@@ -137,12 +137,12 @@ Field purposes:
 
 ## Integration surfaces
 
-The MCP server runs most analysis tools in its own process through `fallow-api`, and runs the CLI for the other tools. Each tool call gives one event, with `integration_surface: mcp` and the tool name in `mcp_tool`:
+The MCP server runs most analysis tools in its own process through `fallow-api`, and runs the CLI for the other tools. The events of a tool call have `integration_surface: mcp` and the tool name in `mcp_tool`:
 
-- A call that runs the CLI gets its event from that CLI run. The server tags the CLI process with the `FALLOW_INTEGRATION_SURFACE` and `FALLOW_MCP_TOOL` environment variables.
-- A call that runs in the server process gets its event from the hidden `fallow telemetry record` command. The server runs that command after it answers the call, with the same two tags. The command applies the same consent rules as every other run and builds the event in the CLI. The event has the workflow of the tool, the duration bucket, and the outcome `success` or `failed`. It has no finding or scale fields, because the server does not read the result for telemetry.
+- A call that runs the CLI gets one event from each CLI run. Most of these calls run the CLI once. `fix_apply` runs it for the preview and for the apply, so it gives more than one event. The server tags each CLI process with the `FALLOW_INTEGRATION_SURFACE` and `FALLOW_MCP_TOOL` environment variables.
+- A call that runs only in the server process gets one event from the hidden `fallow telemetry record` command. The server runs that command after it answers the call, with the same two tags. A call that runs as an MCP task gets its event when the task settles. The command applies the same consent rules as every other run and builds the event in the CLI. The event has the workflow of the tool, the duration bucket, and the outcome `success` or `failed`. It has no finding or scale fields, because the server does not read the result for telemetry.
 
-The server runs `fallow telemetry record` only while `fallow telemetry status` reports `on` or `inspect`. It reads that state at most once every ten minutes, and never when `DO_NOT_TRACK` or `FALLOW_TELEMETRY_DISABLED` is set. With telemetry off, a tool call starts no telemetry process.
+All this work happens after the answer, so telemetry never delays a tool call. The server runs `fallow telemetry record` only while `fallow telemetry status` reports `on` or `inspect`. It reads that state at most once every ten minutes. When `DO_NOT_TRACK` or `FALLOW_TELEMETRY_DISABLED` holds an opt-out value, it reads nothing and runs nothing. With telemetry off, the server starts no `record` process.
 
 Code Mode snippets can make several read-only host calls. The CLI host calls give events with `mcp_tool: code_execute`, not free-form code text or nested helper names. The in-process host calls of a snippet give no event. `FALLOW_MCP_TOOL` is validated CLI-side against a fixed allowlist of tool names; any other value is dropped.
 

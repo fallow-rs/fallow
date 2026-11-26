@@ -130,18 +130,107 @@ fn wait_for_spool(home: &Path, tools: &[&str]) {
 }
 
 #[test]
-fn with_telemetry_off_an_in_process_call_gives_no_event() {
+fn a_failed_in_process_call_gives_a_failed_event() {
     let project = tempfile::tempdir().expect("project");
     write_project(project.path());
     let home = tempfile::tempdir().expect("home");
-    let mut server = McpServer::start(home.path(), None);
+    let mut server = McpServer::start(home.path(), Some("on"));
+    // `trace_file` without its `file` parameter fails in the server process.
+    server.call_raw("trace_file", &serde_json::json!({ "root": project.path() }));
+    wait_for_spool(home.path(), &["trace_file"]);
+    let spool = spool_text(home.path());
+    assert!(spool.contains("\"outcome\":\"failed\""), "{spool}");
+}
+
+/// A `fallow` wrapper that logs each argument list, so a test sees which
+/// telemetry processes the server starts.
+#[cfg(unix)]
+fn logging_binary(dir: &Path) -> (std::path::PathBuf, std::path::PathBuf) {
+    use std::os::unix::fs::PermissionsExt;
+
+    let log = dir.join("calls.log");
+    let script = dir.join("fallow-logged");
+    std::fs::write(
+        &script,
+        format!(
+            "#!/bin/sh\necho \"$*\" >> '{}'\nexec '{}' \"$@\"\n",
+            log.display(),
+            crate::fallow_binary().display()
+        ),
+    )
+    .expect("write wrapper");
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755))
+        .expect("make wrapper executable");
+    (script, log)
+}
+
+#[cfg(unix)]
+#[test]
+fn a_kill_switch_starts_no_telemetry_process() {
+    let project = tempfile::tempdir().expect("project");
+    write_project(project.path());
+    let home = tempfile::tempdir().expect("home");
+    let (binary, log) = logging_binary(home.path());
+    let mut server =
+        McpServer::start_with(home.path(), Some("on"), &binary, &[("DO_NOT_TRACK", "yes")]);
     server.call(
         "project_info",
         &serde_json::json!({ "root": project.path() }),
     );
     thread::sleep(SETTLE);
-    let stderr = server.stderr();
-    assert_eq!(count(&stderr, "\"mcp_tool\""), 0, "{stderr}");
+    let calls = std::fs::read_to_string(&log).unwrap_or_default();
+    assert!(!calls.contains("telemetry"), "{calls}");
+}
+
+#[cfg(unix)]
+#[test]
+fn with_telemetry_off_the_server_reads_the_state_once_and_records_nothing() {
+    let project = tempfile::tempdir().expect("project");
+    write_project(project.path());
+    let home = tempfile::tempdir().expect("home");
+    let (binary, log) = logging_binary(home.path());
+    let mut server = McpServer::start_with(home.path(), None, &binary, &[]);
+    let root = serde_json::json!({ "root": project.path() });
+    server.call("project_info", &root);
+    server.call("project_info", &root);
+    thread::sleep(SETTLE);
+    let calls = std::fs::read_to_string(&log).unwrap_or_default();
+    assert_eq!(count(&calls, "telemetry status"), 1, "{calls}");
+    assert_eq!(count(&calls, "telemetry record"), 0, "{calls}");
+}
+
+/// The answer of a call must not wait for the telemetry state. The wrapper
+/// makes `fallow telemetry status` take four seconds; a project this small
+/// answers well within two.
+#[cfg(unix)]
+#[test]
+fn a_slow_status_read_does_not_delay_the_answer() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let project = tempfile::tempdir().expect("project");
+    write_project(project.path());
+    let home = tempfile::tempdir().expect("home");
+    let script = home.path().join("fallow-slow-status");
+    std::fs::write(
+        &script,
+        format!(
+            "#!/bin/sh\nif [ \"$1\" = telemetry ]; then sleep 4; fi\nexec '{}' \"$@\"\n",
+            crate::fallow_binary().display()
+        ),
+    )
+    .expect("write wrapper");
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755))
+        .expect("make wrapper executable");
+    let mut server = McpServer::start_with(home.path(), Some("on"), &script, &[]);
+    let root = serde_json::json!({ "root": project.path() });
+    let started = Instant::now();
+    server.call("project_info", &root);
+    server.call("project_info", &root);
+    assert!(
+        started.elapsed() < Duration::from_secs(3),
+        "the answer waited {:?}",
+        started.elapsed()
+    );
 }
 
 fn count(haystack: &str, needle: &str) -> usize {
@@ -169,8 +258,17 @@ struct McpServer {
 
 impl McpServer {
     fn start(home: &Path, telemetry: Option<&str>) -> Self {
+        Self::start_with(home, telemetry, &crate::fallow_binary(), &[])
+    }
+
+    fn start_with(
+        home: &Path,
+        telemetry: Option<&str>,
+        binary: &Path,
+        extra_env: &[(&str, &str)],
+    ) -> Self {
         let mut command = Command::new(env!("CARGO_BIN_EXE_fallow-mcp"));
-        command.env("FALLOW_BIN", crate::fallow_binary());
+        command.env("FALLOW_BIN", binary);
         for name in [
             "CI",
             "GITHUB_ACTIONS",
@@ -186,6 +284,9 @@ impl McpServer {
         }
         if let Some(mode) = telemetry {
             command.env("FALLOW_TELEMETRY", mode);
+        }
+        for (key, value) in extra_env {
+            command.env(key, value);
         }
         command
             .env("HOME", home)
@@ -267,6 +368,18 @@ impl McpServer {
             response["result"]["isError"], true,
             "`{tool}` must succeed: {response}"
         );
+    }
+
+    /// Call `tool` and ignore whether it succeeds.
+    fn call_raw(&mut self, tool: &str, arguments: &serde_json::Value) {
+        let id = self.take_id();
+        self.send(&serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "method": "tools/call",
+            "params": { "name": tool, "arguments": arguments }
+        }));
+        self.response(id);
     }
 
     /// Call `tool` as an MCP task and poll `tasks/get` until it settles.

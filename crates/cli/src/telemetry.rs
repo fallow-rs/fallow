@@ -21,7 +21,10 @@ use crate::{exit_codes, json_style::JsonStyle};
 
 #[path = "telemetry_mcp_record.rs"]
 mod mcp_record;
+#[path = "telemetry_spool_drain.rs"]
+mod spool_drain;
 pub use mcp_record::McpCall;
+use spool_drain::drain_spool_file;
 
 const CONFIG_SCHEMA_VERSION: u8 = 2;
 const TELEMETRY_SCHEMA_VERSION: u8 = 2;
@@ -1985,64 +1988,6 @@ pub fn flush_spool_in_background() {
         let install_id = resolve_install_id_for_send();
         drain_spool_file(&spool, install_id.as_deref(), post_telemetry_payload);
     });
-}
-
-/// POST spooled events oldest-first and drop the delivered ones in place.
-///
-/// Generic over the uploader so tests can inject a fake without touching the
-/// network, and parameterized on the resolved install grouping token so tests
-/// never read the real env/config dir (the live resolution happens at the
-/// [`flush_spool_in_background`] spawn site). The flock is held for the whole drain so a concurrent drain or trim
-/// cannot rewrite the spool underneath it. Events are delivered oldest-first and
-/// the drain stops at the first POST failure (a likely-unreachable endpoint), so
-/// the removed set is always a prefix; the file is rewritten to the undelivered
-/// tail (capped, in case it grew while the endpoint was down). Crucially, if the
-/// thread is abandoned at process exit mid-upload, no rewrite runs and the spool
-/// is simply retried next run, bounded meanwhile by [`trim_spool_if_oversized`]
-/// rather than by this function completing.
-fn drain_spool_file<P>(spool: &Path, install_id: Option<&str>, mut post: P)
-where
-    P: FnMut(&serde_json::Value, Option<&str>, Option<&str>) -> Result<(), String>,
-{
-    let lock_path = spool.with_file_name(SPOOL_LOCK_NAME);
-    let Some(_lock) = SpoolLock::try_acquire(&lock_path) else {
-        return;
-    };
-    let Ok(contents) = std::fs::read_to_string(spool) else {
-        return;
-    };
-    let lines: Vec<&str> = contents
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .collect();
-    if lines.is_empty() {
-        let _ = std::fs::remove_file(spool);
-        return;
-    }
-
-    let mut removed = 0usize;
-    for line in &lines {
-        match parse_spool_line(line) {
-            // A corrupt (non-JSON) line cannot be delivered, so it is dropped.
-            Err(_) => removed += 1,
-            Ok((payload, parent_run)) => {
-                if post(&payload, parent_run.as_deref(), install_id).is_ok() {
-                    removed += 1;
-                } else {
-                    // The endpoint is likely unreachable; stop and keep the rest.
-                    break;
-                }
-            }
-        }
-    }
-
-    if removed == 0 {
-        return;
-    }
-    let remaining = &lines[removed..];
-    let keep_from = remaining.len().saturating_sub(SPOOL_MAX_EVENTS);
-    rewrite_spool(spool, &remaining[keep_from..]);
 }
 
 fn parse_spool_line(line: &str) -> serde_json::Result<(serde_json::Value, Option<String>)> {

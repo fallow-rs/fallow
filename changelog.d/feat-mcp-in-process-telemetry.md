@@ -1,6 +1,6 @@
 ### Added
 
-- **Opt-in telemetry now counts MCP tool calls that run in the server process.** Most MCP analysis tools run in the server through `fallow-api` and gave no event before, so agent use through MCP was mostly invisible even with telemetry on. After such a call, the server now runs the hidden `fallow telemetry record` command, which applies the usual consent rules and records one coarse event with `integration_surface: mcp` and the tool name. A call that runs the CLI still gets its one event from the CLI. With telemetry off, the server starts no telemetry process for a call. See [`docs/telemetry.md`](docs/telemetry.md#integration-surfaces).
+- **Opt-in telemetry now counts MCP tool calls that run in the server process.** Most MCP analysis tools run in the server through `fallow-api` and gave no event before, so agent use through MCP was mostly invisible even with telemetry on. After such a call, the server now runs the hidden `fallow telemetry record` command, which applies the usual consent rules and records one coarse event with `integration_surface: mcp` and the tool name. A call that runs the CLI still gets its events from the CLI. The server does this work after the answer, so telemetry never delays a tool call, and with telemetry off it starts no `record` process. See [`docs/telemetry.md`](docs/telemetry.md#integration-surfaces).
 
 ### Fixed
 

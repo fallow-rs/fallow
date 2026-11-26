@@ -51,7 +51,7 @@ pub(super) fn record_mcp_call(call: McpCall) -> ExitCode {
     let Some(tool) = mcp_tool() else {
         return ExitCode::SUCCESS;
     };
-    let workflow = workflow_for_mcp_tool(tool);
+    let (workflow, analysis_mode) = workflow_for_mcp_tool(tool);
     let record = WorkflowRecord {
         workflow,
         output: OutputFormat::Json,
@@ -68,11 +68,7 @@ pub(super) fn record_mcp_call(call: McpCall) -> ExitCode {
             run_scope: RunScope::Unknown,
             config_shape: ConfigShape::Unknown,
             output_destination: OutputDestination::Unknown,
-            analysis_mode: if workflow == Workflow::Unknown {
-                AnalysisMode::Unknown
-            } else {
-                AnalysisMode::Static
-            },
+            analysis_mode,
         },
     };
     let parent_run = parent_run_context(None, workflow);
@@ -94,24 +90,27 @@ pub(super) fn record_mcp_call(call: McpCall) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-/// The workflow of the CLI command that the tool runs on its fallback route,
-/// so an in-process call and a fallback call of one tool count as one
-/// workflow.
-fn workflow_for_mcp_tool(tool: &str) -> Workflow {
-    match tool {
+/// The workflow and the analysis mode of the CLI command that does the same
+/// work as the tool, so the in-process route and the CLI route of one tool
+/// give the same values.
+fn workflow_for_mcp_tool(tool: &str) -> (Workflow, AnalysisMode) {
+    let workflow = match tool {
         "analyze" | "check_changed" | "trace_export" | "trace_file" | "trace_dependency" => {
             Workflow::DeadCode
         }
         "check_architecture" => Workflow::Architecture,
         "find_dupes" | "trace_clone" => Workflow::Dupes,
         "check_health" => Workflow::Health,
-        "audit" | "decision_surface" => Workflow::Audit,
+        "audit" => Workflow::Audit,
         "feature_flags" => Workflow::CodeQualityReview,
+        "decision_surface" => return (Workflow::Audit, AnalysisMode::Unknown),
+        "fallow_explain" => return (Workflow::Explain, AnalysisMode::Unknown),
         "project_info" | "list_boundaries" | "trace_import_path" | "trace_error" => {
-            Workflow::ProjectInventory
+            return (Workflow::ProjectInventory, AnalysisMode::Unknown);
         }
-        _ => Workflow::Unknown,
-    }
+        _ => return (Workflow::Unknown, AnalysisMode::Unknown),
+    };
+    (workflow, AnalysisMode::Static)
 }
 
 #[cfg(test)]
@@ -127,6 +126,7 @@ mod tests {
             "check_changed",
             "check_health",
             "decision_surface",
+            "fallow_explain",
             "feature_flags",
             "find_dupes",
             "list_boundaries",
@@ -139,7 +139,7 @@ mod tests {
             "trace_import_path",
         ] {
             assert_ne!(
-                workflow_for_mcp_tool(tool),
+                workflow_for_mcp_tool(tool).0,
                 Workflow::Unknown,
                 "{tool} needs a workflow"
             );
@@ -148,6 +148,21 @@ mod tests {
 
     #[test]
     fn mutation_keeps_the_unknown_workflow_of_the_cli() {
-        assert_eq!(workflow_for_mcp_tool("mutation_plan"), Workflow::Unknown);
+        assert_eq!(
+            workflow_for_mcp_tool("mutation_plan"),
+            (Workflow::Unknown, AnalysisMode::Unknown)
+        );
+    }
+
+    #[test]
+    fn inventory_tools_keep_the_unknown_analysis_mode_of_the_cli() {
+        assert_eq!(
+            workflow_for_mcp_tool("trace_error"),
+            (Workflow::ProjectInventory, AnalysisMode::Unknown)
+        );
+        assert_eq!(
+            workflow_for_mcp_tool("check_health"),
+            (Workflow::Health, AnalysisMode::Static)
+        );
     }
 }
