@@ -61,6 +61,7 @@ fn imports_that_stay_in_the_output_still_close_a_cycle() {
         "src/preserve",
         "src/solution",
         "src/references",
+        "src/ambient",
         "src/js",
     ] {
         assert!(

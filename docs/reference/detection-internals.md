@@ -614,8 +614,12 @@ error by suppressing a downstream detector.
   `error`. The nearest `tsconfig.json` and its `tsconfig.*.json` siblings
   decide, and a Deno config or a config that does not parse also keeps
   imports. Namespace, side-effect and re-export edges always stay. An import
-  of a class or a value that the importer uses only as a type also stays,
-  because that needs usage facts that this check does not read.
+  whose binding the importer reads in a value position also stays
+  (`ImportedSymbol::value_read`): TypeScript keeps it, and the name can have
+  a value meaning that the graph does not record, such as an ambient
+  namespace. An import of a class that the importer uses only as a type
+  stays too (issue #5309), because `emitDecoratorMetadata` can turn a type
+  annotation into a value reference.
 - `new URL("./x.ts", import.meta.url)` names a module that a path loader can
   run, so the edge credits the `default` export of the target and no other
   export. The edge credits only the file in three cases: a direct argument of

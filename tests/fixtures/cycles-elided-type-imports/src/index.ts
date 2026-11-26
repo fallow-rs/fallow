@@ -13,3 +13,4 @@ export * as solution from './solution/a';
 export * as js from './js/a.js';
 export * as dynamic from './dynamic/a';
 export * as references from './references/a';
+export * as ambient from './ambient/a';

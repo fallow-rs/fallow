@@ -30,14 +30,18 @@ impl ModuleGraph {
     /// output of an importer that compiles without `verbatimModuleSyntax`
     /// and `preserveValueImports`.
     ///
-    /// The import must be a static ES import of a named or default binding,
-    /// and that name must resolve in the type namespace of the target and not
-    /// in its value namespace. A namespace or side-effect import, a
+    /// The import must be a static ES import of a named or default binding
+    /// that the importer does not read in a value position, and that name
+    /// must resolve in the type namespace of the target and not in its value
+    /// namespace. A value read keeps the import: the name can have a value
+    /// meaning that the graph does not record, such as an ambient namespace
+    /// (`declare namespace N { const x: number }`). A namespace or side-effect import, a
     /// re-export, a dynamic `import()` and a `require()` stay in the output.
     /// A name that does not resolve at all also stays: the export can come
     /// from code that the graph cannot read.
     pub(super) fn is_elided_type_import(&self, target: FileId, symbol: &ImportedSymbol) -> bool {
-        if symbol.mechanism != ModuleLoadMechanism::EsModule
+        if symbol.value_read
+            || symbol.mechanism != ModuleLoadMechanism::EsModule
             || symbol.load_kind != ImportLoadKind::Static
         {
             return false;
