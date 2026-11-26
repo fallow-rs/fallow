@@ -223,6 +223,7 @@ fn auto_discover_expands_child_zones_and_parent_rules() {
         coverage: BoundaryCoverageConfig::default(),
         calls: BoundaryCallsConfig::default(),
         preset: None,
+        preset_public_files: false,
         zones: vec![
             BoundaryZone {
                 name: "app".to_string(),
@@ -295,6 +296,7 @@ fn auto_discover_parent_fallback_allows_children_without_relaxing_child_rules() 
         coverage: BoundaryCoverageConfig::default(),
         calls: BoundaryCallsConfig::default(),
         preset: None,
+        preset_public_files: false,
         zones: vec![
             BoundaryZone {
                 name: "app".to_string(),
@@ -413,6 +415,7 @@ fn auto_discover_explicit_child_rule_wins_over_generated_parent_rule() {
             coverage: BoundaryCoverageConfig::default(),
             calls: BoundaryCallsConfig::default(),
             preset: None,
+            preset_public_files: false,
             zones: vec![
                 BoundaryZone {
                     name: "features".to_string(),
@@ -461,6 +464,7 @@ fn logical_groups_returned_for_simple_auto_discover_zone() {
         coverage: BoundaryCoverageConfig::default(),
         calls: BoundaryCallsConfig::default(),
         preset: None,
+        preset_public_files: false,
         zones: vec![
             BoundaryZone {
                 name: "app".to_string(),
@@ -506,6 +510,7 @@ fn logical_groups_preserve_verbatim_auto_discover_strings() {
         coverage: BoundaryCoverageConfig::default(),
         calls: BoundaryCallsConfig::default(),
         preset: None,
+        preset_public_files: false,
         zones: vec![BoundaryZone {
             name: "features".to_string(),
             auto_discover: vec!["./src/features/".to_string()],
@@ -529,6 +534,7 @@ fn logical_groups_bulletproof_keeps_fallback_zone_cross_reference() {
         coverage: BoundaryCoverageConfig::default(),
         calls: BoundaryCallsConfig::default(),
         preset: None,
+        preset_public_files: false,
         zones: vec![BoundaryZone {
             name: "features".to_string(),
             patterns: vec!["src/features/**".to_string()],
@@ -552,6 +558,7 @@ fn logical_groups_status_empty_when_no_child_dirs() {
         coverage: BoundaryCoverageConfig::default(),
         calls: BoundaryCallsConfig::default(),
         preset: None,
+        preset_public_files: false,
         zones: vec![BoundaryZone {
             name: "features".to_string(),
             auto_discover: vec!["src/features".to_string()],
@@ -573,6 +580,7 @@ fn logical_groups_status_invalid_path_when_dir_missing() {
         coverage: BoundaryCoverageConfig::default(),
         calls: BoundaryCallsConfig::default(),
         preset: None,
+        preset_public_files: false,
         zones: vec![BoundaryZone {
             name: "features".to_string(),
             auto_discover: vec!["src/features".to_string()],
@@ -595,6 +603,7 @@ fn logical_groups_status_ok_wins_over_invalid_when_mixed() {
         coverage: BoundaryCoverageConfig::default(),
         calls: BoundaryCallsConfig::default(),
         preset: None,
+        preset_public_files: false,
         zones: vec![BoundaryZone {
             name: "features".to_string(),
             auto_discover: vec!["src/features".to_string(), "src/modules".to_string()],
@@ -620,6 +629,7 @@ fn logical_groups_preserve_declaration_order() {
         coverage: BoundaryCoverageConfig::default(),
         calls: BoundaryCallsConfig::default(),
         preset: None,
+        preset_public_files: false,
         zones: vec![
             BoundaryZone {
                 name: "zeta".to_string(),
@@ -655,6 +665,7 @@ fn logical_groups_merged_from_records_duplicate_indices() {
         coverage: BoundaryCoverageConfig::default(),
         calls: BoundaryCallsConfig::default(),
         preset: None,
+        preset_public_files: false,
         zones: vec![
             BoundaryZone {
                 name: "features".to_string(),
@@ -689,6 +700,7 @@ fn logical_groups_merged_from_none_on_single_declaration() {
         coverage: BoundaryCoverageConfig::default(),
         calls: BoundaryCallsConfig::default(),
         preset: None,
+        preset_public_files: false,
         zones: vec![BoundaryZone {
             name: "features".to_string(),
             auto_discover: vec!["src/features".to_string()],
@@ -709,6 +721,7 @@ fn logical_groups_echo_original_zone_root() {
         coverage: BoundaryCoverageConfig::default(),
         calls: BoundaryCallsConfig::default(),
         preset: None,
+        preset_public_files: false,
         zones: vec![BoundaryZone {
             name: "features".to_string(),
             auto_discover: vec!["src/features".to_string()],
@@ -733,6 +746,7 @@ fn logical_groups_original_zone_root_none_when_unset() {
         coverage: BoundaryCoverageConfig::default(),
         calls: BoundaryCallsConfig::default(),
         preset: None,
+        preset_public_files: false,
         zones: vec![BoundaryZone {
             name: "features".to_string(),
             auto_discover: vec!["src/features".to_string()],
@@ -754,6 +768,7 @@ fn logical_groups_child_source_indices_populated_for_multi_path() {
         coverage: BoundaryCoverageConfig::default(),
         calls: BoundaryCallsConfig::default(),
         preset: None,
+        preset_public_files: false,
         zones: vec![BoundaryZone {
             name: "features".to_string(),
             auto_discover: vec!["src/features".to_string(), "src/modules".to_string()],
@@ -779,6 +794,7 @@ fn logical_groups_child_source_indices_empty_for_single_path() {
         coverage: BoundaryCoverageConfig::default(),
         calls: BoundaryCallsConfig::default(),
         preset: None,
+        preset_public_files: false,
         zones: vec![BoundaryZone {
             name: "features".to_string(),
             auto_discover: vec!["src/features".to_string()],
@@ -800,6 +816,7 @@ fn logical_groups_child_source_indices_after_duplicate_merge_shifted() {
         coverage: BoundaryCoverageConfig::default(),
         calls: BoundaryCallsConfig::default(),
         preset: None,
+        preset_public_files: false,
         zones: vec![
             BoundaryZone {
                 name: "features".to_string(),
@@ -841,6 +858,7 @@ fn logical_groups_merge_duplicate_parent_zone_declarations() {
         coverage: BoundaryCoverageConfig::default(),
         calls: BoundaryCallsConfig::default(),
         preset: None,
+        preset_public_files: false,
         zones: vec![
             BoundaryZone {
                 name: "features".to_string(),
@@ -875,6 +893,7 @@ fn logical_groups_duplicate_identical_declarations_no_double_count() {
         coverage: BoundaryCoverageConfig::default(),
         calls: BoundaryCallsConfig::default(),
         preset: None,
+        preset_public_files: false,
         zones: vec![
             BoundaryZone {
                 name: "features".to_string(),
@@ -912,6 +931,7 @@ fn logical_groups_empty_when_no_auto_discover_present() {
         coverage: BoundaryCoverageConfig::default(),
         calls: BoundaryCallsConfig::default(),
         preset: None,
+        preset_public_files: false,
         zones: vec![BoundaryZone {
             name: "ui".to_string(),
             patterns: vec!["src/components/**".to_string()],
@@ -932,6 +952,7 @@ fn logical_groups_propagate_through_resolve() {
         coverage: BoundaryCoverageConfig::default(),
         calls: BoundaryCallsConfig::default(),
         preset: None,
+        preset_public_files: false,
         zones: vec![BoundaryZone {
             name: "features".to_string(),
             auto_discover: vec!["src/features".to_string()],
@@ -953,6 +974,7 @@ fn validate_zone_references_valid() {
         coverage: BoundaryCoverageConfig::default(),
         calls: BoundaryCallsConfig::default(),
         preset: None,
+        preset_public_files: false,
         zones: vec![
             BoundaryZone {
                 name: "ui".to_string(),
@@ -978,6 +1000,7 @@ fn validate_zone_references_invalid_from() {
         coverage: BoundaryCoverageConfig::default(),
         calls: BoundaryCallsConfig::default(),
         preset: None,
+        preset_public_files: false,
         zones: vec![BoundaryZone {
             name: "ui".to_string(),
             ..BoundaryZone::default()
@@ -1001,6 +1024,7 @@ fn validate_zone_references_invalid_allow() {
         coverage: BoundaryCoverageConfig::default(),
         calls: BoundaryCallsConfig::default(),
         preset: None,
+        preset_public_files: false,
         zones: vec![BoundaryZone {
             name: "ui".to_string(),
             ..BoundaryZone::default()
@@ -1023,6 +1047,7 @@ fn validate_zone_references_invalid_allow_type_only() {
         coverage: BoundaryCoverageConfig::default(),
         calls: BoundaryCallsConfig::default(),
         preset: None,
+        preset_public_files: false,
         zones: vec![BoundaryZone {
             name: "ui".to_string(),
             ..BoundaryZone::default()
@@ -1045,6 +1070,7 @@ fn resolve_and_classify() {
         coverage: BoundaryCoverageConfig::default(),
         calls: BoundaryCallsConfig::default(),
         preset: None,
+        preset_public_files: false,
         zones: vec![
             BoundaryZone {
                 name: "ui".to_string(),
@@ -1074,6 +1100,7 @@ fn first_match_wins() {
         coverage: BoundaryCoverageConfig::default(),
         calls: BoundaryCallsConfig::default(),
         preset: None,
+        preset_public_files: false,
         zones: vec![
             BoundaryZone {
                 name: "specific".to_string(),
@@ -1105,6 +1132,7 @@ fn self_import_always_allowed() {
         coverage: BoundaryCoverageConfig::default(),
         calls: BoundaryCallsConfig::default(),
         preset: None,
+        preset_public_files: false,
         zones: vec![BoundaryZone {
             name: "ui".to_string(),
             ..BoundaryZone::default()
@@ -1125,6 +1153,7 @@ fn unrestricted_zone_allows_all() {
         coverage: BoundaryCoverageConfig::default(),
         calls: BoundaryCallsConfig::default(),
         preset: None,
+        preset_public_files: false,
         zones: vec![
             BoundaryZone {
                 name: "shared".to_string(),
@@ -1147,6 +1176,7 @@ fn restricted_zone_blocks_unlisted() {
         coverage: BoundaryCoverageConfig::default(),
         calls: BoundaryCallsConfig::default(),
         preset: None,
+        preset_public_files: false,
         zones: vec![
             BoundaryZone {
                 name: "ui".to_string(),
@@ -1178,6 +1208,7 @@ fn empty_allow_blocks_all_except_self() {
         coverage: BoundaryCoverageConfig::default(),
         calls: BoundaryCallsConfig::default(),
         preset: None,
+        preset_public_files: false,
         zones: vec![
             BoundaryZone {
                 name: "isolated".to_string(),
@@ -1205,6 +1236,7 @@ fn zone_root_filters_classification_to_subtree() {
         coverage: BoundaryCoverageConfig::default(),
         calls: BoundaryCallsConfig::default(),
         preset: None,
+        preset_public_files: false,
         zones: vec![
             BoundaryZone {
                 name: "ui".to_string(),
@@ -1241,6 +1273,7 @@ fn zone_root_is_case_sensitive() {
         coverage: BoundaryCoverageConfig::default(),
         calls: BoundaryCallsConfig::default(),
         preset: None,
+        preset_public_files: false,
         zones: vec![BoundaryZone {
             name: "ui".to_string(),
             patterns: vec!["src/**".to_string()],
@@ -1273,6 +1306,7 @@ fn zone_root_normalizes_trailing_slash_and_dot_prefix() {
         coverage: BoundaryCoverageConfig::default(),
         calls: BoundaryCallsConfig::default(),
         preset: None,
+        preset_public_files: false,
         zones: vec![
             BoundaryZone {
                 name: "no-slash".to_string(),
@@ -1308,6 +1342,7 @@ fn validate_root_prefixes_flags_redundant_pattern() {
         coverage: BoundaryCoverageConfig::default(),
         calls: BoundaryCallsConfig::default(),
         preset: None,
+        preset_public_files: false,
         zones: vec![BoundaryZone {
             name: "ui".to_string(),
             patterns: vec!["packages/app/src/**".to_string()],
@@ -1342,6 +1377,7 @@ fn validate_root_prefixes_handles_unnormalized_root() {
         coverage: BoundaryCoverageConfig::default(),
         calls: BoundaryCallsConfig::default(),
         preset: None,
+        preset_public_files: false,
         zones: vec![BoundaryZone {
             name: "ui".to_string(),
             patterns: vec!["./packages/app/src/**".to_string()],
@@ -1360,6 +1396,7 @@ fn validate_root_prefixes_empty_when_no_overlap() {
         coverage: BoundaryCoverageConfig::default(),
         calls: BoundaryCallsConfig::default(),
         preset: None,
+        preset_public_files: false,
         zones: vec![BoundaryZone {
             name: "ui".to_string(),
             patterns: vec!["src/**".to_string()],
@@ -1389,6 +1426,7 @@ fn validate_root_prefixes_skips_empty_root() {
             coverage: BoundaryCoverageConfig::default(),
             calls: BoundaryCallsConfig::default(),
             preset: None,
+            preset_public_files: false,
             zones: vec![BoundaryZone {
                 name: "ui".to_string(),
                 patterns: vec!["src/**".to_string(), "lib/**".to_string()],
@@ -1466,6 +1504,7 @@ fn preset_makes_config_non_empty() {
         coverage: BoundaryCoverageConfig::default(),
         calls: BoundaryCallsConfig::default(),
         preset: Some(BoundaryPreset::Layered),
+        preset_public_files: false,
         zones: vec![],
         rules: vec![],
     };
@@ -1478,6 +1517,7 @@ fn expand_layered_produces_four_zones() {
         coverage: BoundaryCoverageConfig::default(),
         calls: BoundaryCallsConfig::default(),
         preset: Some(BoundaryPreset::Layered),
+        preset_public_files: false,
         zones: vec![],
         rules: vec![],
     };
@@ -1495,6 +1535,7 @@ fn expand_layered_rules_correct() {
         coverage: BoundaryCoverageConfig::default(),
         calls: BoundaryCallsConfig::default(),
         preset: Some(BoundaryPreset::Layered),
+        preset_public_files: false,
         zones: vec![],
         rules: vec![],
     };
@@ -1527,6 +1568,7 @@ fn expand_hexagonal_produces_three_zones() {
         coverage: BoundaryCoverageConfig::default(),
         calls: BoundaryCallsConfig::default(),
         preset: Some(BoundaryPreset::Hexagonal),
+        preset_public_files: false,
         zones: vec![],
         rules: vec![],
     };
@@ -1544,6 +1586,7 @@ fn expand_feature_sliced_produces_six_zones() {
         coverage: BoundaryCoverageConfig::default(),
         calls: BoundaryCallsConfig::default(),
         preset: Some(BoundaryPreset::FeatureSliced),
+        preset_public_files: false,
         zones: vec![],
         rules: vec![],
     };
@@ -1567,6 +1610,7 @@ fn expand_bulletproof_produces_four_zones() {
         coverage: BoundaryCoverageConfig::default(),
         calls: BoundaryCallsConfig::default(),
         preset: Some(BoundaryPreset::Bulletproof),
+        preset_public_files: false,
         zones: vec![],
         rules: vec![],
     };
@@ -1602,6 +1646,7 @@ fn expand_bulletproof_rules_correct() {
         coverage: BoundaryCoverageConfig::default(),
         calls: BoundaryCallsConfig::default(),
         preset: Some(BoundaryPreset::Bulletproof),
+        preset_public_files: false,
         zones: vec![],
         rules: vec![],
     };
@@ -1622,6 +1667,7 @@ fn expand_bulletproof_then_resolve_classifies() {
         coverage: BoundaryCoverageConfig::default(),
         calls: BoundaryCallsConfig::default(),
         preset: Some(BoundaryPreset::Bulletproof),
+        preset_public_files: false,
         zones: vec![],
         rules: vec![],
     };
@@ -1666,6 +1712,7 @@ fn bulletproof_features_barrel_can_import_children() {
         coverage: BoundaryCoverageConfig::default(),
         calls: BoundaryCallsConfig::default(),
         preset: Some(BoundaryPreset::Bulletproof),
+        preset_public_files: false,
         zones: vec![],
         rules: vec![],
     };
@@ -1697,6 +1744,7 @@ fn expand_uses_custom_source_root() {
         coverage: BoundaryCoverageConfig::default(),
         calls: BoundaryCallsConfig::default(),
         preset: Some(BoundaryPreset::Hexagonal),
+        preset_public_files: false,
         zones: vec![],
         rules: vec![],
     };
@@ -1711,6 +1759,7 @@ fn user_zone_replaces_preset_zone() {
         coverage: BoundaryCoverageConfig::default(),
         calls: BoundaryCallsConfig::default(),
         preset: Some(BoundaryPreset::Hexagonal),
+        preset_public_files: false,
         zones: vec![BoundaryZone {
             name: "domain".to_string(),
             patterns: vec!["src/core/**".to_string()],
@@ -1730,6 +1779,7 @@ fn user_zone_adds_to_preset() {
         coverage: BoundaryCoverageConfig::default(),
         calls: BoundaryCallsConfig::default(),
         preset: Some(BoundaryPreset::Hexagonal),
+        preset_public_files: false,
         zones: vec![BoundaryZone {
             name: "shared".to_string(),
             patterns: vec!["src/shared/**".to_string()],
@@ -1748,6 +1798,7 @@ fn user_rule_replaces_preset_rule() {
         coverage: BoundaryCoverageConfig::default(),
         calls: BoundaryCallsConfig::default(),
         preset: Some(BoundaryPreset::Hexagonal),
+        preset_public_files: false,
         zones: vec![],
         rules: vec![BoundaryRule {
             from: "adapters".to_string(),
@@ -1770,6 +1821,7 @@ fn expand_without_preset_is_noop() {
         coverage: BoundaryCoverageConfig::default(),
         calls: BoundaryCallsConfig::default(),
         preset: None,
+        preset_public_files: false,
         zones: vec![BoundaryZone {
             name: "ui".to_string(),
             patterns: vec!["src/ui/**".to_string()],
@@ -1788,6 +1840,7 @@ fn expand_then_validate_succeeds() {
         coverage: BoundaryCoverageConfig::default(),
         calls: BoundaryCallsConfig::default(),
         preset: Some(BoundaryPreset::Layered),
+        preset_public_files: false,
         zones: vec![],
         rules: vec![],
     };
@@ -1801,6 +1854,7 @@ fn expand_then_resolve_classifies() {
         coverage: BoundaryCoverageConfig::default(),
         calls: BoundaryCallsConfig::default(),
         preset: Some(BoundaryPreset::Hexagonal),
+        preset_public_files: false,
         zones: vec![],
         rules: vec![],
     };
@@ -1827,6 +1881,7 @@ fn resolved_boundary_config_with_zones_not_empty() {
         coverage: BoundaryCoverageConfig::default(),
         calls: BoundaryCallsConfig::default(),
         preset: None,
+        preset_public_files: false,
         zones: vec![BoundaryZone {
             name: "ui".to_string(),
             patterns: vec!["src/ui/**".to_string()],
@@ -1857,6 +1912,7 @@ fn resolved_boundary_config_with_only_logical_groups_not_empty() {
         }],
         coverage: ResolvedBoundaryCoverageConfig::default(),
         calls_forbidden_by_zone: rustc_hash::FxHashMap::default(),
+        optional_zones: Vec::new(),
     };
     assert!(!resolved.is_empty());
 }
@@ -1867,6 +1923,7 @@ fn boundary_config_with_only_rules_is_empty() {
         coverage: BoundaryCoverageConfig::default(),
         calls: BoundaryCallsConfig::default(),
         preset: None,
+        preset_public_files: false,
         zones: vec![],
         rules: vec![BoundaryRule {
             from: "ui".to_string(),
@@ -1883,6 +1940,7 @@ fn boundary_config_with_zones_not_empty() {
         coverage: BoundaryCoverageConfig::default(),
         calls: BoundaryCallsConfig::default(),
         preset: None,
+        preset_public_files: false,
         zones: vec![BoundaryZone {
             name: "ui".to_string(),
             ..BoundaryZone::default()
@@ -1898,6 +1956,7 @@ fn zone_with_multiple_patterns_matches_any() {
         coverage: BoundaryCoverageConfig::default(),
         calls: BoundaryCallsConfig::default(),
         preset: None,
+        preset_public_files: false,
         zones: vec![BoundaryZone {
             name: "ui".to_string(),
             patterns: vec![
@@ -1928,6 +1987,7 @@ fn validate_zone_references_multiple_errors() {
         coverage: BoundaryCoverageConfig::default(),
         calls: BoundaryCallsConfig::default(),
         preset: None,
+        preset_public_files: false,
         zones: vec![BoundaryZone {
             name: "ui".to_string(),
             ..BoundaryZone::default()
@@ -1955,6 +2015,7 @@ fn expand_feature_sliced_with_custom_root() {
         coverage: BoundaryCoverageConfig::default(),
         calls: BoundaryCallsConfig::default(),
         preset: Some(BoundaryPreset::FeatureSliced),
+        preset_public_files: false,
         zones: vec![],
         rules: vec![],
     };
@@ -1969,6 +2030,7 @@ fn zone_not_in_rules_is_unrestricted() {
         coverage: BoundaryCoverageConfig::default(),
         calls: BoundaryCallsConfig::default(),
         preset: None,
+        preset_public_files: false,
         zones: vec![
             BoundaryZone {
                 name: "a".to_string(),
@@ -2026,6 +2088,7 @@ fn resolve_panics_on_unvalidated_invalid_zone_glob() {
         coverage: BoundaryCoverageConfig::default(),
         calls: BoundaryCallsConfig::default(),
         preset: None,
+        preset_public_files: false,
         zones: vec![BoundaryZone {
             name: "broken".to_string(),
             patterns: vec!["[invalid".to_string()],

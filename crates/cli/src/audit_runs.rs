@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use fallow_config::{
-    CommandKind, EnvSnapshot, PlannedAnalysis, RunInputs, SelectionInput, Surface,
+    AnalysisSnapshot, CommandKind, EnvSnapshot, PlannedAnalysis, RunInputs, SelectionInput, Surface,
 };
 use fallow_engine::resolved_run::{
     BaseConfig, BaseSide, ResolveError, ResolvedRun, Runnable,
@@ -94,7 +94,31 @@ pub(super) fn worktree_run(
     opts: &AuditOptions<'_>,
     origin: &'static str,
 ) -> Result<ResolvedRun, ExitCode> {
-    worktree_side_run(head, root, opts.no_cache, origin).map_err(|err| {
+    side_run(head, root, opts, origin, AnalysisSnapshot::Base)
+}
+
+/// The run of the staged side of `audit --staged`. The staged side holds the
+/// change, so it is validated as the current revision.
+///
+/// # Errors
+///
+/// As [`worktree_run`].
+pub(super) fn staged_run(
+    head: &ResolvedRun,
+    root: &Path,
+    opts: &AuditOptions<'_>,
+) -> Result<ResolvedRun, ExitCode> {
+    side_run(head, root, opts, "--staged", AnalysisSnapshot::Current)
+}
+
+fn side_run(
+    head: &ResolvedRun,
+    root: &Path,
+    opts: &AuditOptions<'_>,
+    origin: &'static str,
+    snapshot: AnalysisSnapshot,
+) -> Result<ResolvedRun, ExitCode> {
+    worktree_side_run(head, root, opts.no_cache, origin, snapshot).map_err(|err| {
         emit_input_error(
             &crate::cli_production::resolve_error_message(&err, None),
             opts.output,
@@ -107,10 +131,14 @@ fn worktree_side_run(
     root: &Path,
     no_cache: bool,
     origin: &'static str,
+    snapshot: AnalysisSnapshot,
 ) -> Result<ResolvedRun, ResolveError> {
     resolve_base_run_with_head_decisions(
         head,
-        worktree_side(root, origin, BaseConfig::Head, no_cache),
+        BaseSide {
+            snapshot,
+            ..worktree_side(root, origin, BaseConfig::Head, no_cache)
+        },
     )
 }
 
@@ -144,6 +172,7 @@ fn base_side(root: &Path, config: BaseConfig, cache_dir: Option<Given<PathBuf>>)
         root: flag("--base")(root.to_path_buf()),
         config,
         cache_dir,
+        snapshot: AnalysisSnapshot::Base,
     }
 }
 

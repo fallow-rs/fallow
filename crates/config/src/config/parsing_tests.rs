@@ -3425,6 +3425,7 @@ fn validate_resolved_boundaries_passes_on_valid_config() {
             coverage: crate::BoundaryCoverageConfig::default(),
             calls: crate::BoundaryCallsConfig::default(),
             preset: None,
+            preset_public_files: false,
             zones: vec![
                 crate::BoundaryZone {
                     name: "ui".to_string(),
@@ -3462,6 +3463,7 @@ fn validate_resolved_boundaries_aggregates_unknown_zone_refs() {
             coverage: crate::BoundaryCoverageConfig::default(),
             calls: crate::BoundaryCallsConfig::default(),
             preset: None,
+            preset_public_files: false,
             zones: vec![crate::BoundaryZone {
                 name: "ui".to_string(),
                 patterns: vec!["src/ui/**".to_string()],
@@ -3520,6 +3522,7 @@ fn validate_resolved_boundaries_flags_redundant_root_prefix() {
             coverage: crate::BoundaryCoverageConfig::default(),
             calls: crate::BoundaryCallsConfig::default(),
             preset: None,
+            preset_public_files: false,
             zones: vec![crate::BoundaryZone {
                 name: "ui".to_string(),
                 patterns: vec!["packages/app/src/**".to_string()],
@@ -3549,6 +3552,7 @@ fn validate_resolved_boundaries_aggregates_unknown_zones_and_root_prefixes() {
             coverage: crate::BoundaryCoverageConfig::default(),
             calls: crate::BoundaryCallsConfig::default(),
             preset: None,
+            preset_public_files: false,
             zones: vec![crate::BoundaryZone {
                 name: "ui".to_string(),
                 patterns: vec!["packages/app/src/**".to_string()],
@@ -3590,6 +3594,7 @@ fn validate_resolved_boundaries_passes_on_bulletproof_preset() {
             coverage: crate::BoundaryCoverageConfig::default(),
             calls: crate::BoundaryCallsConfig::default(),
             preset: Some(crate::BoundaryPreset::Bulletproof),
+            preset_public_files: false,
             zones: vec![],
             rules: vec![],
         },

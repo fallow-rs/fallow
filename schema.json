@@ -2304,6 +2304,10 @@
             }
           ]
         },
+        "presetPublicFiles": {
+          "description": "Give the zones of the `bulletproof` and `feature-sliced` presets\ntheir index files as public entry files (`publicFiles`). Other zones\nmust then import a feature or a slice through its index file. The\n`deep-modules` preset always does this. Older fallow versions ignore\nthis key and report the preset without public entry files.",
+          "type": "boolean"
+        },
         "zones": {
           "description": "Zone definitions.",
           "type": "array",
@@ -2352,6 +2356,11 @@
           "description": "Bulletproof React.",
           "type": "string",
           "const": "bulletproof"
+        },
+        {
+          "description": "One zone for each module folder; other zones import a module only\nthrough its index file.",
+          "type": "string",
+          "const": "deep-modules"
         }
       ]
     },

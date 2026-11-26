@@ -1190,7 +1190,7 @@ fn execute_audit_for_host(
     let changed_files_count = changed_files.len();
 
     let staged = (host_root != opts.root)
-        .then(|| runs::worktree_run(head, opts.root, opts, "--staged"))
+        .then(|| runs::staged_run(head, opts.root, opts))
         .transpose()?;
     let backend = CliAuditBackend {
         opts,

@@ -1896,22 +1896,38 @@ impl FallowConfig {
         &self,
         root: &Path,
     ) -> Result<(), Vec<super::boundaries::ZoneValidationError>> {
+        self.validate_snapshot_boundaries(root, super::AnalysisSnapshot::Current)
+    }
+
+    /// [`Self::validate_resolved_boundaries`] for the given revision. The base
+    /// revision of `audit --base` does not need the module folder of the
+    /// `deep-modules` preset, because the change under audit can add it.
+    ///
+    /// # Errors
+    ///
+    /// Returns each error as [`Self::validate_resolved_boundaries`] does.
+    pub fn validate_snapshot_boundaries(
+        &self,
+        root: &Path,
+        snapshot: super::AnalysisSnapshot,
+    ) -> Result<(), Vec<super::boundaries::ZoneValidationError>> {
         use super::boundaries::ZoneValidationError;
 
-        let mut boundaries = self.boundaries.clone();
-        if boundaries.preset.is_some() {
-            let source_root = crate::workspace::parse_tsconfig_root_dir(root)
-                .filter(|r| r != "." && !r.starts_with("..") && !Path::new(r).is_absolute())
-                .unwrap_or_else(|| "src".to_owned());
-            boundaries.expand(&source_root);
+        let mut errors = self.boundaries.validate_preset(root);
+        if snapshot.is_base() {
+            errors
+                .retain(|error| !matches!(error, ZoneValidationError::PresetModuleRootMissing(_)));
         }
+        let mut boundaries = self.boundaries.clone();
+        super::boundaries::expand_boundary_preset(&mut boundaries, root);
         let _logical_groups = boundaries.expand_auto_discover(root);
 
-        let mut errors: Vec<ZoneValidationError> = boundaries
-            .validate_zone_references()
-            .into_iter()
-            .map(ZoneValidationError::UnknownZoneReference)
-            .collect();
+        errors.extend(
+            boundaries
+                .validate_zone_references()
+                .into_iter()
+                .map(ZoneValidationError::UnknownZoneReference),
+        );
         errors.extend(
             boundaries
                 .validate_root_prefixes()

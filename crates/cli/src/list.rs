@@ -984,6 +984,13 @@ fn print_boundary_zones(zones: &[fallow_api::ZoneInfo]) {
             pluralize("file", zone.file_count),
             zone.patterns.join(", ")
         );
+        if !zone.public_files.is_empty() {
+            eprintln!(
+                "  {:<20} public files: {}",
+                "",
+                zone.public_files.join(", ")
+            );
+        }
     }
 }
 

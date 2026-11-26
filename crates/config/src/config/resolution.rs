@@ -749,10 +749,12 @@ fn resolve_boundaries(
     mut boundaries: super::boundaries::BoundaryConfig,
     root: &Path,
 ) -> ResolvedBoundaryConfig {
+    let optional_zones = boundaries.optional_preset_zones();
     super::boundaries::expand_boundary_preset(&mut boundaries, root);
     let logical_groups = boundaries.expand_auto_discover(root);
     let mut resolved = boundaries.resolve();
     resolved.logical_groups = logical_groups;
+    resolved.optional_zones = optional_zones;
     resolved
 }
 

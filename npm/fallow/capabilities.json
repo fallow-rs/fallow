@@ -8030,6 +8030,11 @@
       "name": "bulletproof",
       "description": "Bulletproof React: app and features depend on shared and server; features stay isolated from each other.",
       "config": "boundaries.preset: \"bulletproof\""
+    },
+    {
+      "name": "deep-modules",
+      "description": "Deep modules: each folder under src/modules (or src/features) is a zone; other zones and out-of-tree tests import a module only through its index file.",
+      "config": "boundaries.preset: \"deep-modules\""
     }
   ],
   "taste_choices": [

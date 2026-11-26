@@ -24,6 +24,7 @@ fn make_config(root: PathBuf, forbidden: Vec<ForbiddenCallRule>) -> ResolvedConf
             coverage: BoundaryCoverageConfig::default(),
             calls: BoundaryCallsConfig { forbidden },
             preset: None,
+            preset_public_files: false,
             zones: vec![
                 BoundaryZone {
                     name: "domain".to_string(),

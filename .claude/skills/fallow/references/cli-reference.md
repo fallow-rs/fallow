@@ -2745,7 +2745,12 @@ Config files are searched in priority order: `.fallowrc.json` > `.fallowrc.jsonc
   },
 
   // Architecture boundaries (preset, custom zones/rules, or auto-discovered feature zones)
-  // Presets: "layered", "hexagonal", "feature-sliced", "bulletproof"
+  // Presets: "layered", "hexagonal", "feature-sliced", "bulletproof", "deep-modules"
+  // "deep-modules" makes each folder of src/modules (else src/features) a zone with its
+  // index file as the public entry, plus an "app" zone (src/**) and a "tests" zone
+  // (test/**, tests/**, e2e/**). It fails with exit 2 when neither folder exists.
+  // "presetPublicFiles": true gives the bulletproof features and the feature-sliced
+  // slices their index files as public entry files (off by default).
   // Rules accept an optional `allowTypeOnly: [zones]` list that admits type-only imports
   // (`import type`, inline `{ type Foo }`, namespace type imports, and `export type` re-exports)
   // to the listed zones even when not present in `allow`. Mixed-specifier imports still fire.

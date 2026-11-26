@@ -85,6 +85,7 @@ fn detects_boundary_violation() {
         coverage: BoundaryCoverageConfig::default(),
         calls: BoundaryCallsConfig::default(),
         preset: None,
+        preset_public_files: false,
         zones: vec![
             BoundaryZone {
                 name: "ui".to_string(),
@@ -350,6 +351,7 @@ fn no_violations_when_rule_is_off() {
         coverage: BoundaryCoverageConfig::default(),
         calls: BoundaryCallsConfig::default(),
         preset: None,
+        preset_public_files: false,
         zones: vec![
             BoundaryZone {
                 name: "ui".to_string(),
@@ -445,6 +447,7 @@ fn preset_detects_boundary_violation() {
         coverage: BoundaryCoverageConfig::default(),
         calls: BoundaryCallsConfig::default(),
         preset: Some(BoundaryPreset::Hexagonal),
+        preset_public_files: false,
         zones: vec![],
         rules: vec![],
     };
@@ -537,6 +540,7 @@ fn root_field_classifies_per_subtree() {
         coverage: BoundaryCoverageConfig::default(),
         calls: BoundaryCallsConfig::default(),
         preset: None,
+        preset_public_files: false,
         zones: vec![
             BoundaryZone {
                 name: "ui".to_string(),
@@ -674,6 +678,7 @@ fn root_field_genuinely_disambiguates_flat_patterns() {
         coverage: BoundaryCoverageConfig::default(),
         calls: BoundaryCallsConfig::default(),
         preset: None,
+        preset_public_files: false,
         zones: vec![BoundaryZone {
             name: "ui".to_string(),
             patterns: vec!["packages/*/src/**".to_string()],
@@ -755,6 +760,7 @@ fn root_field_genuinely_disambiguates_flat_patterns() {
         coverage: BoundaryCoverageConfig::default(),
         calls: BoundaryCallsConfig::default(),
         preset: None,
+        preset_public_files: false,
         zones: vec![
             BoundaryZone {
                 name: "ui".to_string(),
@@ -853,6 +859,7 @@ fn auto_discover_isolates_child_boundary_zones() {
         coverage: BoundaryCoverageConfig::default(),
         calls: BoundaryCallsConfig::default(),
         preset: None,
+        preset_public_files: false,
         zones: vec![
             BoundaryZone {
                 name: "app".to_string(),
@@ -933,6 +940,7 @@ fn bulletproof_preset_detects_violation() {
         coverage: BoundaryCoverageConfig::default(),
         calls: BoundaryCallsConfig::default(),
         preset: Some(BoundaryPreset::Bulletproof),
+        preset_public_files: false,
         zones: vec![],
         rules: vec![],
     };
@@ -1006,6 +1014,7 @@ fn bulletproof_top_level_features_file_is_strict_without_barrel_false_positive()
         coverage: BoundaryCoverageConfig::default(),
         calls: BoundaryCallsConfig::default(),
         preset: Some(BoundaryPreset::Bulletproof),
+        preset_public_files: false,
         zones: vec![],
         rules: vec![],
     };
@@ -1063,6 +1072,7 @@ fn type_only_boundaries(allow_type_only_db: Vec<String>) -> BoundaryConfig {
         coverage: BoundaryCoverageConfig::default(),
         calls: BoundaryCallsConfig::default(),
         preset: None,
+        preset_public_files: false,
         zones: vec![
             BoundaryZone {
                 name: "ui".to_string(),

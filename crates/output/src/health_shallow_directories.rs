@@ -136,7 +136,8 @@ impl ShallowDirectoryFinding {
                 kind: ShallowDirectoryActionType::NarrowInterface,
                 auto_fixable: false,
                 description: "Move the logic behind fewer interface items, or merge the \
-                              directory into the code that calls it"
+                              directory into the code that calls it. To keep the interface \
+                              narrow, see https://fallow.tools/docs/guides/keep-a-module-deep/"
                     .to_string(),
                 config_key: None,
                 value: None,
