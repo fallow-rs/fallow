@@ -20,6 +20,14 @@ impl ModuleInfoExtractor {
         }
     }
 
+    /// Records once that the file holds a decorator.
+    pub(super) fn record_decorator(&mut self) {
+        if !self.recorded_decorator {
+            self.recorded_decorator = true;
+            self.semantic_facts.push(SemanticFact::HasDecorators);
+        }
+    }
+
     /// Records the file-level string directives (`"use client"`, `"use server"`)
     /// for the security client-server-leak detector. `directive.directive` is
     /// the cooked directive text without surrounding quotes.

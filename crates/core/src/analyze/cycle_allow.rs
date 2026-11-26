@@ -11,7 +11,7 @@ use rustc_hash::FxHashMap;
 mod import_elision;
 
 use crate::graph::{CycleOptions, MAX_CYCLE_LENGTH, ModuleGraph};
-use import_elision::ImportKeepingConfigs;
+use import_elision::ImportElisionConfigs;
 
 /// The cycles of `graph` that no `circularDependencies.allow` entry accepts.
 /// Records which entries had an effect, for the unmatched-entry diagnostic.
@@ -29,12 +29,12 @@ pub(super) fn find_unaccepted_cycles(
         ignore_lazy_imports: config.circular_dependencies.ignore_lazy_imports,
     };
     let mut allow_list = CycleAllowList::new(config);
-    let mut configs = ImportKeepingConfigs::new(&config.root);
-    let mut keeps_imports = |file: &Path| configs.keeps_imports(file);
+    let mut configs = ImportElisionConfigs::new(&config.root);
+    let mut elision_of = |file: &Path| configs.elision_of(file);
     let search = if allow_list.entries.is_empty() {
-        graph.find_cycles_accepting(options, &mut keeps_imports, &mut |_| false)
+        graph.find_cycles_accepting(options, &mut elision_of, &mut |_| false)
     } else {
-        graph.find_cycles_accepting(options, &mut keeps_imports, &mut |cycle| {
+        graph.find_cycles_accepting(options, &mut elision_of, &mut |cycle| {
             allow_list.accepts(graph, cycle)
         })
     };

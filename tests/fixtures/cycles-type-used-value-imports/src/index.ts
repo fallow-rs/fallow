@@ -1,0 +1,9 @@
+export * as classType from './class-type/a';
+export * as unused from './unused/a';
+export * as unusedTsx from './unused-tsx/a';
+export * as reexported from './reexported/a';
+export * as decorators from './decorators/a';
+export * as metadata from './metadata/a';
+export * as metadataNoDecorators from './metadata-no-decorators/a';
+export * as generatedExtends from './generated-extends/a';
+export * as typeOnlyTsx from './type-only-tsx/a';

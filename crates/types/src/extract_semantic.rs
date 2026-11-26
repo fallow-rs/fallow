@@ -141,4 +141,8 @@ pub enum SemanticFact {
     /// A named interface that a module-local interface extends.
     /// Appended because bitcode encodes enum variants by ordinal.
     InterfaceExtends(InterfaceExtendsFact),
+    /// The file holds at least one decorator. Under `emitDecoratorMetadata`,
+    /// TypeScript then turns some type annotations into runtime references.
+    /// Appended because bitcode encodes enum variants by ordinal.
+    HasDecorators,
 }

@@ -8,39 +8,9 @@ use rustc_hash::FxHashSet;
 
 use fallow_types::discover::FileId;
 
-use super::import_elision::is_typescript_source;
+use super::import_elision::{ImportElision, ImporterElision};
 use super::types::ModuleNode;
 use super::{ImportedSymbol, ModuleGraph};
-
-/// Whether TypeScript removes the type imports of one importer, read from
-/// the `keeps_imports` callback on first use.
-enum ImporterElision {
-    NotTypeScript,
-    Unknown,
-    Known(bool),
-}
-
-impl ImporterElision {
-    fn new(path: &Path) -> Self {
-        if is_typescript_source(path) {
-            Self::Unknown
-        } else {
-            Self::NotTypeScript
-        }
-    }
-
-    fn get(&mut self, path: &Path, keeps_imports: &mut dyn FnMut(&Path) -> bool) -> bool {
-        match *self {
-            Self::NotTypeScript => false,
-            Self::Known(elides) => elides,
-            Self::Unknown => {
-                let elides = !keeps_imports(path);
-                *self = Self::Known(elides);
-                elides
-            }
-        }
-    }
-}
 
 /// Options for [`ModuleGraph::find_cycles_with`].
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -97,8 +67,10 @@ impl ModuleGraph {
     /// files into one SCC and cannot use a slot of the per-SCC cycle cap.
     #[must_use]
     pub fn find_cycles_with(&self, options: CycleOptions) -> Vec<Vec<FileId>> {
-        self.find_cycles_accepting(options, &mut |_| false, &mut |_| false)
-            .cycles
+        self.find_cycles_accepting(options, &mut |_| ImportElision::RemoveUnread, &mut |_| {
+            false
+        })
+        .cycles
     }
 
     /// Find the cycles like [`Self::find_cycles_with`], and drop each cycle
@@ -106,17 +78,16 @@ impl ModuleGraph {
     /// per-group cycle limit, so the enumeration continues past it. The
     /// callback gets each cycle once, in cycle order.
     ///
-    /// A plain import of names that are only types in the target is not a
-    /// runtime edge, because TypeScript removes it (issue #5262).
-    /// `keeps_imports` gets the path of a TypeScript importer with such an
-    /// import, and returns `true` when the compiler options of that file keep
-    /// each import (`verbatimModuleSyntax`, `preserveValueImports`). The
-    /// callback gets each importer at most once.
+    /// A plain import that the importer never reads as a value is not a
+    /// runtime edge, because TypeScript removes it (issues #5262 and #5309).
+    /// `elision_of` gets the path of a TypeScript importer with such an
+    /// import, and returns the [`ImportElision`] of its compiler options.
+    /// The callback gets each importer at most once.
     #[must_use]
     pub fn find_cycles_accepting(
         &self,
         options: CycleOptions,
-        keeps_imports: &mut dyn FnMut(&Path) -> bool,
+        elision_of: &mut dyn FnMut(&Path) -> ImportElision,
         accept: &mut dyn FnMut(&[FileId]) -> bool,
     ) -> CycleSearch {
         let n = self.modules.len();
@@ -124,7 +95,7 @@ impl ModuleGraph {
             return CycleSearch::default();
         }
 
-        let (all_succs, succ_ranges) = self.build_runtime_successors(n, options, keeps_imports);
+        let (all_succs, succ_ranges) = self.build_runtime_successors(n, options, elision_of);
 
         let mut state = SccState::new(n);
         for start_node in 0..n {
@@ -145,7 +116,7 @@ impl ModuleGraph {
         &self,
         n: usize,
         options: CycleOptions,
-        keeps_imports: &mut dyn FnMut(&Path) -> bool,
+        elision_of: &mut dyn FnMut(&Path) -> ImportElision,
     ) -> (Vec<usize>, Vec<Range<usize>>) {
         let mut all_succs: Vec<usize> = Vec::with_capacity(self.edges.len());
         let mut succ_ranges: Vec<Range<usize>> = Vec::with_capacity(n);
@@ -158,8 +129,12 @@ impl ModuleGraph {
                 let mut is_runtime = |s: &ImportedSymbol| {
                     !s.is_type_only
                         && s.loads_target()
-                        && !(self.is_elided_type_import(edge.target, s)
-                            && elision.get(&module.path, keeps_imports))
+                        && !self.is_removed_import(
+                            edge.target,
+                            s,
+                            module,
+                            elision.get(&module.path, elision_of),
+                        )
                 };
                 if !edge.symbols.iter().any(&mut is_runtime) {
                     continue;
@@ -1765,7 +1740,7 @@ mod tests {
         let graph = build_cycle_graph(5, &edges);
         let all = graph.find_cycles_accepting(
             super::CycleOptions::default(),
-            &mut |_| false,
+            &mut |_| super::ImportElision::RemoveUnread,
             &mut |_| false,
         );
         assert_eq!(all.cycles.len(), super::MAX_CYCLES_PER_SCC);
@@ -1774,7 +1749,7 @@ mod tests {
         let mut offered = 0;
         let rest = graph.find_cycles_accepting(
             super::CycleOptions::default(),
-            &mut |_| false,
+            &mut |_| super::ImportElision::RemoveUnread,
             &mut |cycle| {
                 offered += 1;
                 cycle.len() == 2

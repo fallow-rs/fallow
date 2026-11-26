@@ -52,6 +52,7 @@ const FLAG_TEST_REACHABLE: u8 = 1 << 3;
 const FLAG_CJS_EXPORTS: u8 = 1 << 4;
 const FLAG_CONSUMER_CHECKED: u8 = 1 << 5;
 const FLAG_FIXTURE_ENTRY: u8 = 1 << 6;
+const FLAG_DECORATORS: u8 = 1 << 7;
 
 impl ModuleNode {
     /// Whether this module is an entry point.
@@ -123,6 +124,17 @@ impl ModuleNode {
     #[inline]
     pub const fn is_test_reachable(&self) -> bool {
         self.flags & FLAG_TEST_REACHABLE != 0
+    }
+
+    /// Whether this module holds a decorator.
+    #[inline]
+    pub(crate) const fn has_decorators(&self) -> bool {
+        self.flags & FLAG_DECORATORS != 0
+    }
+
+    /// Record that this module holds a decorator.
+    pub(crate) const fn set_has_decorators(&mut self) {
+        self.flags |= FLAG_DECORATORS;
     }
 
     /// Whether this module has CJS exports (module.exports / exports.*).
