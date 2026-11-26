@@ -14,7 +14,7 @@ Apply the review lenses that match the changed paths.
 | Human CLI output | Scanability, hierarchy, empty states, terminal compatibility |
 | JSON output | Schema stability, actions, determinism, null versus absent |
 | SARIF, CodeClimate, compact, Markdown, badge | Specification compliance, severity, stable identifiers, relative paths |
-| MCP | Tool contracts, parameters, structured errors, safe actions, timeouts |
+| MCP | Tool contracts, parameters, structured errors, safe actions, timeouts, the hand-written MCP text of the fallow skill (`.agents/skills/fallow/references/mcp.md`) |
 | LSP | Protocol compliance, diagnostics, edits, workspace-root selection, single-root analysis |
 | VS Code | Binary resolution, lifecycle, lazy work, configuration, UX |
 | GitHub Action, GitLab CI | Shell quoting, tokens, jq, annotations, comments, Code Quality |
