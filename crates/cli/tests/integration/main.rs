@@ -111,6 +111,7 @@ mod entry_point_field_tests;
 mod entry_point_script_tests;
 mod exit_code_tests;
 mod export_assignment_forward_tests;
+mod feedback_tests;
 mod file_lines_tests;
 mod finding_id_filter_tests;
 mod finding_id_tests;

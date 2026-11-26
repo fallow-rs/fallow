@@ -1583,6 +1583,15 @@ pub enum Command {
     /// Dump fallow's capability manifest (CLI commands and flags, issue types, MCP tools, framework plugins, env vars) as machine-readable JSON for agent introspection. Always JSON, regardless of --format
     Schema(crate::schema::SchemaArgs),
 
+    /// Send feedback to the Fallow maintainers as a GitHub issue.
+    ///
+    /// Without `--yes`, the command sends nothing: it prints the issue preview
+    /// and a prefilled link. With `--yes`, the GitHub CLI (`gh`) creates a
+    /// public issue on fallow-rs/fallow. The report holds the text that you
+    /// give, plus the Fallow version and the operating system
+    /// (`--no-diagnostics` or `DO_NOT_TRACK=1` leaves them out).
+    Feedback(crate::feedback::FeedbackArgs),
+
     /// Print or vendor CI integration templates.
     ///
     /// Use `fallow ci-template gitlab` to print the GitLab CI template, or

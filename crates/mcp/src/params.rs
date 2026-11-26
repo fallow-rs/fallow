@@ -643,6 +643,33 @@ pub struct FindDupesParams {
     pub group_by: Option<String>,
 }
 
+/// Parameters for `submit_feedback`.
+#[derive(Debug, Default, Deserialize, JsonSchema)]
+pub struct SubmitFeedbackParams {
+    /// Short note; the first line is the issue title.
+    pub message: String,
+    /// bug, false-positive, false-negative, friction (default), feature or docs.
+    pub r#type: Option<String>,
+    /// blocked, worked-around or minor.
+    pub impact: Option<String>,
+    /// The task you tried to do.
+    pub task: Option<String>,
+    /// The fallow command you ran.
+    pub command: Option<String>,
+    /// Expected result.
+    pub expected: Option<String>,
+    /// Actual result.
+    pub actual: Option<String>,
+    /// Agent name, such as claude-code.
+    pub agent: Option<String>,
+    /// Create the issue. Only after the user approves the preview.
+    pub submit: Option<bool>,
+    /// The preview's feedback.digest; required with submit.
+    pub confirm: Option<String>,
+    /// Leave out the fallow version and the OS.
+    pub no_diagnostics: Option<bool>,
+}
+
 #[derive(Default, Deserialize, JsonSchema)]
 pub struct FixParams {
     /// Project root; defaults to the working directory.

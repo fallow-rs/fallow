@@ -63,6 +63,7 @@ mod tests {
             "cloud_runtime_context.rs",
             "code_mode.rs",
             "code_mode_subprocess.rs",
+            "feedback.rs",
             "fix.rs",
             "guard.rs",
             "impact.rs",

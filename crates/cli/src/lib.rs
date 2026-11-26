@@ -59,6 +59,7 @@ mod doctor;
 mod dupes;
 mod exit_codes;
 pub mod explain;
+mod feedback;
 mod fix;
 mod flags;
 mod flags_retirement_formats;
@@ -412,8 +413,13 @@ fn run_command() -> ExitCode {
         return code;
     }
 
-    if let Some(code) = run_telemetry_command_if_requested(&mut cli, fmt.output, fmt.json_style) {
+    if let Some(code) =
+        cli_telemetry::run_telemetry_command_if_requested(&mut cli, fmt.output, fmt.json_style)
+    {
         return code;
+    }
+    if let Some(Command::Feedback(args)) = &cli.command {
+        return feedback::run(args, fmt.output, fmt.json_style);
     }
     if let Some(code) = run_doctor_command_if_requested(&cli, &fmt) {
         return code;
@@ -837,19 +843,6 @@ fn dispatch_and_finalize(
         return Err(code);
     }
     Ok(exit_code)
-}
-
-fn run_telemetry_command_if_requested(
-    cli: &mut Cli,
-    output: fallow_config::OutputFormat,
-    json_style: json_style::JsonStyle,
-) -> Option<ExitCode> {
-    if matches!(cli.command, Some(Command::Telemetry { .. }))
-        && let Some(Command::Telemetry { subcommand }) = cli.command.take()
-    {
-        return Some(telemetry::run(subcommand.into(), output, json_style));
-    }
-    None
 }
 
 /// Doctor deliberately bypasses the normal run epilogue: collecting readiness

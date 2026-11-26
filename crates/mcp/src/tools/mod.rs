@@ -17,6 +17,7 @@ mod decision_surface;
 mod dupes;
 mod explain;
 mod fallback_policy;
+mod feedback;
 mod fix;
 mod fix_confirm;
 mod flags;
@@ -70,6 +71,7 @@ pub use code_mode::execute_code_mode;
 pub use decision_surface::run_decision_surface;
 pub use dupes::{build_find_dupes_args, run_find_dupes};
 pub use explain::{build_explain_args, run_explain};
+pub use feedback::run_submit_feedback;
 #[cfg(test)]
 pub use fix::run_fix_apply;
 #[cfg(test)]

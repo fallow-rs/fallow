@@ -208,6 +208,18 @@
     },
     {
       "section": "commands",
+      "row": "feedback",
+      "column": "Key Flags",
+      "seed": "`message`, `--type`, `--impact`, `--task`, `--command`, `--expected`, `--actual`, `--agent`"
+    },
+    {
+      "section": "commands",
+      "row": "feedback",
+      "column": "Purpose",
+      "seed": "Send feedback to the Fallow maintainers as a GitHub issue"
+    },
+    {
+      "section": "commands",
       "row": "fix",
       "column": "Key Flags",
       "seed": "`--dry-run`, `--yes`, `--no-create-config`, `path`"
@@ -2971,6 +2983,12 @@
       "row": "security_candidates",
       "column": "Description",
       "seed": "Unverified local security candidates (tainted sinks) for downstream agent verification"
+    },
+    {
+      "section": "mcp-tools",
+      "row": "submit_feedback",
+      "column": "Description",
+      "seed": "File feedback about Fallow as a public GitHub issue; previews by default, creates it only with submit and the preview digest"
     },
     {
       "section": "mcp-tools",
