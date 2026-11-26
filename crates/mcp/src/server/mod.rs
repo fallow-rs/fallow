@@ -3,8 +3,8 @@ use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{
     CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, GetSkillRequestParams,
     GetSkillResult, Implementation, ListResourceTemplatesResult, ListResourcesResult,
-    ListSkillsResult, PaginatedRequestParams, ReadResourceRequestParams, ReadResourceResponse,
-    ServerCapabilities, ServerConfig,
+    ListSkillsResult, MetaObject, PaginatedRequestParams, ReadResourceRequestParams,
+    ReadResourceResponse, ServerCapabilities, ServerConfig,
 };
 use rmcp::service::{RequestContext, RoleServer};
 use rmcp::{ErrorData as McpError, ServerHandler, tool, tool_router};
@@ -46,6 +46,27 @@ const PROJECT_INFO_RUST_HELP: &str =
 
 const MUTATION_TASKS_RUST_HELP: &str =
     "Call mutation_inspect for one mutant of `cargo fallow mutants` instead.";
+
+/// Result size, in characters, that a large-result tool asks the host to
+/// keep in the conversation.
+///
+/// Claude Code saves a text result over 50,000 characters to a file unless
+/// the tool declares `anthropic/maxResultSizeChars`, with a ceiling of
+/// 500,000. The value (about 50,000 tokens) keeps a filtered or a small
+/// report inline. A whole report of a mid-size project is often larger and
+/// still goes to a file, where the agent can filter it. The server cap
+/// (`FALLOW_MCP_MAX_OUTPUT_BYTES`, default 1,000,000 bytes) is a separate,
+/// higher limit that refuses a result.
+const LARGE_RESULT_MAX_CHARS: u32 = 200_000;
+
+fn large_result_meta() -> MetaObject {
+    let mut meta = MetaObject::new();
+    meta.0.insert(
+        "anthropic/maxResultSizeChars".to_owned(),
+        LARGE_RESULT_MAX_CHARS.into(),
+    );
+    meta
+}
 
 #[derive(Clone)]
 pub struct FallowMcp {
@@ -99,7 +120,10 @@ fn resolve_binary_from(override_bin: Option<String>) -> String {
 #[tool_router]
 impl FallowMcp {
     /// Execute a bounded, read-only JavaScript Code Mode snippet against fallow's MCP host API. `code` must be a JavaScript function expression or function body that receives `{ fallow, root }` and returns a JSON-serializable value. The embedded sandbox exposes only a typed `fallow` object with read-only analysis calls: analyze, combined, checkChanged, checkArchitecture, securityCandidates, findDupes, projectInfo, traceExport, traceFile, impactClosure, traceDependency, traceClone, checkHealth, audit, explain, listBoundaries, featureFlags, impact, checkRuntimeCoverage, getHotPaths, getBlastRadius, getImportance, getCleanupCandidates, plus `fallow.run(tool, params)` for the same allowlist. Similar-code (15-minute timeouts) and mutation are excluded; use the standalone find_similar_code, inspect_similar_code, mutation_plan, and mutation_inspect MCP tools. Mutating fix tools are intentionally not exposed. The sandbox has no filesystem, network, module imports, process, require, Deno, Bun, or shell access, and no dynamic code compilation: eval, Function, and the async and generator function constructors are removed, including the `constructor` route reachable through function prototypes. `root` is injected into host calls that omit params.root. `timeout_ms` caps JS execution and subprocess-backed host calls. In Code Mode, analyze, checkArchitecture, securityCandidates, findDupes, impactClosure, checkHealth, audit, impact, checkRuntimeCoverage, getHotPaths, getBlastRadius, getImportance, and getCleanupCandidates stay subprocess-backed and are killed on timeout. Every other host call runs in this process, where `timeout_ms` both answers you on time and sets that call's cancellation token: the analysis is asked to stop rather than only abandoned. The stop is cooperative and has no upper bound, because a token set inside a long analysis stage is not read until that stage ends, so the work may still be winding down after the call returns, and while it is the next in-process call falls back to the killable subprocess. `max_output_bytes` caps the total fallow JSON read by host calls and, separately, the serialized snippet result: a larger result is refused with `ok:false`, `truncated:true`, `result_bytes`, and a short `result_preview` in place of the value, so return a projection rather than a whole report; an oversized thrown error message is clamped too, at `max_output_bytes` or 4096 bytes, whichever is larger, and reported with `truncated:true` and `error_bytes`. Host calls refused before dispatch (unknown tool name, malformed params, an output budget with nothing left) run nothing and do not spend the `max_host_calls` budget; `limits.max_rejected_host_calls` bounds how many of them `calls[]` records. Host calls are memoized for the duration of one snippet: repeating the same tool with the same params (key order does not matter) is served from that snippet's own cache, spends no `max_host_calls` slot and no output budget, and still appears in `calls[]` marked `cache_hit: true`; nothing is cached between invocations. The trace itself is bounded at `limits.max_recorded_calls` entries: beyond that the host calls still run and still return, only their trace entries are dropped, and `calls_omitted` reports how many, so a snippet looping one cached call cannot grow the response without limit. `fallow.all(requests)` fans out independent host calls in one go: `requests` is an array of `{ tool, params }` objects whose `tool` is the same wire name `fallow.run` takes, and the return value is an array positionally aligned with it whose elements are `{ ok: true, value }` or `{ ok: false, error }`, so one failing element never hides the others. Every batch element goes through the same tool validation, `root` injection, memoization, shared deadline, and output-byte accounting as a single call, and each element that actually dispatches spends one `max_host_calls` slot. The output budget is shared rather than per element: what is left of `max_output_bytes` is divided evenly across the dispatches a batch makes, so a fan-out reads at most `max_output_bytes` in total. A batch is refused whole, before anything runs, when an element is not an object carrying a `tool` string, when it holds more than `max_host_calls` elements, or when it needs more dispatches than the budget has left. The snippet stays synchronous, with no promises in the sandbox: `fallow.all` blocks until every element has resolved, overlapping the subprocess-backed elements while in-process ones run one at a time, so a fan-out cannot stack in-process analyses whose only stop is cooperative.
-    #[tool(annotations(read_only_hint = true, open_world_hint = true))]
+    #[tool(
+        meta = large_result_meta(),
+        annotations(read_only_hint = true, open_world_hint = true)
+    )]
     async fn code_execute(
         &self,
         params: Parameters<CodeExecuteParams>,
@@ -119,11 +143,14 @@ impl FallowMcp {
     }
 
     /// Analyze a TypeScript/JavaScript project for unused code and dependency cycles. On a Rust root, it runs `cargo fallow check` (deps, visibility; no score) and takes only root. Detects unused files, exports, types, dependencies, enum/class members, unresolved imports, unlisted dependencies, duplicate exports, circular dependencies, re-export cycles (barrel files that form a structural loop, silently breaking re-exports), package cycles (workspace packages that import each other in a loop), boundary violations, rule-pack policy violations (banned calls, imports, and catalogue-derived effects declared via the rulePacks config key), stale suppression comments, missing suppression reasons when rules.require-suppression-reason is enabled, unused pnpm catalog entries (entries in pnpm-workspace.yaml `catalog:` / `catalogs:` not referenced by any workspace package), empty pnpm catalog groups, unresolved catalog references (workspace package.json declares `catalog:` but the catalog has no entry), unused dependency overrides (entries in `pnpm-workspace.yaml#overrides`, `package.json#pnpm.overrides`, top-level `package.json#overrides`, or Bun `package.json#resolutions` whose target package no workspace package declares and the active readable lockfile does not resolve), and misconfigured dependency overrides (unparsable key or empty value; the active package manager may reject or ignore the entry). Opt-in issue_types: "private-type-leaks", "deprecated-exports-in-use", "absent-component-props", "constant-parameters", "namespace-escapes", "test-only-exports". Returns structured JSON with all issues found, grouped by issue type. Each finding has a stable `finding_id`; an id absent from a scoped or differently configured run means unknown, not resolved. For code duplication use find_dupes, for complexity hotspots use check_health. Supports baselines, regression detection, performance tuning, boundary_violations, and group_by. Read the `fallow://tools/analyze` resource for the boundary_violations alias, the group_by modes, and how to dispatch the `next_steps[]` follow-up commands.
-    #[tool(annotations(
+    #[tool(
+        meta = large_result_meta(),
+        annotations(
         read_only_hint = false,
         destructive_hint = false,
         open_world_hint = true
-    ))]
+    )
+    )]
     async fn analyze(&self, params: Parameters<AnalyzeParams>) -> Result<CallToolResult, McpError> {
         let root = params.0.root.clone();
         if let Some(manifest) = rust_manifest(root.as_deref()) {
@@ -133,11 +160,14 @@ impl FallowMcp {
     }
 
     /// Analyze only files changed since a git ref. Useful for incremental CI checks on pull requests. Returns the same structured JSON as analyze, but filtered to only include issues in changed files. Each finding keeps its `finding_id` from analyze; an id absent here means unknown, not resolved. Supports baseline comparisons (baseline/save_baseline), regression detection (fail_on_regression, tolerance, regression_baseline, save_regression_baseline), and performance tuning (no_cache, threads).
-    #[tool(annotations(
+    #[tool(
+        meta = large_result_meta(),
+        annotations(
         read_only_hint = false,
         destructive_hint = false,
         open_world_hint = true
-    ))]
+    )
+    )]
     async fn check_changed(
         &self,
         params: Parameters<CheckChangedParams>,
@@ -146,7 +176,10 @@ impl FallowMcp {
     }
 
     /// Check import cycles, boundary violations (with coverage and forbidden calls), and rule-pack policy violations. Returns the `kind: "architecture"` envelope: the finding arrays, `finding_id` values and actions of `analyze` for these issue types, with its own `schema_version`. Set `cycles`, `boundaries`, or `policy` to report one kind. Call `guard` before an edit and this tool after it. `baseline` takes a dead-code baseline. On a Rust root, it runs `cargo fallow boundaries`: `kind: "boundaries"`.
-    #[tool(annotations(read_only_hint = true, open_world_hint = true))]
+    #[tool(
+        meta = large_result_meta(),
+        annotations(read_only_hint = true, open_world_hint = true)
+    )]
     async fn check_architecture(
         &self,
         params: Parameters<ArchitectureParams>,
@@ -163,7 +196,10 @@ impl FallowMcp {
     }
 
     /// Returns unverified security candidates, not confirmed vulnerabilities. Runs `fallow security --format json` and returns `kind: "security"`, `security_findings`, category, CWE, severity, evidence, structural trace, reachability ranking context, blind-spot counters, and optional unresolved-callee diagnostics for agent verification. `severity` is a review-priority tier, not a verified vulnerability verdict. Each finding also carries an agent-actionable `candidate` record (`source_kind`, the untrusted-input kind as a stable catalogue id or null; a self-contained `sink` with the captured callee and optional `url_shape` for URL candidates; and the `boundary` crossed), an optional `taint_flow` source-to-sink triple (present only when an untrusted source is import-reachable to the sink), a `finding_id` (the SARIF fingerprint), and a `stable_finding_id` that survives line moves, for verdicts. Set `surface: true` to include the top-level `attack_surface` inventory with source-to-sink paths and defensive-boundary verification prompts. Set gate to `new` for changed-line candidates or `newly-reachable` for candidates that became reachable from entry points; `newly-reachable` requires changed_since. There is no `impact` field: deciding exploitability is the agent's job. `reachability.untrusted_source_trace` is module-level context only and does not prove value flow. `reachability.taint_confidence` tiers reachable candidates as `arg-level` or `module-level`; tier from that field rather than evidence prose. Verify trace, reachability context, severity, and evidence before editing code or presenting a finding as a vulnerability. Supports root, config, workspace, changed_since, paths, changed_workspaces, surface, gate, no_cache, and threads. Use paths for the agent edit loop: it forwards to `fallow security --file` and scopes returned candidates to matching finding anchors, trace hops, untrusted-source reachability trace hops, or unresolved-callee diagnostics while cached analysis keeps reruns fast. The CLI also honors `FALLOW_DIFF_FILE` from the MCP server environment for line-level diff scoping. Security analysis can exceed the default 120s subprocess timeout on large repos; raise `FALLOW_TIMEOUT_SECS` accordingly.
-    #[tool(annotations(read_only_hint = true, open_world_hint = true))]
+    #[tool(
+        meta = large_result_meta(),
+        annotations(read_only_hint = true, open_world_hint = true)
+    )]
     async fn security_candidates(
         &self,
         params: Parameters<SecurityCandidatesParams>,
@@ -260,11 +296,14 @@ impl FallowMcp {
     }
 
     /// Find code duplication across the project. Detects clone groups (identical or similar code blocks) with configurable detection modes and thresholds. Returns clone families with refactoring suggestions. On a Rust root, it runs `cargo fallow dupes` (mode, min_tokens, min_lines, threshold). Each clone_groups[] entry carries a stable `fingerprint` (dup:<id>); pass it to the trace_clone tool to deep-dive that group (locations, an extract-function suggestion with estimated savings, and a best-effort suggested name). Set top=N to show only the N highest-ranked clone groups. Ranking combines token count, occurrence count, and a capped spread boost for distant files or same-file locations. Set group_by to "owner" (CODEOWNERS), "directory", "package" (workspace), or "section" (GitLab CODEOWNERS `[Section]` headers, with `owners` metadata per group) to partition results. Import declarations are excluded from clone detection by default (sorted import blocks are a formatting artifact, not copy-paste); pass ignore_imports=false to count them again. Clone instances omit their verbatim `fragment` text over MCP (it was most of the payload, and `file` plus the line/column range addresses the same code); set include_fragments=true to get it back. explain_skipped only changes the human-format skipped-default-ignores note (human/markdown CLI output); MCP JSON responses stay clean. Supports config, workspace scoping, baseline comparisons, and performance tuning (no_cache, threads).
-    #[tool(annotations(
+    #[tool(
+        meta = large_result_meta(),
+        annotations(
         read_only_hint = false,
         destructive_hint = false,
         open_world_hint = true
-    ))]
+    )
+    )]
     async fn find_dupes(
         &self,
         params: Parameters<FindDupesParams>,
@@ -280,7 +319,10 @@ impl FallowMcp {
     }
 
     /// Preview auto-fixes without modifying any files. Shows what would be changed: which unused exports would be removed, which unused dependencies would be deleted from package.json, which unused enum members would be removed, which unused pnpm catalog entries would be cleaned up, and which duplicate-export `ignoreExports` rules would be added to the fallow config file. For `add-to-config` actions, each fix entry carries a `proposed_diff` field with the unified-diff preview of the proposed config write. When no fallow config exists outside a monorepo subpackage, fix_apply would CREATE `.fallowrc.json` using `fallow init`'s framework-aware scaffolding (`$schema`, `entry`, `ignorePatterns`, etc.) and layer the `ignoreExports` rules on top; preview entries on that path carry `created_files: [".fallowrc.json"]`. Set `no_create_config: true` to skip the config-creation path with `skip_reason: "no_create_config"`; source-file previews are unaffected. When a source file's xxh3 content hash at preview time differs from the hash captured during the in-process analysis (a concurrent source edit), the per-file entry is emitted with `skip_reason: "content_changed"` and the envelope's top-level `skipped_content_changed` count is incremented; re-run after refreshing analysis. When a source file mixes CRLF and bare-LF line endings, the per-file entry is emitted with `skip_reason: "mixed_line_endings"` and the envelope's top-level `skipped_mixed_line_endings` count is incremented; this skip is NOT self-healing because re-running fallow alone does not normalize the file. The agent must run `dos2unix <path>` (or instruct the user to set `git config core.autocrlf input` and re-checkout) before re-running. When an unused export lives in a test, mock, or fixture directory, or in a file that itself has an unresolved import, its removal is withheld as low confidence because the consumer may be invisible to static analysis: the per-file entry carries `skip_reason: "low_confidence_off_graph"` or `"low_confidence_unresolved_imports"` and the envelope's top-level `skipped_low_confidence_exports` count is incremented. A finding carrying `reachability_caveats` (a file the run did not fully analyze may hold the crediting reference) is withheld the same way, `remove-dependency`, `remove-enum-member` and `remove-class-member` too, under `skip_reason: "low_confidence_incomplete_analysis"`, counted by `skipped_low_confidence_dependencies` and `skipped_low_confidence_members` (which counts both member kinds). Unlike the two skips above these are INTENTIONAL and do NOT change the exit code; the finding stays reported by `fallow dead-code` for manual confirmation. Supports workspace scoping and performance tuning (no_cache, threads).
-    #[tool(annotations(read_only_hint = true, open_world_hint = true))]
+    #[tool(
+        meta = large_result_meta(),
+        annotations(read_only_hint = true, open_world_hint = true)
+    )]
     async fn fix_preview(&self, params: Parameters<FixParams>) -> Result<CallToolResult, McpError> {
         run_fix_preview(&self.binary, params.0).await
     }
@@ -292,7 +334,10 @@ impl FallowMcp {
     }
 
     /// Get project metadata: active framework plugins, discovered source files, and detected entry points. Useful for understanding how fallow sees the project before running analysis. Supports performance tuning (no_cache, threads).
-    #[tool(annotations(read_only_hint = true, open_world_hint = true))]
+    #[tool(
+        meta = large_result_meta(),
+        annotations(read_only_hint = true, open_world_hint = true)
+    )]
     async fn project_info(
         &self,
         params: Parameters<ProjectInfoParams>,
@@ -342,7 +387,10 @@ impl FallowMcp {
     }
 
     /// Trace a file's graph context. Returns whether the file is reachable or an entry point, what it exports, what it imports, what imports it, and which re-exports it declares. Use this to understand whether a file is isolated, barrel-only, or imported by live entry points.
-    #[tool(annotations(read_only_hint = true, open_world_hint = true))]
+    #[tool(
+        meta = large_result_meta(),
+        annotations(read_only_hint = true, open_world_hint = true)
+    )]
     async fn trace_file(
         &self,
         params: Parameters<TraceFileParams>,
@@ -396,11 +444,14 @@ impl FallowMcp {
     }
 
     /// Check code health metrics (cyclomatic and cognitive complexity) for functions in the project. Returns structured JSON with complexity scores per function, sorted by severity. On a Rust root, it runs `cargo fallow complexity` (max_cyclomatic, max_cognitive; no score). Set score=true for a single 0-100 health score with letter grade (A/B/C/D/F); runs duplication analysis automatically, but the churn-backed hotspot penalty requires hotspots=true (or targets=true). Set min_score=N to fail only when the score drops below a threshold (CI quality gate); min_score is authoritative, so complexity findings become informational and min_score=0 never fails. Exit codes are not surfaced over MCP, but the verdict is: a gated run publishes `gate_outcomes`, where `health-min-score` and `health-min-severity` carry a status, whether it was enforced, and the numbers compared. min_severity composes with min_score. Set file_scores=true for per-file health scores (maintainability index, fan-in, fan-out, dead code ratio, complexity density, CRAP risk), sorted in risk-aware triage order so lower MI and higher CRAP risk appear first. Set css=true to add a `css_analytics` section (specificity hotspots, `!important` density, over-complex selectors, deep nesting, design-token sprawl, unreferenced custom properties and `@keyframes`); opt-in because it parses every project stylesheet. Set complexity_breakdown=true to add a per-decision-point `contributions[]` array to each complexity finding, so you can explain WHY a function scored high and which lines to refactor. Set coverage_gaps=true to explicitly include static test coverage gaps: runtime files and exports with no test dependency path (not line-level coverage). A provided config file may also enable coverage gaps via rules.coverage-gaps when no health sections are explicitly selected. Set hotspots=true to identify files that are both complex and frequently changing (combines git churn with complexity). Set churn_file to a `fallow-churn/v1` JSON path to power the churn-backed signals (hotspots, ownership, refactoring targets) from imported VCS history instead of git. Set ownership=true (implies hotspots) to attach per-file ownership signals: bus factor, contributor count, declared CODEOWNERS owner, ownership_state, drift, and unowned-hotspot flag. Use ownership_email_mode=raw|handle|anonymized|hash for author email privacy (default handle; hash is the legacy spelling for anonymized output). Set targets=true for ranked refactoring recommendations sorted by efficiency (quick wins first), with confidence scores and adaptive percentile-based thresholds. Set trend=true to compare current metrics against the most recent saved snapshot and show per-metric deltas with directional indicators (improving/declining/stable). Implies --score. Requires prior snapshots saved with save_snapshot. Set effort to control analysis depth: 'low' (fast, surface-level), 'medium' (balanced, default), or 'high' (thorough, all heuristics). Set summary=true to include a natural-language summary of findings alongside the structured JSON. Set coverage to a path to Istanbul-format coverage data (coverage-final.json from Jest, Vitest, c8, nyc) for accurate per-function CRAP scores instead of the default estimated coverage. CRAP findings carry a `coverage_source` discriminator and the summary reports whether emitted sources are uniform or mixed. Besides real functions, health scores synthetic `<template>`, `<snippet:NAME>`, `<module>`, and Angular `<component>` rollup units, each with its own suppression placement and dimension rules. Set runtime_coverage to a path (V8 coverage directory, V8 JSON file, or Istanbul JSON file) for merged runtime-coverage findings (a single local capture is free; continuous or multi-capture runtime monitoring requires an active license via `fallow license activate`). Runtime-coverage tuning: set min_invocations_hot=N to tune the hot-path threshold (default 100), min_observation_volume=N to tune the high-confidence verdict floor (default 5000), and low_traffic_threshold=RATIO to tune the active/low-traffic split (default 0.001). Set group_by to "owner" (CODEOWNERS), "directory", "package" (workspace), or "section" (GitLab CODEOWNERS `[Section]` headers, with `owners` metadata per group) to partition results. Each group recomputes its own metrics against its files. When config health.thresholdOverrides is set, health findings use the resolved local thresholds and JSON includes threshold_overrides state so agents can see active, stale, and full-run no-match exceptions. For code duplication use find_dupes, for changed-file review use audit, and for execution-backed dead-or-hot verdicts use check_runtime_coverage. Read the `fallow://tools/check_health` resource for the per-flag detail this summary omits: the per-group metrics, `css_analytics` contents, `contributions[]` entries, the React `react_hook_profile` and render-fan-in vital signs, churn-file import, `coverage_source` values, the synthetic `<template>` / `<snippet:NAME>` / `<module>` / `<component>` units and their suppression placements, and the `threshold_overrides` row semantics. Supports config, baseline comparisons, and performance tuning (no_cache, threads). Useful for identifying hard-to-maintain code and prioritizing refactoring.
-    #[tool(annotations(
+    #[tool(
+        meta = large_result_meta(),
+        annotations(
         read_only_hint = false,
         destructive_hint = false,
         open_world_hint = true
-    ))]
+    )
+    )]
     async fn check_health(
         &self,
         params: Parameters<HealthParams>,
@@ -413,7 +464,10 @@ impl FallowMcp {
     }
 
     /// Audit changed files for dead code, complexity, duplication, styling, and diff risk. Purpose-built for reviewing AI-generated code. Combines the analyses scoped to changed files and returns a verdict (pass/warn/fail). Auto-detects the base branch if not specified. By default, audit runs the base ref too and gates only findings introduced by the changeset; inherited findings are annotated with introduced=false and counted under attribution. Set gate="all" or audit.gate="all" in config to gate every finding. Returns JSON with verdict, summary counts per category, attribution counts, and full issue details with actions array for remediation guidance. Per-analysis payloads nest under `dead_code`, `duplication`, and `complexity`; the `complexity` block carries the health sub-analysis output (audit JSON has no `health` key). The `diff_risk` section reports facts about the change itself, such as weakened tests, added suppressions, and a clone copy edited without its siblings. Styling analytics are on by default. Read the fallow://tools/audit guide for the diff-risk rules, styling, coverage, synthetic complexity units, grouping, baselines, runtime coverage, and `FALLOW_DIFF_FILE` scoping. Use this after generating code to verify quality before committing.
-    #[tool(annotations(read_only_hint = true, open_world_hint = true))]
+    #[tool(
+        meta = large_result_meta(),
+        annotations(read_only_hint = true, open_world_hint = true)
+    )]
     async fn audit(&self, params: Parameters<AuditParams>) -> Result<CallToolResult, McpError> {
         run_audit(&self.binary, params.0).await
     }
@@ -470,7 +524,10 @@ impl FallowMcp {
     }
 
     /// Roll EVERY tracked fallow project on this machine into one cross-repo value report (`fallow impact --all --format json`). Runs NO analysis: it reads the per-project history files in the user's private config dir, answering "what has fallow done for me across all my repos". Use this instead of `impact` when the agent wants a portfolio view rather than one repo; use `impact` (with `root`) for a single project. Returns `kind: "impact-cross-repo"` with `schema_version` "2", `project_count` (stores enumerated), `tracked_count` (projects with recorded history shown as rows), `unreadable_count` (corrupt/newer-schema stores skipped), a `totals` roll-up (resolved/contained/surfacing summed over ALL tracked projects, including repos since deleted from disk), and a `projects[]` array. Each project row carries a hashed `project_key` (never a filesystem path, and the only always-present identifier), an optional human `label` (the repo's directory basename; omitted on rows recorded by older fallow binaries, so fall back to `project_key` when `label` is null/absent), `last_recorded`, and a nested per-project `report`. Privacy: the aggregate exposes NO absolute paths, only the hash key plus the basename label. Projects that are enabled but have no recorded history yet are counted in `project_count` but excluded from `projects[]` rows. `sort` orders rows (`recent` default / `resolved` / `contained` / `name`); `limit` caps the rows returned while `totals` still reflect every tracked project. LOCAL-DEV ONLY: history accrues only on developer machines (fallow never records in CI), so in CI / ephemeral runners this returns zero tracked projects and must NOT be used as a CI metric. When `project_count` is 0, no project on this machine has tracking enabled yet: in a local dev session suggest the user run `fallow impact enable` in a repo they care about (do not run it yourself), but in CI stay silent because zero is the expected, non-actionable result. Read-only; the mutating enable / disable / default / reset lifecycle is intentionally not exposed over MCP.
-    #[tool(annotations(read_only_hint = true, idempotent_hint = true, open_world_hint = true))]
+    #[tool(
+        meta = large_result_meta(),
+        annotations(read_only_hint = true, idempotent_hint = true, open_world_hint = true)
+    )]
     async fn impact_all(
         &self,
         params: Parameters<ImpactAllParams>,
@@ -551,7 +608,10 @@ impl FallowMcp {
     }
 
     /// Return design-token blast radius from static analysis. Runs `fallow health --css --format json`; agents should read `css_analytics.token_consumers`, a reverse index keyed by each token of its defining site plus a `consumer_count` and a capped located `consumers[]` sample of `{path,line,kind}`. Covers TWO token origins, disambiguated by token shape and consumer `kind`: Tailwind v4 `@theme` tokens (`token` is the `--`-prefixed custom property like `--color-brand`; `kind` in `theme-var` / `css-var` / `utility` / `apply`) AND CSS-in-JS token definitions (StyleX `defineVars` / `unstable_defineVarsNested`, vanilla-extract `createTheme` / `createThemeContract` / `createGlobalTheme`; `token` is the binding-qualified dotted access path like `vars.color.primary`, `namespace` is the defining binding, member reads use `js-member`, and StyleX theme-group calls use `js-call`). StyleX theme-group calls credit the complete resolved contract, including partial overrides and empty reset themes. The index is empty or absent on projects using neither. `consumer_count` is a static lower bound because computed class names, dynamic token structures, unresolved imports, and computed token access cannot always be counted. For Tailwind a `consumer_count` of 0 mirrors the unused-theme-token population (the dead-token verdict stays on `unused_theme_tokens` via check_health); CSS-in-JS tokens have no corroborating dead-token finding, so treat a CSS-in-JS 0 as weaker. Use this tool to scope the impact of editing or renaming a token, not to decide deletion.
-    #[tool(annotations(read_only_hint = true, idempotent_hint = true, open_world_hint = false))]
+    #[tool(
+        meta = large_result_meta(),
+        annotations(read_only_hint = true, idempotent_hint = true, open_world_hint = false)
+    )]
     async fn get_token_blast_radius(
         &self,
         params: Parameters<GetTokenBlastRadiusParams>,
