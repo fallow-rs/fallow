@@ -497,6 +497,94 @@ fn gate_runs_no_fallow_for_a_command_that_is_not_a_git_write() {
     );
 }
 
+/// Runs the gate for `command` and returns whether it ran the fallow on PATH
+/// for the audit, with the exit code and stderr.
+fn gate_audits(command: &str) -> (bool, Option<i32>, String) {
+    let tmp = tempdir().unwrap();
+    let base = tmp.path().canonicalize().unwrap();
+    let project = base.join("project");
+    std::fs::create_dir_all(&project).unwrap();
+    let log = base.join("calls.log");
+    logging_stub(&base.join("bin/fallow"), "path", &log);
+    let input = serde_json::json!({ "cwd": project, "tool_input": { "command": command } });
+
+    let output = probe_gate(
+        &render_gate_script(true, None),
+        &base.join("home/.claude/hooks/fallow-gate.sh"),
+        &project,
+        &base.join("bin"),
+        input.to_string().as_bytes(),
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+    (
+        calls(&log).contains("path --version"),
+        output.status.code(),
+        stderr,
+    )
+}
+
+fn assert_gate_audits(commands: &[&str]) {
+    for command in commands {
+        let (audited, code, stderr) = gate_audits(command);
+        assert!(audited, "gate must audit {command:?}: {stderr}");
+        assert_eq!(code, Some(2), "{command:?}: {stderr}");
+    }
+}
+
+#[test]
+fn gate_audits_a_brace_expansion_with_a_write_word() {
+    assert_gate_audits(&["git {commit,status} -m x", "git {status,push}"]);
+}
+
+#[test]
+fn gate_audits_a_program_name_from_a_variable() {
+    assert_gate_audits(&["G=git; $G commit -m x", "${G} push", "`echo git` push"]);
+}
+
+#[test]
+fn gate_audits_a_git_write_after_env_or_command() {
+    assert_gate_audits(&["env git commit -m x", "command git push", "exec git push"]);
+}
+
+#[test]
+fn gate_audits_a_git_write_split_by_a_line_continuation() {
+    assert_gate_audits(&["git \\\ncommit -m x", "git -C . \\\n  push"]);
+}
+
+/// A file system that ignores letter case runs git for `GIT`.
+#[test]
+fn gate_audits_a_letter_case_variant_of_git() {
+    assert_gate_audits(&["GIT commit -m x", "Git push", "/usr/bin/GIT push"]);
+}
+
+#[test]
+fn gate_audits_git_named_by_a_path() {
+    assert_gate_audits(&["/usr/bin/git commit -m x", "./bin/git push"]);
+}
+
+#[test]
+fn gate_audits_a_program_name_from_a_glob() {
+    assert_gate_audits(&["g?t commit -m x", "gi[t] push", "g*t push"]);
+}
+
+/// An expansion alone does not make a command a possible git write. The
+/// command must also hold a `commit` or `push` word.
+#[test]
+fn gate_skips_an_expansion_without_a_write_word() {
+    for command in [
+        "echo $HOME",
+        "ls {a,b}/*.ts",
+        "cat `which jq` | head -n 1",
+        "GIT_PAGER=cat git log -n 1",
+        "ls src/GIT",
+        "git log commit-message.txt",
+    ] {
+        let (audited, code, stderr) = gate_audits(command);
+        assert!(!audited, "gate must skip {command:?}: {stderr}");
+        assert_eq!(code, Some(0), "{command:?}: {stderr}");
+    }
+}
+
 /// The small hook input reader decodes JSON string escapes, so a command with
 /// escaped quotes or a new line still reaches the exact check.
 #[test]

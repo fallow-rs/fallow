@@ -74,15 +74,32 @@ gate_skip_not_git_write() {
   exit 0
 }
 
-# The hook runs on every Bash tool call. The gate reads the hook input with
-# the read builtin and keeps it in a variable. A plain pattern on the raw hook
-# input then skips a command that cannot be a git commit or push, before the
-# gate starts any program. A git write puts `git` before `commit`, `push` or
-# an expansion in the command text. The match drops quote and backslash
+# Returns 0 when the raw hook input $1 can hold a git commit or push: it has a
+# `commit` or `push` word, or `git` before an expansion, in any letter case. A
+# program name from an expansion or a glob (`$G commit`, `g?t push`) still
+# has the `commit` or `push` word. The match drops quote and backslash
 # characters first, as gate_loose_write does, so `g''it commit` still goes to
 # the exact parse. A JSON `\u` escape can hide a word, so such a hook input
-# always goes there too. A hook input over GATE_SMALL_INPUT_LIMIT characters
-# also goes to the exact parse.
+# always goes there too.
+gate_input_can_write() {
+  local hit=1
+  case "$1" in
+    *'\u'*) return 0 ;;
+  esac
+  gate_replace "$1" "[\\'\"\\\\]" ""
+  shopt -s nocasematch
+  case "$GATE_OUT" in
+    *commit* | *push* | *git*'$'*) hit=0 ;;
+  esac
+  shopt -u nocasematch
+  return "$hit"
+}
+
+# The hook runs on every Bash tool call. The gate reads the hook input with
+# the read builtin and keeps it in a variable. gate_input_can_write on the raw
+# hook input then skips a command that cannot be a git commit or push, before
+# the gate starts any program. A hook input over GATE_SMALL_INPUT_LIMIT
+# characters always goes to the exact parse.
 # A hook runner can give a socket as stdin. On macOS, /dev/stdin opens a
 # socket, and `$(<file)` reads it in blocks without a program. On Linux,
 # /dev/stdin cannot open a socket, so the gate reads file descriptor 0 with
@@ -108,17 +125,8 @@ case "${OSTYPE:-}" in
     fi
     ;;
 esac
-if [ "${#INPUT}" -le "$GATE_SMALL_INPUT_LIMIT" ]; then
-  case "$INPUT" in
-    *'\u'*) ;;
-    *)
-      gate_replace "$INPUT" "[\\'\"\\\\]" ""
-      case "$GATE_OUT" in
-        *git*commit* | *git*push* | *git*'$'*) ;;
-        *) gate_skip_not_git_write ;;
-      esac
-      ;;
-  esac
+if [ "${#INPUT}" -le "$GATE_SMALL_INPUT_LIMIT" ] && ! gate_input_can_write "$INPUT"; then
+  gate_skip_not_git_write
 fi
 
 # PATH rules. The gate looks up every program, also cat, git and jq, only in
@@ -762,6 +770,16 @@ gate_mark_subshells() {
   printf '%s' "${parts[@]}"
 }
 
+# Returns 0 when the word $1 runs git: `git` in any letter case, as a name or
+# as the last part of a path. A file system that ignores letter case runs git
+# for `GIT` too.
+gate_git_word() {
+  case "$1" in
+    [Gg][Ii][Tt] | */[Gg][Ii][Tt]) return 0 ;;
+  esac
+  return 1
+}
+
 is_git_write_command() {
   local cmd="$1" segment cd_dir="" dir value found=1 track=1 separators=';|&'
   local open_mark=$'\001(' close_mark=$'\001)'
@@ -803,7 +821,7 @@ is_git_write_command() {
       GIT_WRITE_CANDIDATES+=("$cd_dir")
     fi
     while [ "$#" -gt 0 ]; do
-      if [ "$1" != "git" ]; then
+      if ! gate_git_word "$1"; then
         # A git location prefix names a candidate too.
         case "$1" in
           GIT_WORK_TREE=?*)
@@ -896,7 +914,7 @@ gate_loose_write() {
     # Intentional word splitting; globbing is disabled below.
     # shellcheck disable=SC2086
     for word in $segment; do
-      if [ "$word" = git ]; then
+      if gate_git_word "$word"; then
         seen_git=1
         continue
       fi
@@ -909,6 +927,26 @@ gate_loose_write() {
     done
   done <<<"$text"
   return 1
+}
+
+# Returns 0 for a command that the two checks above cannot read and that
+# holds a `commit` or `push` word in any letter case. Such a command names a
+# program or a word with an expansion, a brace, a glob or a backquote
+# (`$G commit`, `git {commit,status}`, `g?t push`), so the gate counts it as a
+# possible git write and the trusted fallow audits it.
+gate_unread_write() {
+  local hit=1
+  case "$1" in
+    *[\$\{\`\?\*\[]*) ;;
+    *) return 1 ;;
+  esac
+  gate_replace "$1" "[\\'\"\\\\]" ""
+  shopt -s nocasematch
+  case "$GATE_OUT" in
+    *commit* | *push*) hit=0 ;;
+  esac
+  shopt -u nocasematch
+  return "$hit"
 }
 
 # The exact check below reads `tool_input.command` before the gate starts any
@@ -951,17 +989,7 @@ else
     GATE_INPUT_READER="$GATE_PATH_FALLOW"
   else
     GATE_INPUT_READER=""
-    case "$INPUT" in
-      *'\u'*) GATE_MAYBE_WRITE=1 ;;
-      *)
-        gate_replace "$INPUT" "[\\'\"\\\\]" ""
-        case "$GATE_OUT" in
-          *git*commit* | *git*push* | *git*'$'*) GATE_MAYBE_WRITE=1 ;;
-          *) GATE_MAYBE_WRITE=0 ;;
-        esac
-        ;;
-    esac
-    if [ "$GATE_MAYBE_WRITE" -eq 1 ]; then
+    if gate_input_can_write "$INPUT"; then
       {
         echo "fallow-gate: blocked: the hook input needs jq or a fallow outside the project to read it, and the command can be a git commit or push."
         echo "fallow-gate: install jq, or install fallow outside the project."
@@ -1011,7 +1039,7 @@ if [ -n "$SESSION_CWD" ] && [ -d "$SESSION_CWD" ]; then
 fi
 
 set -f
-if is_git_write_command "$CMD" || gate_loose_write "$CMD"; then
+if is_git_write_command "$CMD" || gate_loose_write "$CMD" || gate_unread_write "$CMD"; then
   GIT_WRITE=1
 else
   GIT_WRITE=0
