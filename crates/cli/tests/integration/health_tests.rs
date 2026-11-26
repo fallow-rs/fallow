@@ -5464,7 +5464,7 @@ fn health_workspace_scopes_vital_signs_and_health_score() {
     );
     write_file(
         &root.join(".fallowrc.json"),
-        r#"{"duplicates":{"min_tokens":10,"min_lines":3}}"#,
+        r#"{"duplicates":{"minTokens":10,"minLines":3}}"#,
     );
     write_file(
         &root.join("packages/app/package.json"),
@@ -5621,7 +5621,7 @@ fn health_group_by_package_emits_per_workspace_envelope() {
     );
     write_file(
         &root.join(".fallowrc.json"),
-        r#"{"duplicates":{"min_tokens":10,"min_lines":3}}"#,
+        r#"{"duplicates":{"minTokens":10,"minLines":3}}"#,
     );
     write_file(
         &root.join("packages/alpha/package.json"),

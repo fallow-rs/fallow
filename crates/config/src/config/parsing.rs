@@ -1939,24 +1939,41 @@ impl FallowConfig {
     }
 }
 
-/// A fix for an unknown-field error whose usual cause is known.
-pub(super) fn unknown_field_hint(path: &Path, reason: &str) -> &'static str {
-    if !reason.contains("unknown field") {
-        return "";
-    }
+/// A fix for an unknown-field error: the fix for a known cause, else the
+/// valid key that is closest to the unknown key.
+pub(super) fn unknown_field_hint(path: &Path, reason: &str) -> String {
+    const UNKNOWN_FIELD: &str = "unknown field `";
+    let Some((_, rest)) = reason.split_once(UNKNOWN_FIELD) else {
+        return String::new();
+    };
     // Unknown fields on overrides/ignoreExports entries are usually inline
     // annotations; point at JSONC comments as the fix.
     if matches!(ConfigFormat::from_path(path), ConfigFormat::Json)
         && (reason.contains("expected `files` or `rules`")
             || reason.contains("expected `file` or `exports`"))
     {
-        return " (annotations belong in a // comment; .fallowrc.json accepts JSONC)";
+        return " (annotations belong in a // comment; .fallowrc.json accepts JSONC)".to_owned();
     }
     // `duplicates` and `typeAware` have an `enabled` key, `boundaries` has not.
     if reason.contains("unknown field `enabled`") && reason.contains("`presetPublicFiles`") {
-        return " (boundaries has no `enabled` key; remove the `boundaries` section to turn the checks off)";
+        return " (boundaries has no `enabled` key; remove the `boundaries` section to turn the checks off)".to_owned();
     }
-    ""
+    let Some((unknown, rest)) = rest.split_once('`') else {
+        return String::new();
+    };
+    let Some((_, expected)) = rest.split_once(", expected ") else {
+        return String::new();
+    };
+    // The valid keys are the odd parts of "one of `a`, `b`" or "`a` or `b`".
+    let mut known = expected.split('`').skip(1).step_by(2);
+    // `closest_match` ignores case, so it rejects a key that differs in
+    // case only, such as `mintokens` for `minTokens`.
+    known
+        .clone()
+        .find(|known| known.eq_ignore_ascii_case(unknown))
+        .or_else(|| crate::levenshtein::closest_match(unknown, &mut known))
+        .map(|known| format!(" (did you mean `{known}`?)"))
+        .unwrap_or_default()
 }
 
 #[cfg(test)]

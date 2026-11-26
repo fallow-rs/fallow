@@ -90,6 +90,7 @@ mod config_load_cli_tests;
 mod config_pattern_parity_tests;
 mod config_resolved_tests;
 mod config_string_package_names_tests;
+mod config_unknown_keys_tests;
 mod constant_parameter_tests;
 mod coverage_analyze_tests;
 mod coverage_cloud_reads_tests;

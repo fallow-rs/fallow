@@ -105,7 +105,7 @@ use crate::workspace::WorkspaceConfig;
 
 /// Value of the `ignoreExportsUsedInFile` config key: whether an export
 /// referenced elsewhere in its own file is suppressed from `unused-export`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, JsonSchema)]
 #[serde(untagged, rename_all = "camelCase")]
 pub enum IgnoreExportsUsedInFileConfig {
     /// Blanket toggle: `true` suppresses any export with a same-file use,
@@ -113,6 +113,44 @@ pub enum IgnoreExportsUsedInFileConfig {
     Bool(bool),
     /// Object form that restricts the suppression to type-only exports.
     ByKind(IgnoreExportsUsedInFileByKind),
+}
+
+/// A derived untagged deserializer gives only "did not match any variant",
+/// so an unknown key in the object form would not be named.
+impl<'de> Deserialize<'de> for IgnoreExportsUsedInFileConfig {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct IgnoreExportsVisitor;
+
+        impl<'de> serde::de::Visitor<'de> for IgnoreExportsVisitor {
+            type Value = IgnoreExportsUsedInFileConfig;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                formatter.write_str("a boolean or an object with `type` and `interface`")
+            }
+
+            fn visit_bool<E>(self, value: bool) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                Ok(IgnoreExportsUsedInFileConfig::Bool(value))
+            }
+
+            fn visit_map<A>(self, map: A) -> Result<Self::Value, A::Error>
+            where
+                A: serde::de::MapAccess<'de>,
+            {
+                IgnoreExportsUsedInFileByKind::deserialize(
+                    serde::de::value::MapAccessDeserializer::new(map),
+                )
+                .map(IgnoreExportsUsedInFileConfig::ByKind)
+            }
+        }
+
+        deserializer.deserialize_any(IgnoreExportsVisitor)
+    }
 }
 
 impl Default for IgnoreExportsUsedInFileConfig {
@@ -159,7 +197,7 @@ impl IgnoreExportsUsedInFileConfig {
 /// Object form of `ignoreExportsUsedInFile` (`{ "type": ..., "interface": ... }`),
 /// restricting the same-file-use suppression to type-only exports.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct IgnoreExportsUsedInFileByKind {
     /// When `true`, enables the same-file-use suppression for type-only exports (serialized as `type`; part of the object form of `ignoreExportsUsedInFile`). Because fallow groups type aliases and interfaces under one issue kind, setting either `type` or `interface` enables the identical type-only suppression, applied only to exports fallow classifies as type-only.
     #[serde(default, rename = "type")]
@@ -332,7 +370,7 @@ impl EffectConfig {
 
 /// The `fix` config section: settings for `fallow fix` apply behavior.
 #[derive(Debug, Default, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct FixConfig {
     /// Groups `fallow fix` settings for pnpm workspace catalog cleanup. Its only key, `deletePrecedingComments` (`auto` default, `always`, `never`), controls whether a comment block directly above a removed unused `pnpm-workspace.yaml` catalog entry is deleted with the entry.
     #[serde(default)]
@@ -342,7 +380,7 @@ pub struct FixConfig {
 /// The `fix.catalog` section: how `fallow fix` cleans up unused
 /// `pnpm-workspace.yaml` catalog entries.
 #[derive(Debug, Default, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct CatalogFixConfig {
     /// Controls whether comment lines immediately above an unused `pnpm-workspace.yaml` catalog entry are removed when `fallow fix` deletes that entry: `auto` (default: delete only when the comment block is preceded by a blank line or sits directly under the parent catalog header, and never when it is a section banner like `# ====`), `always` (always remove the adjacent comment block), or `never` (leave all preceding comments). A `fallow-keep` marker anywhere in the block always preserves it regardless of this setting. Set `never` for teams that keep hand-authored notes above catalog pins.
     #[serde(default)]
@@ -956,7 +994,7 @@ pub struct PerAnalysisProductionConfig {
 /// The `audit` config section: in-repo defaults for `fallow audit`, each
 /// overridable by its matching CLI flag.
 #[derive(Debug, Default, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct AuditConfig {
     /// Selects which findings affect the `fallow audit` verdict: `new-only` (default) fails only on findings introduced by the current changeset (running a base-snapshot attribution pass), while `all` fails on every finding in changed files and skips that pass. Set to `all` to gate the full backlog in changed files; the `--gate` CLI flag overrides this.
     #[serde(default, skip_serializing_if = "AuditGate::is_default")]
@@ -1076,7 +1114,7 @@ impl AuditWorsened {
 /// The `regression` config section holding the saved issue-count baseline for
 /// the `--fail-on-regression` gate.
 #[derive(Debug, Default, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct RegressionConfig {
     /// The saved per-issue-type issue counts that `--fail-on-regression` compares the current run against; the gate fails only when counts grow beyond the configured tolerance. Typically written by `--save-baseline` rather than hand-authored; each field (total_issues plus per-kind counts like unused_exports, boundary_violations, policy_violations) is an integer defaulting to 0 when omitted. Absent means no baseline is embedded.
     #[serde(default, skip_serializing_if = "Option::is_none")]

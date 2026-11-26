@@ -103,7 +103,7 @@ const fn default_min_corpus_size_for_token_cache() -> usize {
 
 /// Configuration for code duplication detection.
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct DuplicatesConfig {
     /// Whether duplication detection is enabled. `false` turns off each duplication analysis that a command runs by default: the duplication analysis of the bare `fallow` command, the duplication sub-analysis of `fallow audit`, and the duplication measure and penalty of the health score. A command line that names the analysis still runs it: `--only dupes`, `--include-dupes`, `audit.dupes: true` and the `fallow dupes` command.
     #[serde(default = "default_true")]
@@ -293,7 +293,7 @@ impl Default for DuplicatesConfig {
 /// the detection mode. When set to `Some(false)`, it forces preservation. When
 /// `None`, the detection mode's default behavior applies.
 #[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct NormalizationConfig {
     /// Blind all identifiers (variable names, function names, etc.) to the same hash.
     /// Default in `semantic` mode.

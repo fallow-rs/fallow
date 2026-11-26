@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 /// }
 /// ```
 #[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct ResolveConfig {
     /// Additional export/import condition names to honor during module
     /// resolution. Merged with fallow's built-in conditions (`development`,
