@@ -661,9 +661,20 @@ The server advertises the tasks extension (`io.modelcontextprotocol/tasks`).
   capabilities of `initialize` do not count. Any other request gets the
   synchronous result.
 - The tool must be a task tool: `audit`, `mutation_plan`,
-  `find_similar_code`, or `analyze` with a type-aware parameter
-  (`type_aware: true`, `type_aware_projects` or `type_aware_require`). A
-  syntactic `analyze` ends in seconds, and a task adds a poll round trip.
+  `find_similar_code`, or `analyze` with type-aware analysis. A syntactic
+  `analyze` ends in seconds, and a task adds a poll round trip. `analyze`
+  runs type-aware analysis when a parameter asks for it (`type_aware: true`,
+  `type_aware_projects` or `type_aware_require`), or when `FALLOW_TYPE_AWARE`
+  or `typeAware.enabled` turns it on and the parameters leave the choice
+  open. `fallow_api::layers_turn_on_type_aware` decides the second case with
+  the precedence of the typed runners, which refuse that run and fall back
+  to the type-aware CLI. It can read the config file, so the server calls it
+  on a blocking thread. The check never fetches a remote `extends`, so a
+  config that needs one keeps the call synchronous. `type_aware: false` keeps
+  the call synchronous too.
+- On a 27,000-file TypeScript monorepo with 22 type-aware candidates,
+  `dead-code` took 6.5 s, and `dead-code --type-aware` took 60 to 77 s with
+  the `typescript-go` backend and 48 to 56 s with tsrs, under host load.
 
 On a large repository `audit` and `mutation_plan` can approach the 120 s
 default deadline (`audit --base HEAD~30` took 96 s and `mutation --plan --all`

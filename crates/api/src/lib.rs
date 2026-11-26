@@ -219,7 +219,6 @@ pub use output_contracts::{
     SecurityOutput, SecurityOutputConfig, SecuritySummaryOutput, SimilarCodeCandidateSnapshot,
     SimilarCodeOutput, TraceOutput, WorkspacesOutput,
 };
-pub use runtime::TYPE_AWARE_CONFIG_UNSUPPORTED;
 pub use runtime::{
     AUDIT_CONFIG_BASELINE_UNSUPPORTED, ArchitectureOutput, ArchitectureProgrammaticOutput,
     AuditProgrammaticKeySnapshot, AuditProgrammaticOutput, BoundaryViolationsOutput,
@@ -243,6 +242,7 @@ pub use runtime::{
     run_trace_clone, run_trace_dependency, run_trace_error, run_trace_export, run_trace_file,
     run_trace_import_path, select_similar_code_candidate_snapshot, serialize_health_report_json,
 };
+pub use runtime::{TYPE_AWARE_CONFIG_UNSUPPORTED, layers_turn_on_type_aware};
 pub use runtime_json::{
     serialize_architecture_programmatic_json, serialize_audit_programmatic_json,
     serialize_boundary_violations_programmatic_json,

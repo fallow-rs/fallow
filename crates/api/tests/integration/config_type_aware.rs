@@ -418,3 +418,66 @@ fn type_aware_refusal_comes_before_a_config_validation_error() {
     });
     assert_refused(trace.map(drop), "typeAware.enabled");
 }
+
+/// `layers_turn_on_type_aware` is `true` exactly when a dead-code family
+/// runner refuses the same options with `TYPE_AWARE_CONFIG_UNSUPPORTED`. The
+/// MCP server reads it to run `analyze` as a task before the typed route
+/// refuses the call and falls back to the type-aware CLI.
+#[test]
+fn layers_turn_on_type_aware_predicts_the_refusal_of_every_dead_code_family() {
+    use fallow_api::layers_turn_on_type_aware;
+    use fallow_api::run::{EnvSnapshot, HostInputs, Surface};
+
+    let dir = tempfile::tempdir().expect("temp dir");
+    let configs = [
+        ("config-on", r#"{"typeAware":{"enabled":true}}"#),
+        ("config-off", "{}"),
+    ];
+    for (name, config) in configs {
+        let root = project(&dir.path().join(name), config);
+        for env in [None, Some("1"), Some("0")] {
+            for enabled in [None, Some(false)] {
+                let pairs: Vec<(&str, &str)> = env
+                    .map(|value| ("FALLOW_TYPE_AWARE", value))
+                    .into_iter()
+                    .collect();
+                let options = DeadCodeOptions {
+                    analysis: AnalysisOptions {
+                        type_aware: TypeAwareOptions {
+                            enabled,
+                            ..TypeAwareOptions::default()
+                        },
+                        host: Some(HostInputs {
+                            surface: Surface::Mcp,
+                            env: EnvSnapshot::from_pairs(&pairs, Some(&root)),
+                        }),
+                        ..analysis(&root)
+                    },
+                    ..DeadCodeOptions::default()
+                };
+                let predicted = layers_turn_on_type_aware(&options.analysis);
+                let refused = |result: Result<(), ProgrammaticError>| {
+                    result.is_err_and(|err| {
+                        err.code.as_deref() == Some(TYPE_AWARE_CONFIG_UNSUPPORTED)
+                    })
+                };
+                let case = format!("{name} env={env:?} option={enabled:?}");
+                assert_eq!(
+                    refused(run_dead_code(&options).map(drop)),
+                    predicted,
+                    "dead-code {case}"
+                );
+                assert_eq!(
+                    refused(run_circular_dependencies(&options).map(drop)),
+                    predicted,
+                    "circular {case}"
+                );
+                assert_eq!(
+                    refused(run_boundary_violations(&options).map(drop)),
+                    predicted,
+                    "boundary {case}"
+                );
+            }
+        }
+    }
+}

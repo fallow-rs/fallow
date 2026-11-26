@@ -118,15 +118,28 @@ impl TaskPace {
 /// A call whose arguments do not parse stays synchronous, so the client gets
 /// the same invalid-params error as without the extension. `analyze` is a
 /// task tool only with type-aware analysis, because a syntactic run ends in
-/// seconds and a task adds a poll round trip.
-pub fn task_pace(request: &CallToolRequestParams) -> Option<TaskPace> {
+/// seconds and a task adds a poll round trip. Its parameters,
+/// `FALLOW_TYPE_AWARE` and the project config can turn type-aware analysis
+/// on, so the check of `analyze` can read the config file.
+pub async fn task_pace(request: &CallToolRequestParams) -> Option<TaskPace> {
     match request.name.as_ref() {
         "audit" => parses::<AuditParams>(request).then_some(TaskPace::Short),
         "mutation_plan" => parses::<MutationPlanParams>(request).then_some(TaskPace::Short),
         "find_similar_code" => parses::<FindSimilarCodeParams>(request).then_some(TaskPace::Long),
-        "analyze" => arguments::<AnalyzeParams>(request)
-            .is_some_and(|params| crate::tools::analyze_requests_type_aware(&params))
-            .then_some(TaskPace::Long),
+        "analyze" => {
+            let params = arguments::<AnalyzeParams>(request)?;
+            match tokio::task::spawn_blocking(move || {
+                crate::tools::analyze_runs_type_aware(&params)
+            })
+            .await
+            {
+                Ok(type_aware) => type_aware.then_some(TaskPace::Long),
+                Err(error) => {
+                    tracing::warn!(%error, "the type-aware check of analyze failed; the call runs synchronously");
+                    None
+                }
+            }
+        }
         _ => None,
     }
 }
@@ -245,48 +258,86 @@ mod tests {
         CallToolRequestParams::new(name).with_arguments(arguments)
     }
 
-    #[test]
-    fn only_the_long_tools_run_as_tasks() {
+    #[tokio::test]
+    async fn only_the_long_tools_run_as_tasks() {
         let empty = serde_json::json!({});
         assert_eq!(
-            task_pace(&request("audit", empty.clone())),
+            task_pace(&request("audit", empty.clone())).await,
             Some(TaskPace::Short)
         );
         assert_eq!(
-            task_pace(&request("mutation_plan", empty.clone())),
+            task_pace(&request("mutation_plan", empty.clone())).await,
             Some(TaskPace::Short)
         );
         assert_eq!(
-            task_pace(&request("find_similar_code", empty.clone())),
+            task_pace(&request("find_similar_code", empty.clone())).await,
             Some(TaskPace::Long)
         );
-        assert_eq!(task_pace(&request("check_health", empty.clone())), None);
-        assert_eq!(task_pace(&request("code_execute", empty)), None);
+        assert_eq!(
+            task_pace(&request("check_health", empty.clone())).await,
+            None
+        );
+        assert_eq!(task_pace(&request("code_execute", empty)).await, None);
     }
 
-    #[test]
-    fn analyze_runs_as_a_task_only_with_type_aware_analysis() {
-        assert_eq!(task_pace(&request("analyze", serde_json::json!({}))), None);
+    #[tokio::test]
+    async fn analyze_runs_as_a_task_only_with_type_aware_analysis() {
+        assert_eq!(
+            task_pace(&request("analyze", serde_json::json!({}))).await,
+            None
+        );
         assert_eq!(
             task_pace(&request(
                 "analyze",
                 serde_json::json!({ "type_aware": false })
-            )),
+            ))
+            .await,
             None
         );
         assert_eq!(
             task_pace(&request(
                 "analyze",
                 serde_json::json!({ "type_aware": true })
-            )),
+            ))
+            .await,
             Some(TaskPace::Long)
         );
         assert_eq!(
             task_pace(&request(
                 "analyze",
                 serde_json::json!({ "type_aware_projects": ["tsconfig.json"] })
-            )),
+            ))
+            .await,
             Some(TaskPace::Long)
+        );
+    }
+
+    /// The project config turns type-aware analysis on for `analyze`, and the
+    /// typed route then runs the type-aware CLI. An explicit `type_aware:
+    /// false` keeps the call syntactic and synchronous.
+    #[tokio::test]
+    async fn analyze_runs_as_a_task_when_the_config_turns_type_aware_on() {
+        let project = tempfile::tempdir().expect("temp dir");
+        std::fs::create_dir(project.path().join(".git")).expect("git marker");
+        std::fs::write(project.path().join("package.json"), r#"{"name":"app"}"#)
+            .expect("package.json");
+        std::fs::write(
+            project.path().join(".fallowrc.json"),
+            r#"{"typeAware":{"enabled":true}}"#,
+        )
+        .expect("config");
+        let root = project.path().to_string_lossy().into_owned();
+        assert_eq!(
+            task_pace(&request("analyze", serde_json::json!({ "root": root }))).await,
+            Some(TaskPace::Long)
+        );
+        assert_eq!(
+            task_pace(&request(
+                "analyze",
+                serde_json::json!({ "root": root, "type_aware": false })
+            ))
+            .await,
+            None
         );
     }
 
@@ -296,12 +347,18 @@ mod tests {
         assert_eq!(ttl_ms(Duration::MAX), u64::MAX);
     }
 
-    #[test]
-    fn a_call_with_invalid_arguments_stays_synchronous() {
+    #[tokio::test]
+    async fn a_call_with_invalid_arguments_stays_synchronous() {
         let invalid = serde_json::json!({ "root": 42 });
-        assert_eq!(task_pace(&request("audit", invalid.clone())), None);
-        assert_eq!(task_pace(&request("mutation_plan", invalid.clone())), None);
-        assert_eq!(task_pace(&request("find_similar_code", invalid)), None);
+        assert_eq!(task_pace(&request("audit", invalid.clone())).await, None);
+        assert_eq!(
+            task_pace(&request("mutation_plan", invalid.clone())).await,
+            None
+        );
+        assert_eq!(
+            task_pace(&request("find_similar_code", invalid)).await,
+            None
+        );
     }
 
     #[tokio::test]

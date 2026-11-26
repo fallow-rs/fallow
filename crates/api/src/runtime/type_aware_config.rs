@@ -149,6 +149,36 @@ impl<'a> ConfigLocation<'a> {
     }
 }
 
+/// Whether `FALLOW_TYPE_AWARE` or the project config turns on type-aware
+/// analysis for a `dead-code` run with `analysis`, while its `type_aware`
+/// option leaves the choice open.
+///
+/// The typed runners refuse such a run with [`TYPE_AWARE_CONFIG_UNSUPPORTED`],
+/// so a caller can route the call to the `fallow` CLI before it starts. The
+/// precedence is that of the runners: an explicit option decides first and
+/// gives `false`, then the variable, then `typeAware.enabled`. The config file
+/// is read only when the variable leaves the choice open. A root, config path
+/// or config file that does not load gives `false`, so the runner reports
+/// that error itself.
+#[must_use]
+pub fn layers_turn_on_type_aware(analysis: &AnalysisOptions) -> bool {
+    if analysis.type_aware.enabled.is_some() {
+        return false;
+    }
+    let Ok(root) = crate::analysis_context::resolve_analysis_root(analysis.root.as_deref()) else {
+        return false;
+    };
+    let location = ConfigLocation {
+        root: &root,
+        config_path: analysis.config_path.as_deref(),
+        allow_remote_extends: analysis.allow_remote_extends,
+    };
+    matches!(
+        reject_config_type_aware_at(analysis, location, TypeAwareCommand::Analysis),
+        Err(err) if err.code.as_deref() == Some(TYPE_AWARE_CONFIG_UNSUPPORTED)
+    )
+}
+
 /// [`reject_config_type_aware`] for a caller without a resolved run. It
 /// reads the config file only when the environment leaves the choice open.
 pub(super) fn reject_config_type_aware_at(
@@ -340,6 +370,79 @@ mod tests {
         }
         // An explicit option decides before the variable, as before.
         assert!(dead_code_with_env(dir.path(), &[(TYPE_AWARE_ENV, "maybe")], Some(false)).is_ok());
+    }
+
+    fn analysis_at(root: &Path, env: &[(&str, &str)], enabled: Option<bool>) -> AnalysisOptions {
+        AnalysisOptions {
+            root: Some(root.to_path_buf()),
+            type_aware: TypeAwareOptions {
+                enabled,
+                ..TypeAwareOptions::default()
+            },
+            host: Some(fallow_config::HostInputs {
+                surface: fallow_config::Surface::Mcp,
+                env: fallow_config::EnvSnapshot::from_pairs(env, Some(root)),
+            }),
+            ..AnalysisOptions::default()
+        }
+    }
+
+    #[test]
+    fn layers_turn_on_type_aware_follows_the_runner_precedence() {
+        let plain = project();
+        assert!(!layers_turn_on_type_aware(&analysis_at(
+            plain.path(),
+            &[],
+            None
+        )));
+        assert!(layers_turn_on_type_aware(&analysis_at(
+            plain.path(),
+            &[(TYPE_AWARE_ENV, "1")],
+            None
+        )));
+        assert!(!layers_turn_on_type_aware(&analysis_at(
+            plain.path(),
+            &[(TYPE_AWARE_ENV, "1")],
+            Some(false)
+        )));
+
+        let configured = project();
+        std::fs::write(
+            configured.path().join(".fallowrc.json"),
+            r#"{"typeAware":{"enabled":true}}"#,
+        )
+        .expect("config");
+        assert!(layers_turn_on_type_aware(&analysis_at(
+            configured.path(),
+            &[],
+            None
+        )));
+        assert!(!layers_turn_on_type_aware(&analysis_at(
+            configured.path(),
+            &[(TYPE_AWARE_ENV, "0")],
+            None
+        )));
+        assert!(!layers_turn_on_type_aware(&analysis_at(
+            configured.path(),
+            &[],
+            Some(true)
+        )));
+    }
+
+    #[test]
+    fn a_config_that_does_not_load_gives_false() {
+        let broken = project();
+        std::fs::write(broken.path().join(".fallowrc.json"), "{ not json").expect("config");
+        assert!(!layers_turn_on_type_aware(&analysis_at(
+            broken.path(),
+            &[],
+            None
+        )));
+        assert!(!layers_turn_on_type_aware(&analysis_at(
+            Path::new("/fallow-no-such-root"),
+            &[],
+            None
+        )));
     }
 
     #[test]

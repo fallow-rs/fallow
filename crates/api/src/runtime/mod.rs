@@ -65,7 +65,7 @@ pub use trace::{
     benchmark_trace_graph_family_compact_json, run_trace_clone, run_trace_dependency,
     run_trace_error, run_trace_export, run_trace_file, run_trace_import_path,
 };
-pub use type_aware_config::TYPE_AWARE_CONFIG_UNSUPPORTED;
+pub use type_aware_config::{TYPE_AWARE_CONFIG_UNSUPPORTED, layers_turn_on_type_aware};
 
 use crate::{
     ComplexityOptions, ProgrammaticError,
