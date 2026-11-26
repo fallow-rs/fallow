@@ -504,6 +504,11 @@
             "status": "ignored",
             "reason": "The command reads no project. It accepts `--root` because a caller can pass it to each command.",
             "command": "telemetry"
+          },
+          {
+            "status": "ignored",
+            "reason": "The command reads no project. It accepts `--root` because a caller can pass it to each command.",
+            "command": "feedback"
           }
         ]
       }
@@ -563,6 +568,11 @@
             "status": "rejected",
             "message": "`fallow <command>` does not read `<option>`, so the option has no effect.",
             "command": "telemetry"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow <command>` does not read `<option>`, so the option has no effect.",
+            "command": "feedback"
           },
           {
             "status": "rejected",
@@ -1105,6 +1115,11 @@
             "status": "rejected",
             "message": "`fallow <command>` does not read `<option>`, so the option has no effect.",
             "command": "telemetry"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow <command>` does not read `<option>`, so the option has no effect.",
+            "command": "feedback"
           },
           {
             "status": "rejected",
@@ -2669,6 +2684,11 @@
             "status": "rejected",
             "message": "--ci, --fail-on-issues, --sarif-file, and --output-file are only valid with dead-code, architecture, dupes, health, security, or bare invocation",
             "command": "telemetry"
+          },
+          {
+            "status": "rejected",
+            "message": "--ci, --fail-on-issues, --sarif-file, and --output-file are only valid with dead-code, architecture, dupes, health, security, or bare invocation",
+            "command": "feedback"
           }
         ]
       }
@@ -18326,6 +18346,411 @@
         }
       ],
       "subcommands": []
+    },
+    {
+      "name": "feedback",
+      "path": "feedback",
+      "aliases": [],
+      "help_group": "Reference",
+      "about": "Send feedback to the Fallow maintainers as a GitHub issue",
+      "long_about": "Send feedback to the Fallow maintainers as a GitHub issue.\n\nWithout `--yes`, the command sends nothing: it prints the issue preview and a prefilled link. With `--yes`, the GitHub CLI (`gh`) creates a public issue on fallow-rs/fallow. The report holds the text that you give, plus the Fallow version and the operating system (`--no-diagnostics` or `DO_NOT_TRACK=1` leaves them out).",
+      "hidden": false,
+      "usage": "fallow feedback [OPTIONS] [MESSAGE]",
+      "always_json": false,
+      "exit_codes": [],
+      "positionals": [
+        {
+          "id": "message",
+          "index": 1,
+          "value_name": "MESSAGE",
+          "multiple": false,
+          "possible_values": [],
+          "default": null,
+          "help": "A short note. The first line becomes the issue title",
+          "long_help": null,
+          "hidden": false,
+          "required": false
+        }
+      ],
+      "options": [
+        {
+          "id": "kind",
+          "long": "--type",
+          "short": null,
+          "aliases": [],
+          "value_name": "KIND",
+          "value_names": [
+            "KIND"
+          ],
+          "value_optional": false,
+          "action": "set",
+          "takes_value": true,
+          "multiple": false,
+          "possible_values": [
+            {
+              "name": "bug",
+              "aliases": [],
+              "help": "A command failed, crashed or gave wrong output",
+              "hidden": false
+            },
+            {
+              "name": "false-positive",
+              "aliases": [],
+              "help": "Fallow reported code, a dependency or a file that is in use",
+              "hidden": false
+            },
+            {
+              "name": "false-negative",
+              "aliases": [],
+              "help": "Fallow missed a problem that is in the code",
+              "hidden": false
+            },
+            {
+              "name": "friction",
+              "aliases": [],
+              "help": "A task took more steps than it should, or the output was unclear",
+              "hidden": false
+            },
+            {
+              "name": "feature",
+              "aliases": [],
+              "help": "A capability that Fallow does not have",
+              "hidden": false
+            },
+            {
+              "name": "docs",
+              "aliases": [],
+              "help": "The docs or the help text were wrong or missing",
+              "hidden": false
+            }
+          ],
+          "default": null,
+          "env": null,
+          "help": "What kind of feedback this is (default: friction)",
+          "long_help": null,
+          "hidden": false,
+          "hidden_in_short_help": false,
+          "global": false,
+          "help_heading": "Input",
+          "required": false,
+          "conflicts_with": [],
+          "negates": null,
+          "negated_by": null
+        },
+        {
+          "id": "impact",
+          "long": "--impact",
+          "short": null,
+          "aliases": [],
+          "value_name": "IMPACT",
+          "value_names": [
+            "IMPACT"
+          ],
+          "value_optional": false,
+          "action": "set",
+          "takes_value": true,
+          "multiple": false,
+          "possible_values": [
+            {
+              "name": "blocked",
+              "aliases": [],
+              "help": "The task could not be completed",
+              "hidden": false
+            },
+            {
+              "name": "worked-around",
+              "aliases": [],
+              "help": "The task was completed with a workaround",
+              "hidden": false
+            },
+            {
+              "name": "minor",
+              "aliases": [],
+              "help": "The problem cost little time",
+              "hidden": false
+            }
+          ],
+          "default": null,
+          "env": null,
+          "help": "How much the problem cost",
+          "long_help": null,
+          "hidden": false,
+          "hidden_in_short_help": false,
+          "global": false,
+          "help_heading": "Input",
+          "required": false,
+          "conflicts_with": [],
+          "negates": null,
+          "negated_by": null
+        },
+        {
+          "id": "task",
+          "long": "--task",
+          "short": null,
+          "aliases": [],
+          "value_name": "TASK",
+          "value_names": [
+            "TASK"
+          ],
+          "value_optional": false,
+          "action": "set",
+          "takes_value": true,
+          "multiple": false,
+          "possible_values": [],
+          "default": null,
+          "env": null,
+          "help": "The task that you tried to do",
+          "long_help": null,
+          "hidden": false,
+          "hidden_in_short_help": false,
+          "global": false,
+          "help_heading": "Input",
+          "required": false,
+          "conflicts_with": [],
+          "negates": null,
+          "negated_by": null
+        },
+        {
+          "id": "command",
+          "long": "--command",
+          "short": null,
+          "aliases": [],
+          "value_name": "COMMAND",
+          "value_names": [
+            "COMMAND"
+          ],
+          "value_optional": false,
+          "action": "set",
+          "takes_value": true,
+          "multiple": false,
+          "possible_values": [],
+          "default": null,
+          "env": null,
+          "help": "The Fallow command that you ran",
+          "long_help": null,
+          "hidden": false,
+          "hidden_in_short_help": false,
+          "global": false,
+          "help_heading": "Input",
+          "required": false,
+          "conflicts_with": [],
+          "negates": null,
+          "negated_by": null
+        },
+        {
+          "id": "expected",
+          "long": "--expected",
+          "short": null,
+          "aliases": [],
+          "value_name": "EXPECTED",
+          "value_names": [
+            "EXPECTED"
+          ],
+          "value_optional": false,
+          "action": "set",
+          "takes_value": true,
+          "multiple": false,
+          "possible_values": [],
+          "default": null,
+          "env": null,
+          "help": "The result that you expected",
+          "long_help": null,
+          "hidden": false,
+          "hidden_in_short_help": false,
+          "global": false,
+          "help_heading": "Input",
+          "required": false,
+          "conflicts_with": [],
+          "negates": null,
+          "negated_by": null
+        },
+        {
+          "id": "actual",
+          "long": "--actual",
+          "short": null,
+          "aliases": [],
+          "value_name": "ACTUAL",
+          "value_names": [
+            "ACTUAL"
+          ],
+          "value_optional": false,
+          "action": "set",
+          "takes_value": true,
+          "multiple": false,
+          "possible_values": [],
+          "default": null,
+          "env": null,
+          "help": "The result that you got",
+          "long_help": null,
+          "hidden": false,
+          "hidden_in_short_help": false,
+          "global": false,
+          "help_heading": "Input",
+          "required": false,
+          "conflicts_with": [],
+          "negates": null,
+          "negated_by": null
+        },
+        {
+          "id": "agent",
+          "long": "--agent",
+          "short": null,
+          "aliases": [],
+          "value_name": "AGENT",
+          "value_names": [
+            "AGENT"
+          ],
+          "value_optional": false,
+          "action": "set",
+          "takes_value": true,
+          "multiple": false,
+          "possible_values": [],
+          "default": null,
+          "env": null,
+          "help": "The name of the coding agent that writes the report, such as `claude-code`",
+          "long_help": null,
+          "hidden": false,
+          "hidden_in_short_help": false,
+          "global": false,
+          "help_heading": "Input",
+          "required": false,
+          "conflicts_with": [],
+          "negates": null,
+          "negated_by": null
+        },
+        {
+          "id": "input_json",
+          "long": "--input-json",
+          "short": null,
+          "aliases": [],
+          "value_name": "FILE",
+          "value_names": [
+            "FILE"
+          ],
+          "value_optional": false,
+          "action": "set",
+          "takes_value": true,
+          "multiple": false,
+          "possible_values": [],
+          "default": null,
+          "env": null,
+          "help": "Read the report from a JSON file, or from stdin with `-`. A flag overrides the same field in the file",
+          "long_help": null,
+          "hidden": false,
+          "hidden_in_short_help": false,
+          "global": false,
+          "help_heading": "Input",
+          "required": false,
+          "conflicts_with": [],
+          "negates": null,
+          "negated_by": null
+        },
+        {
+          "id": "yes",
+          "long": "--yes",
+          "short": null,
+          "aliases": [],
+          "value_name": null,
+          "value_names": [],
+          "value_optional": false,
+          "action": "set-true",
+          "takes_value": false,
+          "multiple": false,
+          "possible_values": [],
+          "default": null,
+          "env": null,
+          "help": "Create the issue with the GitHub CLI (`gh`). Without this flag the command prints a preview and a prefilled link, and sends nothing",
+          "long_help": null,
+          "hidden": false,
+          "hidden_in_short_help": false,
+          "global": false,
+          "help_heading": "Run",
+          "required": false,
+          "conflicts_with": [
+            "--dry-run"
+          ],
+          "negates": null,
+          "negated_by": null
+        },
+        {
+          "id": "confirm",
+          "long": "--confirm",
+          "short": null,
+          "aliases": [],
+          "value_name": "DIGEST",
+          "value_names": [
+            "DIGEST"
+          ],
+          "value_optional": false,
+          "action": "set",
+          "takes_value": true,
+          "multiple": false,
+          "possible_values": [],
+          "default": null,
+          "env": null,
+          "help": "Create the issue only when the report still has this digest, the `feedback.digest` of the preview. A changed report exits 2",
+          "long_help": null,
+          "hidden": false,
+          "hidden_in_short_help": false,
+          "global": false,
+          "help_heading": "Run",
+          "required": false,
+          "conflicts_with": [],
+          "negates": null,
+          "negated_by": null
+        },
+        {
+          "id": "dry_run",
+          "long": "--dry-run",
+          "short": null,
+          "aliases": [],
+          "value_name": null,
+          "value_names": [],
+          "value_optional": false,
+          "action": "set-true",
+          "takes_value": false,
+          "multiple": false,
+          "possible_values": [],
+          "default": null,
+          "env": null,
+          "help": "Print the preview and the prefilled link only. This is the default",
+          "long_help": null,
+          "hidden": false,
+          "hidden_in_short_help": false,
+          "global": false,
+          "help_heading": "Run",
+          "required": false,
+          "conflicts_with": [],
+          "negates": null,
+          "negated_by": null
+        },
+        {
+          "id": "no_diagnostics",
+          "long": "--no-diagnostics",
+          "short": null,
+          "aliases": [],
+          "value_name": null,
+          "value_names": [],
+          "value_optional": false,
+          "action": "set-true",
+          "takes_value": false,
+          "multiple": false,
+          "possible_values": [],
+          "default": null,
+          "env": null,
+          "help": "Leave out the Fallow version and the operating system",
+          "long_help": null,
+          "hidden": false,
+          "hidden_in_short_help": false,
+          "global": false,
+          "help_heading": "Run",
+          "required": false,
+          "conflicts_with": [],
+          "negates": null,
+          "negated_by": null
+        }
+      ],
+      "subcommands": []
     }
   ],
   "exit_codes": [
@@ -26850,6 +27275,24 @@
       "read_only": true,
       "modifies_source": false,
       "code_mode_alias": "explain"
+    },
+    {
+      "name": "submit_feedback",
+      "kind": "introspection",
+      "description": "File feedback about Fallow as a public GitHub issue; previews by default, creates it only with submit and the preview digest",
+      "cli_command": "fallow feedback <message> --format json --quiet",
+      "key_params": [
+        "message",
+        "type",
+        "impact",
+        "submit",
+        "confirm"
+      ],
+      "license": "free",
+      "license_note": null,
+      "read_only": false,
+      "modifies_source": false,
+      "code_mode_alias": null
     },
     {
       "name": "fix_preview",

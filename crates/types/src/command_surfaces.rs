@@ -210,6 +210,7 @@ pub const COMMANDS_WITHOUT_ANALYSIS_ENVELOPE: &[(&str, &str)] = &[
     ("license", "license management"),
     ("cloud", "Fallow Cloud login and logout"),
     ("telemetry", "telemetry settings"),
+    ("feedback", "files a feedback report as a GitHub issue"),
     ("schema", "capability manifest"),
 ];
 

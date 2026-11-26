@@ -81,6 +81,7 @@ Runtime coverage:
 
 Reference:
   schema         Dump the CLI interface as machine-readable JSON
+  feedback       Report a Fallow problem as a GitHub issue
   help           Print this message or the help of a command"
     };
 }

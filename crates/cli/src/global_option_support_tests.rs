@@ -307,7 +307,7 @@ fn analysis_commands_without_a_regression_baseline_reject_the_regression_options
 /// The pairs of a file option and a command that ignore the option on
 /// purpose. `audit-cache` must clean up when the config does not load
 /// (`audit_cache_prune_ignores_a_config_that_does_not_load`). The schema
-/// commands and `telemetry` read no project, and accept `--root` because a
+/// commands, `telemetry` and `feedback` read no project, and accept `--root` because a
 /// caller can pass it to each command
 /// (`rule_pack_schema_matches_legacy_top_level_command`).
 const INTENTIONALLY_IGNORED: &[(&str, &str)] = &[
@@ -317,6 +317,7 @@ const INTENTIONALLY_IGNORED: &[(&str, &str)] = &[
     ("--root", "rule-pack-schema"),
     ("--root", "schema"),
     ("--root", "telemetry"),
+    ("--root", "feedback"),
 ];
 
 /// A command that ignores an option that names a file accepts the command

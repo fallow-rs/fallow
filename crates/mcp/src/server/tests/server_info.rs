@@ -81,7 +81,8 @@ fn all_tools_registered() {
     assert!(names.contains(&"mutation_plan".to_string()));
     assert!(names.contains(&"mutation_inspect".to_string()));
     assert!(names.contains(&"mutation_tasks".to_string()));
-    assert_eq!(tools.len(), 44);
+    assert!(names.contains(&"submit_feedback".to_string()));
+    assert_eq!(tools.len(), 45);
 }
 
 #[test]
@@ -134,6 +135,15 @@ fn read_only_tools_have_annotations() {
         if read_only.contains(&name.as_str()) {
             let ann = tool.annotations.as_ref().expect("annotations");
             assert_eq!(ann.read_only_hint, Some(true), "{name} should be read-only");
+        } else if name == EXTERNAL_WRITE_TOOL {
+            let ann = tool.annotations.as_ref().expect("annotations");
+            assert_eq!(
+                ann.read_only_hint,
+                Some(false),
+                "{name} can create an issue"
+            );
+            assert_eq!(ann.destructive_hint, Some(false), "{name} deletes nothing");
+            assert_eq!(ann.open_world_hint, Some(true), "{name} reaches GitHub");
         } else if !FILE_WRITING_TOOLS.contains(&name.as_str()) {
             assert_eq!(
                 name, "fix_apply",
@@ -143,6 +153,9 @@ fn read_only_tools_have_annotations() {
         }
     }
 }
+
+/// The tool that can create a public GitHub issue. It writes no local file.
+const EXTERNAL_WRITE_TOOL: &str = "submit_feedback";
 
 /// Tools that write a file when the caller asks for it: a baseline, a
 /// regression baseline or a snapshot. They do not change project source.

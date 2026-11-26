@@ -309,6 +309,7 @@ pub fn telemetry_workflow_for_command(
             | Command::CiTemplate { .. }
             | Command::Migrate { .. }
             | Command::Telemetry { .. }
+            | Command::Feedback(_)
             | Command::TypeAware { .. }
             | Command::Doctor
             | Command::SetupHooks { .. }
@@ -316,4 +317,17 @@ pub fn telemetry_workflow_for_command(
             | Command::Baselines { .. },
         ) => telemetry::Workflow::Setup,
     }
+}
+
+pub fn run_telemetry_command_if_requested(
+    cli: &mut Cli,
+    output: fallow_config::OutputFormat,
+    json_style: crate::json_style::JsonStyle,
+) -> Option<ExitCode> {
+    if matches!(cli.command, Some(Command::Telemetry { .. }))
+        && let Some(Command::Telemetry { subcommand }) = cli.command.take()
+    {
+        return Some(telemetry::run(subcommand.into(), output, json_style));
+    }
+    None
 }

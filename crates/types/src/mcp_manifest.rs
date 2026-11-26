@@ -61,8 +61,8 @@ pub struct McpToolInfo {
     /// tool can write a file: `fix_apply` changes source files, and
     /// `analyze`, `check_changed`, `find_dupes` and `check_health` write a
     /// report or baseline file (a baseline, regression baseline or snapshot)
-    /// when the caller asks for one. Use `modifies_source` to tell the two
-    /// cases apart.
+    /// when the caller asks for one. `submit_feedback` writes no file but can
+    /// create a GitHub issue. Use `modifies_source` to tell the cases apart.
     pub read_only: bool,
     /// Whether the tool edits source files of the project. `fix_apply` is
     /// `true`. A tool that writes only a report or baseline file on request
@@ -505,6 +505,18 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         read_only: true,
         modifies_source: false,
         code_mode_alias: Some("explain"),
+    },
+    McpToolInfo {
+        name: "submit_feedback",
+        kind: "introspection",
+        description: "File feedback about Fallow as a public GitHub issue; previews by default, creates it only with submit and the preview digest",
+        cli_command: Some("fallow feedback <message> --format json --quiet"),
+        key_params: &["message", "type", "impact", "submit", "confirm"],
+        license: McpToolLicense::Free,
+        license_note: None,
+        read_only: false,
+        modifies_source: false,
+        code_mode_alias: None,
     },
     McpToolInfo {
         name: "fix_preview",
@@ -1367,6 +1379,15 @@ pub const CAPABILITY_PARITY: &[CapabilityParityRow] = &[
         ),
     },
     CapabilityParityRow {
+        capability: "feedback issue",
+        api_runner: None,
+        napi_export: None,
+        mcp_tool: Some("submit_feedback"),
+        omission_note: Some(
+            "Feedback report for the Fallow maintainers. MCP shells out to `fallow feedback`, which calls the GitHub CLI; no run_* runner and no napi export.",
+        ),
+    },
+    CapabilityParityRow {
         capability: "auto-fix preview",
         api_runner: None,
         napi_export: None,
@@ -1572,6 +1593,7 @@ mod tests {
             "check_changed",
             "find_dupes",
             "check_health",
+            "submit_feedback",
         ];
         for tool in MCP_TOOLS {
             assert_eq!(

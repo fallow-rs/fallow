@@ -2940,6 +2940,115 @@
       ]
     },
     {
+      "name": "feedback",
+      "description": "Send feedback to the Fallow maintainers as a GitHub issue",
+      "flags": [
+        {
+          "name": "message",
+          "type": "string",
+          "required": false,
+          "description": "A short note. The first line becomes the issue title"
+        },
+        {
+          "name": "--type",
+          "type": "string",
+          "required": false,
+          "description": "What kind of feedback this is (default: friction)",
+          "possible_values": [
+            "bug",
+            "false-positive",
+            "false-negative",
+            "friction",
+            "feature",
+            "docs"
+          ]
+        },
+        {
+          "name": "--impact",
+          "type": "string",
+          "required": false,
+          "description": "How much the problem cost",
+          "possible_values": [
+            "blocked",
+            "worked-around",
+            "minor"
+          ]
+        },
+        {
+          "name": "--task",
+          "type": "string",
+          "required": false,
+          "description": "The task that you tried to do"
+        },
+        {
+          "name": "--command",
+          "type": "string",
+          "required": false,
+          "description": "The Fallow command that you ran"
+        },
+        {
+          "name": "--expected",
+          "type": "string",
+          "required": false,
+          "description": "The result that you expected"
+        },
+        {
+          "name": "--actual",
+          "type": "string",
+          "required": false,
+          "description": "The result that you got"
+        },
+        {
+          "name": "--agent",
+          "type": "string",
+          "required": false,
+          "description": "The name of the coding agent that writes the report, such as `claude-code`"
+        },
+        {
+          "name": "--input-json",
+          "type": "string",
+          "required": false,
+          "description": "Read the report from a JSON file, or from stdin with `-`. A flag overrides the same field in the file"
+        },
+        {
+          "name": "--yes",
+          "type": "bool",
+          "required": false,
+          "description": "Create the issue with the GitHub CLI (`gh`). Without this flag the command prints a preview and a prefilled link, and sends nothing",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
+          "name": "--confirm",
+          "type": "string",
+          "required": false,
+          "description": "Create the issue only when the report still has this digest, the `feedback.digest` of the preview. A changed report exits 2"
+        },
+        {
+          "name": "--dry-run",
+          "type": "bool",
+          "required": false,
+          "description": "Print the preview and the prefilled link only. This is the default",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
+          "name": "--no-diagnostics",
+          "type": "bool",
+          "required": false,
+          "description": "Leave out the Fallow version and the operating system",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        }
+      ]
+    },
+    {
       "name": "ci-template",
       "description": "Print or vendor CI integration templates",
       "flags": []
@@ -8902,6 +9011,24 @@
         "read_only": true,
         "modifies_source": false,
         "code_mode_alias": "explain"
+      },
+      {
+        "name": "submit_feedback",
+        "kind": "introspection",
+        "description": "File feedback about Fallow as a public GitHub issue; previews by default, creates it only with submit and the preview digest",
+        "cli_command": "fallow feedback <message> --format json --quiet",
+        "key_params": [
+          "message",
+          "type",
+          "impact",
+          "submit",
+          "confirm"
+        ],
+        "license": "free",
+        "license_note": null,
+        "read_only": false,
+        "modifies_source": false,
+        "code_mode_alias": null
       },
       {
         "name": "fix_preview",

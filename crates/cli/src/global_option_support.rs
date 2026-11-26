@@ -265,6 +265,7 @@ const NO_PROJECT_COMMANDS: &[CommandSupport] = &[
     rejected("rule-pack-schema", NOT_READ_MESSAGE),
     rejected("schema", NOT_READ_MESSAGE),
     rejected("telemetry", NOT_READ_MESSAGE),
+    rejected("feedback", NOT_READ_MESSAGE),
 ];
 
 /// The commands that read no project. A caller can pass `--root` to each
@@ -275,6 +276,7 @@ const NO_PROJECT_ROOT: &[CommandSupport] = &[
     ignored("rule-pack-schema", NO_PROJECT_ROOT_REASON),
     ignored("schema", NO_PROJECT_ROOT_REASON),
     ignored("telemetry", NO_PROJECT_ROOT_REASON),
+    ignored("feedback", NO_PROJECT_ROOT_REASON),
 ];
 
 /// The commands that read a project but load no config file.
@@ -583,6 +585,7 @@ pub const GLOBAL_OPTION_SUPPORT: &[GlobalOptionSupport] = &[
             &[
                 rejected("doctor", DOCTOR_OUTPUT_FILE_MESSAGE),
                 rejected("telemetry", OUTPUT_GATE_MESSAGE),
+                rejected("feedback", OUTPUT_GATE_MESSAGE),
             ],
         ],
     ),

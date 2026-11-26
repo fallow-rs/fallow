@@ -32,10 +32,11 @@ use crate::tools::{
     run_get_hot_paths, run_get_importance, run_get_token_blast_radius, run_guard, run_health,
     run_impact, run_impact_all, run_impact_closure, run_inspect_similar_code, run_list_boundaries,
     run_list_suppressions, run_mutation_inspect, run_mutation_plan, run_mutation_tasks,
-    run_project_info, run_recommend, run_rust_call, run_security_candidates, run_symbol_impact,
-    run_symbol_trace, run_trace_clone_tool, run_trace_dependency_tool, run_trace_error_tool,
-    run_trace_export_tool, run_trace_file_tool, run_trace_import_path_tool, rust_manifest,
-    track_call, unsupported_tool_body, with_mixed_root_warning, with_request_cancellation,
+    run_project_info, run_recommend, run_rust_call, run_security_candidates, run_submit_feedback,
+    run_symbol_impact, run_symbol_trace, run_trace_clone_tool, run_trace_dependency_tool,
+    run_trace_error_tool, run_trace_export_tool, run_trace_file_tool, run_trace_import_path_tool,
+    rust_manifest, track_call, unsupported_tool_body, with_mixed_root_warning,
+    with_request_cancellation,
 };
 
 #[cfg(test)]
@@ -350,6 +351,20 @@ impl FallowMcp {
             root.as_deref(),
             run_find_dupes(&self.binary, params.0).await,
         )
+    }
+
+    /// File feedback about Fallow (a false positive, false negative, bug, dead end, docs gap or missing feature) as a public GitHub issue on fallow-rs/fallow. By default it sends nothing and returns `feedback.status: "preview"` with the issue `title`, `body`, `digest` and a prefilled `new_issue_url`. Show the preview to the user. Only after the user approves, call again with `submit: true` and `confirm` set to the preview `digest`. Then `gh` creates the issue under the user's account, and `issue_url` is the receipt to give the user. An error result with `status: "manual"` means `gh` is missing or signed out; give the user `new_issue_url`. Never put source code, secrets or private names in the text.
+    #[tool(annotations(
+        read_only_hint = false,
+        destructive_hint = false,
+        idempotent_hint = false,
+        open_world_hint = true
+    ))]
+    async fn submit_feedback(
+        &self,
+        params: Parameters<crate::params::SubmitFeedbackParams>,
+    ) -> Result<CallToolResult, McpError> {
+        run_submit_feedback(&self.binary, params.0).await
     }
 
     /// Preview auto-fixes without modifying any files. Shows what would be changed: which unused exports would be removed, which unused dependencies would be deleted from package.json, which unused enum members would be removed, which unused pnpm catalog entries would be cleaned up, and which duplicate-export `ignoreExports` rules would be added to the fallow config file. For `add-to-config` actions, each fix entry carries a `proposed_diff` field with the unified-diff preview of the proposed config write. When no fallow config exists outside a monorepo subpackage, fix_apply would CREATE `.fallowrc.json` using `fallow init`'s framework-aware scaffolding (`$schema`, `entry`, `ignorePatterns`, etc.) and layer the `ignoreExports` rules on top; preview entries on that path carry `created_files: [".fallowrc.json"]`. Set `no_create_config: true` to skip the config-creation path with `skip_reason: "no_create_config"`; source-file previews are unaffected. When a source file's xxh3 content hash at preview time differs from the hash captured during the in-process analysis (a concurrent source edit), the per-file entry is emitted with `skip_reason: "content_changed"` and the envelope's top-level `skipped_content_changed` count is incremented; re-run after refreshing analysis. When a source file mixes CRLF and bare-LF line endings, the per-file entry is emitted with `skip_reason: "mixed_line_endings"` and the envelope's top-level `skipped_mixed_line_endings` count is incremented; this skip is NOT self-healing because re-running fallow alone does not normalize the file. The agent must run `dos2unix <path>` (or instruct the user to set `git config core.autocrlf input` and re-checkout) before re-running. When an unused export lives in a test, mock, or fixture directory, or in a file that itself has an unresolved import, its removal is withheld as low confidence because the consumer may be invisible to static analysis: the per-file entry carries `skip_reason: "low_confidence_off_graph"` or `"low_confidence_unresolved_imports"` and the envelope's top-level `skipped_low_confidence_exports` count is incremented. A finding carrying `reachability_caveats` (a file the run did not fully analyze may hold the crediting reference) is withheld the same way, `remove-dependency`, `remove-enum-member` and `remove-class-member` too, under `skip_reason: "low_confidence_incomplete_analysis"`, counted by `skipped_low_confidence_dependencies` and `skipped_low_confidence_members` (which counts both member kinds). Unlike the two skips above these are INTENTIONAL and do NOT change the exit code; the finding stays reported by `fallow dead-code` for manual confirmation. Supports workspace scoping and performance tuning (no_cache, threads).

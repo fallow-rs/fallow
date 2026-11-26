@@ -486,6 +486,7 @@ pub fn reject_global_option(cli: &Cli, fmt: &FormatConfig, message: &str) -> Exi
                     | Command::PluginSchema
                     | Command::RulePackSchema
                     | Command::Telemetry { .. }
+                    | Command::Feedback(_)
                     | Command::Doctor
             )
         );

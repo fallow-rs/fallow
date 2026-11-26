@@ -239,7 +239,7 @@ pub fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> 
         Command::Cloud { subcommand } => {
             inspect_dispatch::dispatch_cloud(subcommand, output, dispatch.json_style)
         }
-        Command::Telemetry { .. } => unreachable!("handled before root validation"),
+        Command::Telemetry { .. } | Command::Feedback(_) => unreachable!("handled before dispatch"),
         Command::Coverage { subcommand } => dispatch_coverage_command(dispatch, &subcommand),
         setup_hooks @ Command::SetupHooks { .. } => {
             dispatch_setup_hooks_command(&setup_hooks, dispatch)
