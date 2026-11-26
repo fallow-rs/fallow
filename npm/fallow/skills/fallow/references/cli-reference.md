@@ -2264,9 +2264,9 @@ These are global flags with behavior specific to bare `fallow` combined mode.
 | `FALLOW_VERIFY_CACHE_DIR` | Override where the lazy-verify sentinel file is written. Cascade is platform-pkg-dir, then this override, then `$XDG_CACHE_HOME/fallow/sentinels/` (Linux/macOS) or `%LOCALAPPDATA%\fallow\sentinels\` (Windows). Useful when the platform pkg dir is read-only (yarn PnP, Docker layered images, pnpm verify-store). |
 | `FALLOW_VERIFY_LOG` | Set to `1`, `true`, or `yes` to emit one structured stderr line per verify outcome (`fallow-verify outcome=ok cache=hit sentinel=...`). Off by default so MCP stdout/stderr stay clean; enable for CI diagnostic logs. |
 | `FALLOW_TELEMETRY` | Opt-in product telemetry mode, off by default: `off`/`on`/`inspect` (plus `0`/`1`/`true`/`false`/`disabled`/`enabled`/`debug`/`log`). `inspect` prints the exact payload to stderr without sending. Wins over the user telemetry config. |
-| `FALLOW_TELEMETRY_DISABLED` | Admin/fleet telemetry kill switch (top precedence, with `DO_NOT_TRACK`). Truthy (`1`/`true`/`yes`/`on`) hard-disables telemetry and refuses `fallow telemetry enable`. |
+| `FALLOW_TELEMETRY_DISABLED` | Admin/fleet telemetry kill switch (top precedence, with `DO_NOT_TRACK`). Any value except empty, `0`, `false`, `no` or `off` hard-disables telemetry and refuses `fallow telemetry enable`. |
 | `FALLOW_TELEMETRY_DEBUG` | Forces inspect mode; outranks `FALLOW_TELEMETRY`. |
-| `DO_NOT_TRACK` | Honored as a top-precedence telemetry kill switch (consoledonottrack.com convention). |
+| `DO_NOT_TRACK` | Top-precedence telemetry kill switch (consoledonottrack.com convention). Any value except empty, `0`, `false`, `no` or `off` disables telemetry. |
 | `FALLOW_AGENT_SOURCE` | Declare the calling agent for telemetry classification (only used when telemetry is enabled; never enables it): `codex`, `claude_code`, `cursor`, `copilot`, `opencode`, `aider`, `roo`, `windsurf`, `gemini` (aliases `gemini_cli`/`antigravity`), `cline`, `continue`, `zed`, `goose`, `other_known`, `unknown`, `none`. Unrecognized values are ignored. |
 | `GITLAB_TOKEN` | GitLab CI: project access token with `api` scope (for MR comments/reviews; `CI_JOB_TOKEN` is read-only for MR notes in the official GitLab API). |
 

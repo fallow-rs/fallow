@@ -18215,6 +18215,74 @@
             }
           ],
           "subcommands": []
+        },
+        {
+          "name": "record",
+          "path": "telemetry record",
+          "aliases": [],
+          "help_group": null,
+          "about": "Record one in-process MCP tool call. The MCP server runs this",
+          "long_about": null,
+          "hidden": true,
+          "usage": "fallow telemetry record [OPTIONS] --duration-ms <DURATION_MS>",
+          "always_json": null,
+          "exit_codes": [],
+          "positionals": [],
+          "options": [
+            {
+              "id": "duration_ms",
+              "long": "--duration-ms",
+              "short": null,
+              "aliases": [],
+              "value_name": "DURATION_MS",
+              "value_names": [
+                "DURATION_MS"
+              ],
+              "value_optional": false,
+              "action": "set",
+              "takes_value": true,
+              "multiple": false,
+              "possible_values": [],
+              "default": null,
+              "env": null,
+              "help": "How long the tool call took",
+              "long_help": null,
+              "hidden": false,
+              "hidden_in_short_help": false,
+              "global": false,
+              "help_heading": null,
+              "required": true,
+              "conflicts_with": [],
+              "negates": null,
+              "negated_by": null
+            },
+            {
+              "id": "failed",
+              "long": "--failed",
+              "short": null,
+              "aliases": [],
+              "value_name": null,
+              "value_names": [],
+              "value_optional": false,
+              "action": "set-true",
+              "takes_value": false,
+              "multiple": false,
+              "possible_values": [],
+              "default": null,
+              "env": null,
+              "help": "The tool call returned an error",
+              "long_help": null,
+              "hidden": false,
+              "hidden_in_short_help": false,
+              "global": false,
+              "help_heading": null,
+              "required": false,
+              "conflicts_with": [],
+              "negates": null,
+              "negated_by": null
+            }
+          ],
+          "subcommands": []
         }
       ]
     },
@@ -18620,7 +18688,7 @@
       "name": "FALLOW_TELEMETRY_DISABLED",
       "group": "telemetry",
       "default": null,
-      "description": "Admin/fleet kill switch: truthy values hard-disable telemetry and refuse fallow telemetry enable."
+      "description": "Admin/fleet kill switch: any value except empty, 0, false, no or off hard-disables telemetry and refuses fallow telemetry enable."
     },
     {
       "name": "FALLOW_TELEMETRY_DEBUG",
@@ -18638,7 +18706,7 @@
       "name": "DO_NOT_TRACK",
       "group": "telemetry",
       "default": null,
-      "description": "Honored as a top-precedence telemetry kill switch (consoledonottrack.com convention)."
+      "description": "Top-precedence telemetry kill switch (consoledonottrack.com convention): any value except empty, 0, false, no or off disables telemetry."
     },
     {
       "name": "FALLOW_BIN",

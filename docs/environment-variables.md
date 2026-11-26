@@ -182,9 +182,9 @@ Telemetry is opt-in and off by default. See [telemetry.md](telemetry.md) for the
 | Variable | Description | Default | Example |
 | --- | --- | --- | --- |
 | `FALLOW_TELEMETRY` | Telemetry mode: `off`, `on`, or `inspect` (print the payload to stderr without sending). Wins over the user config file. | `off` | `FALLOW_TELEMETRY=inspect` |
-| `FALLOW_TELEMETRY_DISABLED` | Admin/fleet kill switch: truthy values hard-disable telemetry and refuse `fallow telemetry enable`. | unset | `FALLOW_TELEMETRY_DISABLED=1` |
+| `FALLOW_TELEMETRY_DISABLED` | Admin/fleet kill switch: any value except empty, `0`, `false`, `no` or `off` hard-disables telemetry and refuses `fallow telemetry enable`. | unset | `FALLOW_TELEMETRY_DISABLED=1` |
 | `FALLOW_TELEMETRY_DEBUG` | Truthy values alias `FALLOW_TELEMETRY=inspect`. | unset | `FALLOW_TELEMETRY_DEBUG=1` |
-| `DO_NOT_TRACK` | Honored as a top-precedence telemetry kill switch ([consoledonottrack.com](https://consoledonottrack.com) convention). | unset | `DO_NOT_TRACK=1` |
+| `DO_NOT_TRACK` | Top-precedence telemetry kill switch ([consoledonottrack.com](https://consoledonottrack.com) convention): any value except empty, `0`, `false`, `no` or `off` disables telemetry. | unset | `DO_NOT_TRACK=1` |
 
 ## Internal markers
 

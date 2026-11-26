@@ -5,6 +5,7 @@
 //! file in `tests/`.
 
 mod cloud_runtime_context;
+mod in_process_telemetry;
 mod inspect_target_cloud;
 mod resources;
 // The surface differential builds `file://` URIs from Unix paths.

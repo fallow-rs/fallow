@@ -19,6 +19,13 @@ use sha2::{Digest, Sha256};
 use crate::api::{api_url, try_api_agent_with_timeout};
 use crate::{exit_codes, json_style::JsonStyle};
 
+#[path = "telemetry_mcp_record.rs"]
+mod mcp_record;
+#[path = "telemetry_spool_drain.rs"]
+mod spool_drain;
+pub use mcp_record::McpCall;
+use spool_drain::drain_spool_file;
+
 const CONFIG_SCHEMA_VERSION: u8 = 2;
 const TELEMETRY_SCHEMA_VERSION: u8 = 2;
 const CONNECT_TIMEOUT_SECS: u64 = 1;
@@ -55,8 +62,6 @@ const SPOOL_FILE_NAME: &str = "telemetry-spool.jsonl";
 /// Advisory `flock` sidecar serialising drains/trims across concurrent processes.
 const SPOOL_LOCK_NAME: &str = "telemetry-spool.lock";
 
-const DO_NOT_TRACK: &str = "DO_NOT_TRACK";
-const DISABLED_ENV: &str = "FALLOW_TELEMETRY_DISABLED";
 const MODE_ENV: &str = "FALLOW_TELEMETRY";
 const DEBUG_ENV: &str = "FALLOW_TELEMETRY_DEBUG";
 const AGENT_SOURCE_ENV: &str = "FALLOW_AGENT_SOURCE";
@@ -613,6 +618,7 @@ pub enum TelemetryCommand {
     Enable,
     Disable,
     Inspect { example: bool },
+    Record(McpCall),
 }
 
 #[expect(
@@ -771,10 +777,6 @@ pub enum ConfigShape {
     Unknown,
 }
 
-#[expect(
-    dead_code,
-    reason = "telemetry schema reserves v1 destination values before every sink is wired"
-)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum OutputDestination {
@@ -1020,6 +1022,7 @@ pub fn run(command: TelemetryCommand, output: OutputFormat, json_style: JsonStyl
         TelemetryCommand::Enable => set_enabled(true, output, json_style),
         TelemetryCommand::Disable => set_enabled(false, output, json_style),
         TelemetryCommand::Inspect { example } => inspect(example, output, json_style),
+        TelemetryCommand::Record(call) => mcp_record::record_mcp_call(call),
     }
 }
 
@@ -1339,8 +1342,8 @@ fn inspect(example: bool, output: OutputFormat, json_style: JsonStyle) -> ExitCo
 }
 
 /// Point-in-time copy of every per-run accumulator `build_workflow_event`
-/// consumes. Production snapshots the process globals once per event; tests
-/// pass the test-only `RunAccumulatorSnapshot::UNSET` so the assertion is deterministic
+/// consumes. Production snapshots the process globals once per event; tests and
+/// the MCP record command pass `RunAccumulatorSnapshot::UNSET` so it is deterministic
 /// even while a PARALLEL test drives a real command path (e.g.
 /// `load_config_for_analysis` -> `note_config_shape`) that mutates the
 /// globals mid-test. A reset-before-read guard cannot close that race.
@@ -1358,7 +1361,6 @@ struct RunAccumulatorSnapshot {
 }
 
 impl RunAccumulatorSnapshot {
-    #[cfg(test)]
     const UNSET: Self = Self {
         failure_reason: None,
         config_shape: None,
@@ -1786,7 +1788,7 @@ fn parse_env_mode(value: &str) -> Option<EffectiveMode> {
 }
 
 fn admin_disabled() -> bool {
-    env_truthy(DO_NOT_TRACK) || env_truthy(DISABLED_ENV)
+    fallow_types::telemetry_opt_out::telemetry_opted_out()
 }
 
 fn debug_enabled() -> bool {
@@ -1794,7 +1796,6 @@ fn debug_enabled() -> bool {
 }
 
 /// True when env var `name` holds a truthy value (`1`, `true`, `yes`, `on`).
-/// Shared with the update check and the cache notice opt-out gate.
 pub fn env_truthy(name: &str) -> bool {
     std::env::var(name).is_ok_and(|value| {
         matches!(
@@ -1987,64 +1988,6 @@ pub fn flush_spool_in_background() {
         let install_id = resolve_install_id_for_send();
         drain_spool_file(&spool, install_id.as_deref(), post_telemetry_payload);
     });
-}
-
-/// POST spooled events oldest-first and drop the delivered ones in place.
-///
-/// Generic over the uploader so tests can inject a fake without touching the
-/// network, and parameterized on the resolved install grouping token so tests
-/// never read the real env/config dir (the live resolution happens at the
-/// [`flush_spool_in_background`] spawn site). The flock is held for the whole drain so a concurrent drain or trim
-/// cannot rewrite the spool underneath it. Events are delivered oldest-first and
-/// the drain stops at the first POST failure (a likely-unreachable endpoint), so
-/// the removed set is always a prefix; the file is rewritten to the undelivered
-/// tail (capped, in case it grew while the endpoint was down). Crucially, if the
-/// thread is abandoned at process exit mid-upload, no rewrite runs and the spool
-/// is simply retried next run, bounded meanwhile by [`trim_spool_if_oversized`]
-/// rather than by this function completing.
-fn drain_spool_file<P>(spool: &Path, install_id: Option<&str>, mut post: P)
-where
-    P: FnMut(&serde_json::Value, Option<&str>, Option<&str>) -> Result<(), String>,
-{
-    let lock_path = spool.with_file_name(SPOOL_LOCK_NAME);
-    let Some(_lock) = SpoolLock::try_acquire(&lock_path) else {
-        return;
-    };
-    let Ok(contents) = std::fs::read_to_string(spool) else {
-        return;
-    };
-    let lines: Vec<&str> = contents
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .collect();
-    if lines.is_empty() {
-        let _ = std::fs::remove_file(spool);
-        return;
-    }
-
-    let mut removed = 0usize;
-    for line in &lines {
-        match parse_spool_line(line) {
-            // A corrupt (non-JSON) line cannot be delivered, so it is dropped.
-            Err(_) => removed += 1,
-            Ok((payload, parent_run)) => {
-                if post(&payload, parent_run.as_deref(), install_id).is_ok() {
-                    removed += 1;
-                } else {
-                    // The endpoint is likely unreachable; stop and keep the rest.
-                    break;
-                }
-            }
-        }
-    }
-
-    if removed == 0 {
-        return;
-    }
-    let remaining = &lines[removed..];
-    let keep_from = remaining.len().saturating_sub(SPOOL_MAX_EVENTS);
-    rewrite_spool(spool, &remaining[keep_from..]);
 }
 
 fn parse_spool_line(line: &str) -> serde_json::Result<(serde_json::Value, Option<String>)> {

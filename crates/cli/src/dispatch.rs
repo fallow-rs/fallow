@@ -15,7 +15,7 @@ use crate::cli_agent::{AgentCli, run_agent_command};
 use crate::cli_args::{
     AuditCacheCli, AuditGateArg, AuditWorsenedArg, BaselinesCli, CiCli, CiProviderArg,
     CiTemplateCli, Cli, Command, CoverageCli, EffortFilter, EmailModeArg, HealthSeverityCli,
-    LicenseCli, RulePackCli, SecuritySubcommand, TelemetryCli, TypeAwareRequireArg,
+    LicenseCli, RulePackCli, SecuritySubcommand, TypeAwareRequireArg,
 };
 use crate::cli_hooks::run_hooks_command;
 use crate::cli_impact::{ImpactCrossRepoOpts, dispatch_impact};
@@ -29,8 +29,8 @@ use crate::{
     baseline_gate, baseline_growth, baselines, check, ci, ci_template, cli_report, combined,
     config, coverage, dupes, explain, fix, flags, guard, health, init, json_style, license, list,
     migrate, onboarding, plugin_check, regression, report, resolve_audit_baseline_path, rule_pack,
-    security, setup_hooks, suppressions, telemetry, trace_chain, trace_dependency, trace_error,
-    trace_path, viz, watch,
+    security, setup_hooks, suppressions, trace_chain, trace_dependency, trace_error, trace_path,
+    viz, watch,
 };
 use crate::{error::emit_input_error, exit_codes::exit_invalid_input};
 use fallow_config::PlannedAnalysis;
@@ -1172,15 +1172,6 @@ fn map_license_subcommand(sub: LicenseCli) -> license::LicenseSubcommand {
             license::LicenseSubcommand::Refresh(license::RefreshArgs { api_key })
         }
         LicenseCli::Deactivate => license::LicenseSubcommand::Deactivate,
-    }
-}
-
-pub fn map_telemetry_subcommand(sub: TelemetryCli) -> telemetry::TelemetryCommand {
-    match sub {
-        TelemetryCli::Status => telemetry::TelemetryCommand::Status,
-        TelemetryCli::Enable => telemetry::TelemetryCommand::Enable,
-        TelemetryCli::Disable => telemetry::TelemetryCommand::Disable,
-        TelemetryCli::Inspect { example } => telemetry::TelemetryCommand::Inspect { example },
     }
 }
 

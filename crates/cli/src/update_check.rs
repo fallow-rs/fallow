@@ -59,8 +59,6 @@ const LATEST_VERSION_PATH: &str = "/v1/cli/latest-version";
 /// Dedicated opt-out env var. Truthy-disable values mirror the telemetry mode
 /// parser's "off" set.
 const UPDATE_CHECK_ENV: &str = "FALLOW_UPDATE_CHECK";
-const DO_NOT_TRACK_ENV: &str = "DO_NOT_TRACK";
-const TELEMETRY_DISABLED_ENV: &str = "FALLOW_TELEMETRY_DISABLED";
 
 /// Where the user is pointed to decide whether the upgrade is worth it. Kept
 /// method-agnostic on purpose: fallow ships via npm, Homebrew, and a direct
@@ -189,8 +187,7 @@ fn cache_is_expired(checked_at_secs: u64, now: u64, ttl_secs: u64) -> bool {
 /// Env / CI kill switches that suppress both the nudge and the fetch. The
 /// cache notice reads the same gate, so one opt-out silences both.
 pub fn env_disabled() -> bool {
-    crate::telemetry::env_truthy(DO_NOT_TRACK_ENV)
-        || crate::telemetry::env_truthy(TELEMETRY_DISABLED_ENV)
+    fallow_types::telemetry_opt_out::telemetry_opted_out()
         || update_check_off()
         || fallow_engine::ci_env::is_ci()
 }
