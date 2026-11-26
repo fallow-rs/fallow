@@ -13,6 +13,7 @@ use super::super::{
     analyze_commands_with_context, referenced_package_scripts,
 };
 use super::{staged_commands, task_commands};
+use crate::discover::project_read::ProjectReader;
 
 fn analyze(command: &str, scripts: &[(&str, &str)], declared: &[&str]) -> ScriptAnalysis {
     let scripts: HashMap<String, String> = scripts
@@ -185,7 +186,7 @@ fn staged_block_gives_string_and_array_commands() {
         ",
     );
     assert_eq!(
-        staged_commands(temp.path()),
+        staged_commands(&ProjectReader::new(temp.path()), temp.path()),
         ["vp check --fix", "prettier --write", "markdownlint"]
     );
 }
@@ -222,6 +223,6 @@ fn run_tasks_give_commands_and_skip_a_task_with_cwd() {
 #[test]
 fn no_config_gives_no_commands() {
     let temp = tempfile::tempdir().expect("tempdir");
-    assert!(staged_commands(temp.path()).is_empty());
+    assert!(staged_commands(&ProjectReader::new(temp.path()), temp.path()).is_empty());
     assert!(task_commands(temp.path()).is_empty());
 }

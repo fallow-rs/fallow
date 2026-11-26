@@ -12,6 +12,7 @@ use fallow_extract::JsText;
 use oxc_ast::ast::{Expression, ObjectExpression};
 
 use super::{PackageSelector, RunLocation};
+use crate::discover::project_read::ProjectReader;
 use crate::plugins::config_parser;
 use crate::plugins::vite_plus::VITE_CONFIG_FILES;
 
@@ -158,19 +159,20 @@ pub(super) fn exec_child_index(tokens: &[&str], idx: usize) -> Option<usize> {
 }
 
 /// The root `vite.config.*` of `dir` that Vite+ loads, with its source.
-fn read_vite_config(dir: &Path) -> Option<(std::path::PathBuf, String)> {
+fn read_vite_config(reader: &ProjectReader, dir: &Path) -> Option<(std::path::PathBuf, String)> {
     VITE_CONFIG_FILES.iter().find_map(|name| {
         let path = dir.join(name);
-        let source = crate::discover::project_read::read_project_file(dir, &path)?;
+        let source = reader.read_file(&path)?;
         Some((path, source))
     })
 }
 
-/// The commands of the `staged` block of the Vite+ config in `dir`. A value
-/// is a command or an array of commands. A function value is skipped.
+/// The commands of the `staged` block of the Vite+ config in `dir`, read
+/// through `reader`, the reader of a scan of `dir`. A value is a command or
+/// an array of commands. A function value is skipped.
 #[must_use]
-pub fn staged_commands(dir: &Path) -> Vec<String> {
-    let Some((path, source)) = read_vite_config(dir) else {
+pub(super) fn staged_commands(reader: &ProjectReader, dir: &Path) -> Vec<String> {
+    let Some((path, source)) = read_vite_config(reader, dir) else {
         return Vec::new();
     };
     config_parser::extract_from_source(&source, &path, |program| {
@@ -195,7 +197,7 @@ pub fn staged_commands(dir: &Path) -> Vec<String> {
 /// against the wrong directory. Such a task gives no command.
 #[must_use]
 pub fn task_commands(dir: &Path) -> Vec<(String, String)> {
-    let Some((path, source)) = read_vite_config(dir) else {
+    let Some((path, source)) = read_vite_config(&ProjectReader::new(dir), dir) else {
         return Vec::new();
     };
     config_parser::extract_from_source(&source, &path, |program| {

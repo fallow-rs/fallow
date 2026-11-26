@@ -17,7 +17,7 @@ use std::path::Path;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::discover::project_read::{is_project_file, read_project_dir, read_project_file};
+use crate::discover::project_read::ProjectReader;
 
 use super::{IgnoredCommandEntries, ScriptCatalog, analyze_commands_with_context};
 
@@ -111,9 +111,10 @@ pub struct HookContext<'a> {
 #[must_use]
 pub fn analyze_hook_files(root: &Path, context: &HookContext<'_>) -> FxHashSet<String> {
     let _span = tracing::info_span!("analyze_hook_files").entered();
-    let mut commands = collect_hook_commands(root);
-    let agent_commands = collect_agent_hook_commands(root);
-    let runs_gate = runs_generated_gate(root, &agent_commands);
+    let reader = ProjectReader::new(root);
+    let mut commands = collect_hook_commands(&reader, root);
+    let agent_commands = collect_agent_hook_commands(&reader, root);
+    let runs_gate = runs_generated_gate(&reader, root, &agent_commands);
     commands.extend(agent_commands.into_iter().map(|(_, command)| command));
     if commands.is_empty() {
         return FxHashSet::default();
@@ -135,10 +136,10 @@ pub fn analyze_hook_files(root: &Path, context: &HookContext<'_>) -> FxHashSet<S
 
 /// Gather every `hooks.<Event>[].hooks[].command` string of the agent hook
 /// configs under `root`.
-fn collect_agent_hook_commands(root: &Path) -> Vec<(&'static str, String)> {
+fn collect_agent_hook_commands(reader: &ProjectReader, root: &Path) -> Vec<(&'static str, String)> {
     let mut commands = Vec::new();
     for (file, harness) in AGENT_HOOK_FILES {
-        let Some(config) = read_json(root, &root.join(file)) else {
+        let Some(config) = read_json(reader, &root.join(file)) else {
             continue;
         };
         let Some(events) = config.get("hooks").and_then(serde_json::Value::as_object) else {
@@ -170,30 +171,31 @@ fn strip_project_dir(command: &str) -> String {
 }
 
 /// Whether an agent hook command runs the generated gate of its harness.
-fn runs_generated_gate(root: &Path, commands: &[(&str, String)]) -> bool {
+fn runs_generated_gate(reader: &ProjectReader, root: &Path, commands: &[(&str, String)]) -> bool {
     commands.iter().any(|(harness, command)| {
         let gate = format!("{harness}/{GENERATED_GATE}");
         command.contains(&gate)
-            && read_project_file(root, &root.join(&gate))
+            && reader
+                .read_file(&root.join(&gate))
                 .is_some_and(|content| content.contains(GENERATED_GATE_MARKER))
     })
 }
 
 /// Gather every hook and staged-file command string under `root`.
-fn collect_hook_commands(root: &Path) -> Vec<String> {
+fn collect_hook_commands(reader: &ProjectReader, root: &Path) -> Vec<String> {
     let mut commands = Vec::new();
     for dir in HOOK_SCRIPT_DIRS {
-        collect_hook_script_commands(root, &root.join(dir), &mut commands);
+        collect_hook_script_commands(reader, &root.join(dir), &mut commands);
     }
-    commands.extend(super::vite_plus::staged_commands(root));
+    commands.extend(super::vite_plus::staged_commands(reader, root));
 
     for name in LEFTHOOK_FILES {
-        if let Some(content) = read_project_file(root, &root.join(name)) {
+        if let Some(content) = reader.read_file(&root.join(name)) {
             commands.extend(super::ci::extract_ci_commands(&content));
         }
     }
 
-    if let Some(manifest) = read_json(root, &root.join("package.json")) {
+    if let Some(manifest) = read_json(reader, &root.join("package.json")) {
         for key in MANIFEST_COMMAND_KEYS {
             if let Some(value) = manifest.get(*key) {
                 collect_json_strings(value, &mut commands);
@@ -205,26 +207,26 @@ fn collect_hook_commands(root: &Path) -> Vec<String> {
         .iter()
         .chain(&[".lintstagedrc.json"])
     {
-        if let Some(value) = read_json(root, &root.join(name)) {
+        if let Some(value) = read_json(reader, &root.join(name)) {
             collect_json_strings(&value, &mut commands);
         }
     }
 
     // `.lintstagedrc` is JSON or YAML.
-    if let Some(content) = read_project_file(root, &root.join(".lintstagedrc")) {
+    if let Some(content) = reader.read_file(&root.join(".lintstagedrc")) {
         match serde_json::from_str::<serde_json::Value>(&content) {
             Ok(value) => collect_json_strings(&value, &mut commands),
             Err(_) => commands.extend(yaml_scalar_values(&content)),
         }
     }
     for name in LINT_STAGED_YAML_FILES {
-        if let Some(content) = read_project_file(root, &root.join(name)) {
+        if let Some(content) = reader.read_file(&root.join(name)) {
             commands.extend(yaml_scalar_values(&content));
         }
     }
 
     for name in SIMPLE_GIT_HOOKS_JS_FILES.iter().chain(LINT_STAGED_JS_FILES) {
-        if let Some(content) = read_project_file(root, &root.join(name)) {
+        if let Some(content) = reader.read_file(&root.join(name)) {
             commands.extend(js_string_literals(&content));
         }
     }
@@ -235,14 +237,14 @@ fn collect_hook_commands(root: &Path) -> Vec<String> {
 /// Read the hook scripts directly inside a hook directory such as `.husky/`.
 /// The `_` directory holds the runtime of the hook manager and is skipped
 /// with every other directory.
-fn collect_hook_script_commands(root: &Path, dir: &Path, commands: &mut Vec<String>) {
-    let Some(entries) = read_project_dir(root, dir) else {
+fn collect_hook_script_commands(reader: &ProjectReader, dir: &Path, commands: &mut Vec<String>) {
+    let Some(entries) = reader.read_dir(dir) else {
         return;
     };
     let mut paths: Vec<_> = entries
         .flatten()
         .map(|entry| entry.path())
-        .filter(|path| is_project_file(root, path))
+        .filter(|path| reader.is_file(path))
         .filter(|path| {
             path.file_name()
                 .is_some_and(|name| !name.to_string_lossy().starts_with('.'))
@@ -250,14 +252,14 @@ fn collect_hook_script_commands(root: &Path, dir: &Path, commands: &mut Vec<Stri
         .collect();
     paths.sort();
     for path in paths {
-        if let Some(content) = read_project_file(root, &path) {
+        if let Some(content) = reader.read_file(&path) {
             commands.extend(super::shell_helpers::script_file_commands(&content));
         }
     }
 }
 
-fn read_json(root: &Path, path: &Path) -> Option<serde_json::Value> {
-    let content = read_project_file(root, path)?;
+fn read_json(reader: &ProjectReader, path: &Path) -> Option<serde_json::Value> {
+    let content = reader.read_file(path)?;
     serde_json::from_str(&content).ok()
 }
 
@@ -413,6 +415,25 @@ mod tests {
         .collect();
         packages.sort();
         packages
+    }
+
+    /// The hook scan resolves the read scope once, and each missing candidate
+    /// file costs no path resolution. Most candidates of a workspace root do
+    /// not exist, so a resolution for each of them made each warm run slower
+    /// (issue #5320).
+    #[test]
+    fn missing_hook_files_cost_no_path_resolution_each() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path().join("project");
+        write(&root, "package.json", r#"{"name":"app"}"#);
+        // The search of the scope base runs once for each root and process.
+        let _ = fallow_config::project_scope_base(&root);
+        let before = fallow_types::read_guard::canonicalize_calls();
+        assert!(used(&root, &["eslint"]).is_empty());
+        let calls = fallow_types::read_guard::canonicalize_calls() - before;
+        // The scope base, the directory of the candidates when its spelling
+        // differs from the scope base, and the `package.json` that exists.
+        assert!(calls <= 3, "{calls} path resolutions");
     }
 
     /// A hook directory or a hook config that links out of the project is

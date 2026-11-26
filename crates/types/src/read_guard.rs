@@ -118,11 +118,10 @@ impl std::error::Error for ReadRefusal {
 /// missing file, a dangling link or a path that is too long.
 #[must_use]
 pub fn is_inside_root(root: &Path, path: &Path) -> bool {
-    let Ok(canonical_root) = std::fs::canonicalize(root) else {
+    let Ok(canonical_root) = canonicalize(root) else {
         return false;
     };
-    std::fs::canonicalize(root.join(path))
-        .is_ok_and(|resolved| resolved.starts_with(&canonical_root))
+    canonicalize(&root.join(path)).is_ok_and(|resolved| resolved.starts_with(&canonical_root))
 }
 
 /// Read `path` in full when it resolves inside `root`, is a regular file and
@@ -133,6 +132,98 @@ pub fn is_inside_root(root: &Path, path: &Path) -> bool {
 ///
 /// Returns a [`ReadRefusal`] when a check fails or the read fails.
 pub fn read_bytes_inside(root: &Path, path: &Path, max_bytes: u64) -> Result<Vec<u8>, ReadRefusal> {
+    let canonical_root = canonicalize(root).map_err(|source| ReadRefusal::Io {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    read_bytes_in(root, &canonical_root, path, max_bytes, |dir| {
+        canonicalize(dir).ok()
+    })
+}
+
+/// A root for many bounded reads, such as the probes of many candidate
+/// files. The root resolves once, and each directory that holds a missing
+/// candidate resolves once. So a missing candidate costs one `lstat` call.
+/// A read gives the same result as [`read_bytes_inside`] with the same root.
+///
+/// A file system change after a directory resolves is not seen, so keep a
+/// `ReadRoot` for one scan only.
+#[derive(Debug)]
+pub struct ReadRoot {
+    root: PathBuf,
+    canonical: Result<PathBuf, std::io::ErrorKind>,
+    dirs: std::cell::RefCell<rustc_hash::FxHashMap<PathBuf, Option<PathBuf>>>,
+}
+
+impl ReadRoot {
+    /// A read root for `root`.
+    #[must_use]
+    pub fn new(root: &Path) -> Self {
+        Self {
+            root: root.to_path_buf(),
+            canonical: canonicalize(root).map_err(|error| error.kind()),
+            dirs: std::cell::RefCell::default(),
+        }
+    }
+
+    /// [`read_bytes_inside`] with this root.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`ReadRefusal`] when a check fails or the read fails.
+    pub fn read_bytes(&self, path: &Path, max_bytes: u64) -> Result<Vec<u8>, ReadRefusal> {
+        let canonical_root = self.canonical.as_ref().map_err(|kind| ReadRefusal::Io {
+            path: path.to_path_buf(),
+            source: std::io::Error::from(*kind),
+        })?;
+        read_bytes_in(&self.root, canonical_root, path, max_bytes, |dir| {
+            self.dirs
+                .borrow_mut()
+                .entry(dir.to_path_buf())
+                .or_insert_with(|| canonicalize(dir).ok())
+                .clone()
+        })
+    }
+
+    /// [`read_to_string_inside`] with this root.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`ReadRefusal`] when a check fails, the read fails, or the
+    /// content is not valid UTF-8.
+    pub fn read_to_string(&self, path: &Path, max_bytes: u64) -> Result<String, ReadRefusal> {
+        let bytes = self.read_bytes(path, max_bytes)?;
+        into_string(path, bytes)
+    }
+
+    /// [`is_inside_root`] with this root.
+    #[must_use]
+    pub fn is_inside(&self, path: &Path) -> bool {
+        let Ok(canonical_root) = &self.canonical else {
+            return false;
+        };
+        let joined = self.root.join(path);
+        // A path with no entry does not resolve, so one `lstat` call answers.
+        if joined
+            .symlink_metadata()
+            .is_err_and(|error| error.kind() == std::io::ErrorKind::NotFound)
+        {
+            return false;
+        }
+        canonicalize(&joined).is_ok_and(|resolved| resolved.starts_with(canonical_root))
+    }
+}
+
+/// The checks and the read of [`read_bytes_inside`] for the resolved root
+/// `canonical_root`. `resolve_dir` resolves the directory that holds a
+/// missing entry.
+fn read_bytes_in(
+    root: &Path,
+    canonical_root: &Path,
+    path: &Path,
+    max_bytes: u64,
+    resolve_dir: impl FnOnce(&Path) -> Option<PathBuf>,
+) -> Result<Vec<u8>, ReadRefusal> {
     let joined = root.join(path);
     let io = |source: std::io::Error| ReadRefusal::Io {
         path: path.to_path_buf(),
@@ -142,16 +233,78 @@ pub fn read_bytes_inside(root: &Path, path: &Path, max_bytes: u64) -> Result<Vec
         path: path.to_path_buf(),
         root: root.to_path_buf(),
     };
-    let canonical_root = std::fs::canonicalize(root).map_err(io)?;
-    let resolved = match std::fs::canonicalize(&joined) {
+    if let Some(source) = missing_inside(root, canonical_root, &joined, resolve_dir) {
+        return Err(io(source));
+    }
+    let resolved = match canonicalize(&joined) {
         Ok(resolved) => resolved,
-        Err(_) if unresolved_is_outside(&canonical_root, &joined) => return Err(outside()),
+        Err(_) if unresolved_is_outside(canonical_root, &joined) => return Err(outside()),
         Err(source) => return Err(io(source)),
     };
-    if !resolved.starts_with(&canonical_root) {
+    if !resolved.starts_with(canonical_root) {
         return Err(outside());
     }
     read_resolved(path, &resolved, max_bytes)
+}
+
+/// The `NotFound` error of `joined` when no entry, not even a link, has that
+/// name and the nearest existing directory above it resolves inside
+/// `canonical_root`. No link exists below a missing entry, so the full check
+/// of [`unresolved_is_outside`] cannot find a link out of the root. The walk
+/// up costs one `lstat` call for each missing directory. `None` sends the
+/// path to the full check: an entry that exists, a dangling link, a `..`
+/// component, a directory that does not resolve, or a directory outside the
+/// root.
+fn missing_inside(
+    root: &Path,
+    canonical_root: &Path,
+    joined: &Path,
+    resolve_dir: impl FnOnce(&Path) -> Option<PathBuf>,
+) -> Option<std::io::Error> {
+    use std::path::Component;
+    let error = joined.symlink_metadata().err()?;
+    if error.kind() != std::io::ErrorKind::NotFound {
+        return None;
+    }
+    let mut missing = joined;
+    loop {
+        if !matches!(missing.components().next_back(), Some(Component::Normal(_))) {
+            return None;
+        }
+        let dir = missing.parent()?;
+        if dir == root {
+            return Some(error);
+        }
+        match dir.symlink_metadata() {
+            Err(dir_error) if dir_error.kind() == std::io::ErrorKind::NotFound => missing = dir,
+            Err(_) => return None,
+            Ok(_) => {
+                let inside = resolve_dir(dir).is_some_and(|dir| dir.starts_with(canonical_root));
+                return inside.then_some(error);
+            }
+        }
+    }
+}
+
+/// `std::fs::canonicalize`, counted in test builds (see
+/// `canonicalize_calls`).
+fn canonicalize(path: &Path) -> std::io::Result<PathBuf> {
+    #[cfg(any(test, feature = "testing"))]
+    CANONICALIZE_CALLS.with(|calls| calls.set(calls.get() + 1));
+    std::fs::canonicalize(path)
+}
+
+#[cfg(any(test, feature = "testing"))]
+std::thread_local! {
+    static CANONICALIZE_CALLS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// The number of path resolutions that the bounded read helpers made on this
+/// thread. A test compares two counts to check the cost of a scan.
+#[cfg(any(test, feature = "testing"))]
+#[must_use]
+pub fn canonicalize_calls() -> u64 {
+    CANONICALIZE_CALLS.with(std::cell::Cell::get)
 }
 
 /// True when `joined`, a path that does not resolve, names a place outside
@@ -165,9 +318,7 @@ fn unresolved_is_outside(canonical_root: &Path, joined: &Path) -> bool {
     let components: Vec<Component<'_>> = joined.components().collect();
     let Some((resolved_len, mut current)) = (0..=components.len()).rev().find_map(|len| {
         let prefix: PathBuf = components[..len].iter().collect();
-        std::fs::canonicalize(&prefix)
-            .ok()
-            .map(|resolved| (len, resolved))
+        canonicalize(&prefix).ok().map(|resolved| (len, resolved))
     }) else {
         return true;
     };
@@ -466,6 +617,162 @@ mod tests {
         let path = dir.path().join("alias/none.json");
         let err = read_to_string_inside(&root, &path, 16).unwrap_err();
         assert!(err.is_not_found(), "{err:?}");
+    }
+
+    /// A missing file inside the root costs no path resolution beyond the
+    /// one of its directory, and a read root resolves that directory once.
+    #[test]
+    #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+    fn a_missing_file_inside_the_root_costs_no_prefix_walk() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("sub")).unwrap();
+        let before = canonicalize_calls();
+        let err = read_to_string_inside(dir.path(), Path::new("none.json"), 16).unwrap_err();
+        assert!(err.is_not_found(), "{err:?}");
+        // The root only.
+        assert_eq!(canonicalize_calls() - before, 1);
+
+        let reader = ReadRoot::new(dir.path());
+        let before = canonicalize_calls();
+        for name in [
+            "a.json",
+            "b.json",
+            "sub/a.json",
+            "sub/b.json",
+            "sub/c.json",
+            "none/a.json",
+            "none/deeper/b.json",
+        ] {
+            let err = reader.read_to_string(Path::new(name), 16).unwrap_err();
+            assert!(err.is_not_found(), "{name}: {err:?}");
+        }
+        // The `sub` directory only.
+        assert_eq!(canonicalize_calls() - before, 1);
+    }
+
+    /// The kind of a read result, to compare two reads of one path.
+    #[cfg(unix)]
+    fn kind(result: Result<Vec<u8>, ReadRefusal>) -> String {
+        match result {
+            Ok(bytes) => format!("ok {bytes:?}"),
+            Err(ReadRefusal::OutsideRoot { .. }) => "outside".to_string(),
+            Err(ReadRefusal::NotRegularFile { .. }) => "not regular".to_string(),
+            Err(ReadRefusal::TooLarge { .. }) => "too large".to_string(),
+            Err(ReadRefusal::Io { source, .. }) => format!("io {:?}", source.kind()),
+        }
+    }
+
+    /// A read root refuses each path that the free read refuses, with the
+    /// same kind of refusal, and reads each file that the free read reads.
+    #[cfg(unix)]
+    #[test]
+    #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+    fn a_read_root_gives_the_results_of_the_free_read() {
+        let outer = tempfile::tempdir().unwrap();
+        let root = outer.path().join("project");
+        let elsewhere = outer.path().join("elsewhere");
+        std::fs::create_dir_all(root.join("sub")).unwrap();
+        std::fs::create_dir(&elsewhere).unwrap();
+        std::fs::write(root.join("own.json"), "{}").unwrap();
+        std::fs::write(outer.path().join("other.json"), "{}").unwrap();
+        std::fs::write(root.join("big.json"), "0123456789").unwrap();
+        let link = |target: &Path, name: &str| {
+            std::os::unix::fs::symlink(target, root.join(name)).unwrap();
+        };
+        link(&outer.path().join("other.json"), "out.json");
+        link(&elsewhere, "linked");
+        link(Path::new("/nonexistent/fallow/target"), "dangling.json");
+        link(Path::new("missing-dir"), "sub/dangling-dir");
+        link(Path::new("own.json"), "inner.json");
+        link(Path::new("/dev/zero"), "zero.json");
+        let reader = ReadRoot::new(&root);
+        let paths = [
+            "own.json",
+            "none.json",
+            "big.json",
+            "sub",
+            "sub/none.json",
+            "sub/../none.json",
+            "none/a.json",
+            "none/deeper/a.json",
+            "sub/none/a.json",
+            "linked/none/a.json",
+            "../none.json",
+            "../other.json",
+            "out.json",
+            "linked/none.json",
+            "linked/../other.json",
+            "dangling.json",
+            "sub/dangling-dir/a.json",
+            "inner.json",
+            "zero.json",
+            "own.json/a.json",
+        ];
+        let canonical = std::fs::canonicalize(&root).unwrap();
+        let absolute = [
+            canonical.join("own.json"),
+            canonical.join("none.json"),
+            canonical.join("none/a.json"),
+            canonical.join("out.json"),
+            canonical.join("linked/none.json"),
+        ];
+        let paths = paths
+            .iter()
+            .map(Path::new)
+            .chain(absolute.iter().map(PathBuf::as_path));
+        for path in paths {
+            let free = kind(read_bytes_inside(&root, path, 4));
+            assert_eq!(kind(reader.read_bytes(path, 4)), free, "{}", path.display());
+            assert_eq!(
+                reader.is_inside(path),
+                is_inside_root(&root, path),
+                "{}",
+                path.display()
+            );
+        }
+        assert_eq!(
+            kind(read_bytes_inside(&root, Path::new("out.json"), 4)),
+            "outside"
+        );
+        assert_eq!(
+            kind(read_bytes_inside(&root, Path::new("linked/none.json"), 4)),
+            "outside"
+        );
+        assert_eq!(
+            kind(read_bytes_inside(&root, Path::new("linked/none/a.json"), 4)),
+            "outside"
+        );
+        assert_eq!(
+            kind(read_bytes_inside(
+                &root,
+                Path::new("sub/dangling-dir/a.json"),
+                4
+            )),
+            "outside"
+        );
+        assert_eq!(
+            kind(read_bytes_inside(&root, Path::new("dangling.json"), 4)),
+            "outside"
+        );
+        assert_eq!(
+            kind(read_bytes_inside(&root, Path::new("sub"), 4)),
+            "not regular"
+        );
+        assert_eq!(
+            kind(read_bytes_inside(&root, Path::new("big.json"), 4)),
+            "too large"
+        );
+    }
+
+    /// A read root of a root that does not resolve refuses each read.
+    #[test]
+    #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+    fn a_read_root_that_does_not_resolve_refuses_each_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let reader = ReadRoot::new(&dir.path().join("none"));
+        let err = reader.read_bytes(Path::new("a.json"), 16).unwrap_err();
+        assert!(err.is_not_found(), "{err:?}");
+        assert!(!reader.is_inside(Path::new("a.json")));
     }
 
     #[cfg(unix)]

@@ -49,6 +49,9 @@ windows-sys = { workspace = true, features = ["Win32_Security_Authorization"] }
 # Adds `#[derive(schemars::JsonSchema)]` to result and extract types so the
 # JSON output schema can be regenerated from the Rust source of truth.
 schema = ["dep:schemars"]
+# Counts the path resolutions of `read_guard`, for cost tests of other
+# crates.
+testing = []
 
 [dev-dependencies]
 serde_json = { workspace = true }
