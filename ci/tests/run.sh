@@ -209,14 +209,92 @@ fi
 assert_contains "$OUT" "no 'fallow' binary is on PATH" "install: FALLOW_SKIP_INSTALL explains missing binary"
 assert_not_contains "$OUT" "DRY RUN: npm install" "install: missing-binary path never reaches npm install"
 
+# A Node that pnpm installs can leave the npm global bin folder off PATH
+# (#5242). The install block then finds fallow in that folder and records it
+# for the run script. Controlled PATH keeps a host fallow out of the test.
+GBIN_TOOLS="$INSTALL_TMP/gbin-tools"
+GBIN_PREFIX="$INSTALL_TMP/gbin-prefix"
+mkdir -p "$GBIN_TOOLS" "$GBIN_PREFIX/bin"
+ln -sf "$(command -v node)" "$GBIN_TOOLS/node"
+cat > "$GBIN_TOOLS/npm" <<'SH'
+#!/usr/bin/env bash
+if [ "$1" = "prefix" ] && [ "$2" = "-g" ]; then
+  printf '%s\n' "${STUB_NPM_PREFIX:?}"
+fi
+exit 0
+SH
+cat > "$GBIN_PREFIX/bin/fallow" <<'SH'
+#!/usr/bin/env bash
+echo "fallow 9.9.9"
+SH
+chmod +x "$GBIN_TOOLS/npm" "$GBIN_PREFIX/bin/fallow"
+rm -f /tmp/fallow-bin-dir
+OUT=$(PATH="$GBIN_TOOLS:/usr/bin:/bin" STUB_NPM_PREFIX="$GBIN_PREFIX" FALLOW_ROOT="$INSTALL_TMP/empty" \
+  FALLOW_VERSION=9.9.9 FALLOW_TYPE_AWARE=false /bin/sh -c "$GITLAB_INSTALL_SCRIPT" 2>&1)
+gbin_status=$?
+if [ "$gbin_status" -eq 0 ]; then
+  pass "install: finds fallow in the npm global bin folder off PATH"
+else
+  fail "install: finds fallow in the npm global bin folder off PATH" "exit=$gbin_status: $OUT"
+fi
+assert_contains "$OUT" "Installed fallow fallow 9.9.9" "install: reports the version of fallow from the npm global bin folder"
+assert_not_contains "$OUT" "unknown version" "install: never reports an unknown version when npm installed fallow"
+assert_contains "$(cat /tmp/fallow-bin-dir 2>/dev/null || true)" "$GBIN_PREFIX/bin" "install: records the npm global bin folder for the run script"
+
+rm -f "$GBIN_PREFIX/bin/fallow" /tmp/fallow-bin-dir
+OUT=$(PATH="$GBIN_TOOLS:/usr/bin:/bin" STUB_NPM_PREFIX="$GBIN_PREFIX" FALLOW_ROOT="$INSTALL_TMP/empty" \
+  FALLOW_VERSION=9.9.9 FALLOW_TYPE_AWARE=false /bin/sh -c "$GITLAB_INSTALL_SCRIPT" 2>&1)
+gbin_status=$?
+if [ "$gbin_status" -eq 2 ]; then
+  pass "install: fails with exit 2 when npm installed no fallow command"
+else
+  fail "install: fails with exit 2 when npm installed no fallow command" "expected exit 2, got $gbin_status"
+fi
+assert_contains "$OUT" "does not contain a fallow command" "install: explains the missing fallow command"
+
+# A different fallow earlier on PATH must not run in place of the installed one.
+printf '#!/usr/bin/env bash\necho "fallow 9.9.9"\n' > "$GBIN_PREFIX/bin/fallow"
+printf '#!/usr/bin/env bash\necho "fallow 1.0.0"\n' > "$GBIN_TOOLS/fallow"
+chmod +x "$GBIN_PREFIX/bin/fallow" "$GBIN_TOOLS/fallow"
+OUT=$(PATH="$GBIN_TOOLS:/usr/bin:/bin" STUB_NPM_PREFIX="$GBIN_PREFIX" FALLOW_ROOT="$INSTALL_TMP/empty" \
+  FALLOW_VERSION=9.9.9 FALLOW_TYPE_AWARE=false /bin/sh -c "$GITLAB_INSTALL_SCRIPT" 2>&1)
+assert_contains "$OUT" "Installed fallow fallow 9.9.9" "install: runs the installed fallow when another fallow is on PATH"
+assert_contains "$(cat /tmp/fallow-bin-dir 2>/dev/null || true)" "$GBIN_PREFIX/bin" "install: records the npm global bin folder when another fallow is on PATH"
+
+# With the npm global bin folder on PATH, the template records nothing.
+OUT=$(PATH="$GBIN_PREFIX/bin:$GBIN_TOOLS:/usr/bin:/bin" STUB_NPM_PREFIX="$GBIN_PREFIX" FALLOW_ROOT="$INSTALL_TMP/empty" \
+  FALLOW_VERSION=9.9.9 FALLOW_TYPE_AWARE=false /bin/sh -c "$GITLAB_INSTALL_SCRIPT" 2>&1)
+if [ ! -e /tmp/fallow-bin-dir ]; then
+  pass "install: records no bin folder when the npm global bin folder is on PATH"
+else
+  fail "install: records no bin folder when the npm global bin folder is on PATH" "$(cat /tmp/fallow-bin-dir)"
+fi
+
+# A shell executor can keep /tmp between jobs. FALLOW_SKIP_INSTALL must remove
+# a bin folder that an earlier job recorded.
+printf '%s\n' "$GBIN_PREFIX/bin" > /tmp/fallow-bin-dir
+PATH="$SKIP_BIN:/usr/bin:/bin" FALLOW_ROOT="$INSTALL_TMP/empty" FALLOW_SKIP_INSTALL=true \
+  /bin/sh -c "$GITLAB_INSTALL_SCRIPT" > /dev/null 2>&1
+if [ ! -e /tmp/fallow-bin-dir ]; then
+  pass "install: FALLOW_SKIP_INSTALL removes a bin folder from an earlier job"
+else
+  fail "install: FALLOW_SKIP_INSTALL removes a bin folder from an earlier job" "/tmp/fallow-bin-dir still exists"
+fi
+
 # A version range or `latest` must still let the MR integration download its
 # scripts: the install block records the installed exact version, and the
 # script prep pins the download to the matching release tag (issue #4841).
-RANGE_BIN="$INSTALL_TMP/range-bin"
+# The stubs sit in the bin folder of a fake npm global prefix, as after a real
+# `npm install -g`.
+RANGE_PREFIX="$INSTALL_TMP/range-prefix"
+RANGE_BIN="$RANGE_PREFIX/bin"
 RANGE_WORK="$INSTALL_TMP/range-work"
 mkdir -p "$RANGE_BIN" "$RANGE_WORK"
-cat > "$RANGE_BIN/npm" <<'SH'
+cat > "$RANGE_BIN/npm" <<SH
 #!/usr/bin/env bash
+if [ "\$1" = "prefix" ] && [ "\$2" = "-g" ]; then
+  printf '%s\\n' "$RANGE_PREFIX"
+fi
 exit 0
 SH
 cat > "$RANGE_BIN/fallow" <<'SH'
@@ -314,6 +392,17 @@ if bash -n /tmp/fallow-run.sh 2>/tmp/fallow-run-syntax.err; then
 else
   fail "run writer: generated analysis script is valid bash" "$(cat /tmp/fallow-run-syntax.err)"
 fi
+RUN_PATH_TMP="$INSTALL_TMP/run-path"
+mkdir -p "$RUN_PATH_TMP"
+printf '#!/usr/bin/env bash\necho "fallow 9.9.9"\n' > "$RUN_PATH_TMP/fallow"
+chmod +x "$RUN_PATH_TMP/fallow"
+printf '%s\n' "$RUN_PATH_TMP" > /tmp/fallow-bin-dir
+run_path_prologue="$(sed -n '/fallow-bin-dir/,/^fi$/p' /tmp/fallow-run.sh)"
+OUT=$(PATH="/usr/bin:/bin" bash -c "${run_path_prologue}
+command -v fallow" 2>&1)
+assert_contains "$OUT" "$RUN_PATH_TMP/fallow" "run writer: analysis script puts the recorded npm global bin folder on PATH"
+rm -f /tmp/fallow-bin-dir
+
 RUNNER_TMP="$INSTALL_TMP/runner"
 mkdir -p "$RUNNER_TMP/bin" "$RUNNER_TMP/root"
 cat > "$RUNNER_TMP/bin/fallow" <<'SH'
