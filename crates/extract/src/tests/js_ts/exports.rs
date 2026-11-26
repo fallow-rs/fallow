@@ -104,6 +104,17 @@ fn local_export_of_a_value_or_merged_name_keeps_its_value() {
 }
 
 #[test]
+fn local_export_of_a_default_class_name_keeps_its_value() {
+    let info = parse_source(
+        "interface Foo { a: number }\nexport default class Foo {}\nexport { Foo as Bar };",
+    );
+    assert!(!is_type_only_export(
+        &info,
+        &ExportName::Named("Bar".to_string())
+    ));
+}
+
+#[test]
 fn default_export_of_an_interface_is_type_only() {
     let info = parse_source("export default interface Options { enabled: boolean }");
     assert!(is_type_only_export(&info, &ExportName::Default));

@@ -50,6 +50,14 @@ impl ModuleInfoExtractor {
         });
     }
 
+    /// Record `name` as a top-level value name, and return it. A named
+    /// `export default class` or `function` declares a value name that a
+    /// local `export { X as Y }` can export again.
+    pub(super) fn record_module_value_name(&mut self, name: &str) -> String {
+        self.module_value_names.insert(name.to_string());
+        name.to_string()
+    }
+
     /// Whether a top-level `interface` or `type` alias declares `name`, and
     /// no top-level value declaration does.
     fn is_module_type_only_name(&self, name: &str) -> bool {
