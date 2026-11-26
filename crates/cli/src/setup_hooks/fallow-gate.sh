@@ -75,9 +75,9 @@ gate_skip_not_git_write() {
 }
 
 # Returns 0 when the raw hook input $1 can hold a git commit or push: it has a
-# `commit` or `push` word, or `git` before an expansion, in any letter case. A
-# program name from an expansion or a glob (`$G commit`, `g?t push`) still
-# has the `commit` or `push` word. The match drops quote and backslash
+# `commit` or `push` word, or `git` before an expansion, a brace, a glob or a
+# backquote, in any letter case. A program name from an expansion or a glob
+# (`$G commit`, `g?t push`) still has the `commit` or `push` word. The match drops quote and backslash
 # characters first, as gate_loose_write does, so `g''it commit` still goes to
 # the exact parse. A JSON `\u` escape can hide a word, so such a hook input
 # always goes there too.
@@ -89,7 +89,7 @@ gate_input_can_write() {
   gate_replace "$1" "[\\'\"\\\\]" ""
   shopt -s nocasematch
   case "$GATE_OUT" in
-    *commit* | *push* | *git*'$'*) hit=0 ;;
+    *commit* | *push* | *git*[\$\{\`\?\*\[]*) hit=0 ;;
   esac
   shopt -u nocasematch
   return "$hit"
@@ -791,12 +791,12 @@ gate_mark_subshells() {
   printf '%s' "${parts[@]}"
 }
 
-# Returns 0 when the word $1 runs git: `git` in any letter case, as a name or
-# as the last part of a path. A file system that ignores letter case runs git
-# for `GIT` too.
+# Returns 0 when the word $1 runs git: `git` in any letter case, with or
+# without the `.exe` suffix of Git for Windows, as a name or as the last part
+# of a path. A file system that ignores letter case runs git for `GIT` too.
 gate_git_word() {
   case "$1" in
-    [Gg][Ii][Tt] | */[Gg][Ii][Tt]) return 0 ;;
+    [Gg][Ii][Tt] | */[Gg][Ii][Tt] | [Gg][Ii][Tt].[Ee][Xx][Ee] | */[Gg][Ii][Tt].[Ee][Xx][Ee]) return 0 ;;
   esac
   return 1
 }
@@ -887,6 +887,13 @@ is_git_write_command() {
             # (-cuser.name=x).
             shift
             continue
+            ;;
+          *[\$\{\`\?\*\[]*)
+            # An expansion, a brace or a glob can make the subcommand a
+            # write (`git c{o,}mmit`, `git co${x}mit`).
+            found=0
+            [ -n "$dir" ] && GIT_WRITE_CANDIDATES+=("$dir")
+            break
             ;;
           *)
             # A different subcommand; resume scanning for a later `git` word.

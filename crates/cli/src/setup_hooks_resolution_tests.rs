@@ -533,12 +533,22 @@ fn assert_gate_audits(commands: &[&str]) {
 
 #[test]
 fn gate_audits_a_brace_expansion_with_a_write_word() {
-    assert_gate_audits(&["git {commit,status} -m x", "git {status,push}"]);
+    assert_gate_audits(&[
+        "git {commit,status} -m x",
+        "git {status,push}",
+        "git c{o,}mmit -m x",
+    ]);
 }
 
 #[test]
 fn gate_audits_a_program_name_from_a_variable() {
-    assert_gate_audits(&["G=git; $G commit -m x", "${G} push", "`echo git` push"]);
+    assert_gate_audits(&[
+        "G=git; $G commit -m x",
+        "${G} push",
+        "`echo git` push",
+        "git co${x}mit -m x",
+        "git -C . $'push'",
+    ]);
 }
 
 #[test]
@@ -562,9 +572,20 @@ fn gate_audits_git_named_by_a_path() {
     assert_gate_audits(&["/usr/bin/git commit -m x", "./bin/git push"]);
 }
 
+/// Git for Windows runs `git.exe`, and git-bash also runs it as `git`.
+#[test]
+fn gate_audits_git_with_an_exe_suffix() {
+    assert_gate_audits(&["git.exe commit -m x", "/usr/bin/GIT.EXE push"]);
+}
+
 #[test]
 fn gate_audits_a_program_name_from_a_glob() {
-    assert_gate_audits(&["g?t commit -m x", "gi[t] push", "g*t push"]);
+    assert_gate_audits(&[
+        "g?t commit -m x",
+        "gi[t] push",
+        "g*t push",
+        "git c?mmit -m x",
+    ]);
 }
 
 /// An expansion alone does not make a command a possible git write. The
@@ -578,6 +599,8 @@ fn gate_skips_an_expansion_without_a_write_word() {
         "GIT_PAGER=cat git log -n 1",
         "ls src/GIT",
         "git log commit-message.txt",
+        "git add src/*.ts",
+        "git diff $base",
     ] {
         let (audited, code, stderr) = gate_audits(command);
         assert!(!audited, "gate must skip {command:?}: {stderr}");
