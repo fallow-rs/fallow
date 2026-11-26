@@ -831,9 +831,9 @@ CLI applies the consent rules, builds the event and spools it. For the
 analysis tools, `crates/mcp/src/tools/call_counts.rs` reads one finding
 count from the result and passes it as `--result-count`, so the event of the
 in-process route has the same `findings_present` and `result_count_bucket`
-as the event of the CLI route. The server copies the result text only when
-the cached telemetry state is on, and it parses the text on the detached
-task.
+as the event of the CLI route. The server copies the result text unless
+the last known telemetry state is off, and it parses the text on the
+detached task.
 
 The server does this work on a detached task after the answer. It reads
 `fallow telemetry status` at most once per ten minutes (one minute after a

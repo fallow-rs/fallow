@@ -50,10 +50,34 @@ fn an_in_process_call_and_a_cli_call_each_give_one_event() {
     );
 }
 
+/// Each counted tool reads its count from its real output. The project is a
+/// Git repository with one commit and one change, so the change-scoped
+/// tools have a base.
 #[test]
-fn an_in_process_analysis_reports_its_findings() {
+fn every_counted_tool_reports_a_count_from_its_real_output() {
     let project = tempfile::tempdir().expect("project");
     write_project(project.path());
+    let git = |args: &[&str]| {
+        let status = Command::new("git")
+            .args([
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@t",
+                "-c",
+                "commit.gpgsign=false",
+            ])
+            .args(args)
+            .current_dir(project.path())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .expect("run git");
+        assert!(status.success(), "git {args:?}");
+    };
+    git(&["init", "-q"]);
+    git(&["add", "-A"]);
+    git(&["commit", "-q", "-m", "base"]);
     std::fs::write(
         project.path().join("src/orphan.ts"),
         "export const lost = 2;\n",
@@ -61,21 +85,38 @@ fn an_in_process_analysis_reports_its_findings() {
     .expect("orphan");
     let home = tempfile::tempdir().expect("home");
     let mut server = McpServer::start(home.path(), Some("on"));
-    let root = serde_json::json!({ "root": project.path() });
-    // The first call reads the telemetry state; a count needs that state.
-    server.call("project_info", &root);
-    wait_for_spool(home.path(), &["project_info"]);
-    server.call("analyze", &root);
-    wait_for_spool(home.path(), &["analyze"]);
+    let root = project.path().to_string_lossy().into_owned();
+    let calls = [
+        ("analyze", serde_json::json!({ "root": root })),
+        ("check_architecture", serde_json::json!({ "root": root })),
+        ("find_dupes", serde_json::json!({ "root": root })),
+        ("check_health", serde_json::json!({ "root": root })),
+        (
+            "check_changed",
+            serde_json::json!({ "root": root, "since": "HEAD" }),
+        ),
+        ("audit", serde_json::json!({ "root": root, "base": "HEAD" })),
+    ];
+    for (tool, arguments) in &calls {
+        server.call(tool, arguments);
+    }
+    let tools: Vec<&str> = calls.iter().map(|(tool, _)| *tool).collect();
+    wait_for_spool(home.path(), &tools);
     let spool = spool_text(home.path());
-    let event = spool
+    for tool in tools {
+        let event = spool
+            .lines()
+            .find(|line| line.contains(&format!("\"mcp_tool\":\"{tool}\"")))
+            .unwrap_or_else(|| panic!("an event for {tool}: {spool}"));
+        assert!(event.contains("\"result_count_bucket\""), "{tool}: {event}");
+    }
+    let analyze = spool
         .lines()
         .find(|line| line.contains("\"mcp_tool\":\"analyze\""))
         .expect("an analyze event");
     // `run_scope: unknown` marks the event of the server, not of a CLI run.
-    assert!(event.contains("\"run_scope\":\"unknown\""), "{event}");
-    assert!(event.contains("\"findings_present\":true"), "{event}");
-    assert!(event.contains("\"result_count_bucket\":\"1-9\""), "{event}");
+    assert!(analyze.contains("\"run_scope\":\"unknown\""), "{analyze}");
+    assert!(analyze.contains("\"findings_present\":true"), "{analyze}");
 }
 
 #[test]

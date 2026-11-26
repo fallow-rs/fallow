@@ -7,56 +7,88 @@
 //! this module reads the same count from the JSON result, so the event of
 //! the in-process route and the event of the CLI route agree. Only the
 //! count leaves this module; the result itself never reaches telemetry.
+//!
+//! Each tool has its own small struct, so `serde` reads only the fields of
+//! that tool and skips the rest without building it.
 
 use serde::Deserialize;
 use serde::de::IgnoredAny;
 
-/// The fields that hold a count, in the JSON of the analysis tools.
-/// `serde` skips every other field without building it.
-#[derive(Debug, Default, Deserialize)]
-struct Counts {
-    total_issues: Option<usize>,
-    total_flags: Option<usize>,
-    stats: Option<DupesStats>,
-    findings: Option<Vec<IgnoredAny>>,
-    summary: Option<AuditSummary>,
+/// `analyze`, `check_changed` and `check_architecture`: the CLI notes
+/// `total_issues`.
+#[derive(Deserialize)]
+struct DeadCode {
+    total_issues: usize,
 }
 
-#[derive(Debug, Deserialize)]
-struct DupesStats {
-    clone_groups: Option<usize>,
+/// `find_dupes`: the CLI notes the clone groups after `top`, which the JSON
+/// names `clone_groups_shown`.
+#[derive(Deserialize)]
+struct Dupes {
+    clone_groups_shown: usize,
 }
 
-#[derive(Debug, Deserialize)]
+/// `check_health`: the CLI notes the findings, but a run whose only
+/// findings are coverage gaps counts as "found, count unknown".
+#[derive(Deserialize)]
+struct Health {
+    findings: Vec<IgnoredAny>,
+    coverage_gaps: Option<CoverageGaps>,
+}
+
+#[derive(Deserialize)]
+struct CoverageGaps {
+    #[serde(default)]
+    files: Vec<IgnoredAny>,
+    #[serde(default)]
+    exports: Vec<IgnoredAny>,
+}
+
+/// `audit`: the CLI adds the three analysis counts of the summary.
+#[derive(Deserialize)]
+struct Audit {
+    summary: AuditSummary,
+}
+
+#[derive(Deserialize)]
 struct AuditSummary {
-    dead_code_issues: Option<usize>,
-    complexity_findings: Option<usize>,
-    duplication_clone_groups: Option<usize>,
+    dead_code_issues: usize,
+    complexity_findings: usize,
+    duplication_clone_groups: usize,
 }
 
 /// The finding count of a successful result of `tool`, counted as the
 /// matching CLI command counts it. `None` for a tool without such a count,
-/// and for a result that is not the expected JSON.
+/// for a result that is not the expected JSON, and for a count that the CLI
+/// also does not know.
 pub(super) fn result_count(tool: &str, text: &str) -> Option<usize> {
-    if !has_count(tool) {
-        return None;
-    }
-    let counts: Counts = serde_json::from_str(text).ok()?;
     match tool {
-        "analyze" | "check_changed" | "check_architecture" => counts.total_issues,
-        "find_dupes" => counts.stats?.clone_groups,
-        "check_health" => counts.findings.map(|findings| findings.len()),
-        "feature_flags" => counts.total_flags,
-        "audit" => {
-            let summary = counts.summary?;
-            Some(
-                summary.dead_code_issues?
-                    + summary.complexity_findings?
-                    + summary.duplication_clone_groups?,
-            )
+        "analyze" | "check_changed" | "check_architecture" => {
+            serde_json::from_str::<DeadCode>(text)
+                .ok()
+                .map(|out| out.total_issues)
         }
+        "find_dupes" => serde_json::from_str::<Dupes>(text)
+            .ok()
+            .map(|out| out.clone_groups_shown),
+        "check_health" => health_count(serde_json::from_str(text).ok()?),
+        "audit" => serde_json::from_str::<Audit>(text).ok().map(|out| {
+            out.summary.dead_code_issues
+                + out.summary.complexity_findings
+                + out.summary.duplication_clone_groups
+        }),
         _ => None,
     }
+}
+
+fn health_count(health: Health) -> Option<usize> {
+    let gaps = health
+        .coverage_gaps
+        .is_some_and(|gaps| !gaps.files.is_empty() || !gaps.exports.is_empty());
+    if health.findings.is_empty() && gaps {
+        return None;
+    }
+    Some(health.findings.len())
 }
 
 /// True for a tool whose result holds a finding count. The server copies a
@@ -69,7 +101,6 @@ pub(super) fn has_count(tool: &str) -> bool {
             | "check_architecture"
             | "find_dupes"
             | "check_health"
-            | "feature_flags"
             | "audit"
     )
 }
@@ -87,9 +118,9 @@ mod tests {
     }
 
     #[test]
-    fn dupes_counts_every_clone_group_not_only_the_shown_ones() {
-        let text = r#"{"clone_groups":[{}],"clone_groups_omitted":4,"stats":{"clone_groups":5}}"#;
-        assert_eq!(result_count("find_dupes", text), Some(5));
+    fn dupes_counts_the_clone_groups_after_top_like_the_cli() {
+        let text = r#"{"clone_groups":[{}],"clone_groups_shown":1,"clone_groups_omitted":4,"stats":{"clone_groups":5}}"#;
+        assert_eq!(result_count("find_dupes", text), Some(1));
     }
 
     #[test]
@@ -99,11 +130,11 @@ mod tests {
     }
 
     #[test]
-    fn flags_count_the_total_flags() {
-        assert_eq!(
-            result_count("feature_flags", r#"{"total_flags":0}"#),
-            Some(0)
-        );
+    fn health_with_only_coverage_gaps_has_no_count() {
+        let text = r#"{"findings":[],"coverage_gaps":{"summary":{},"files":[{"path":"a.ts"}]}}"#;
+        assert_eq!(result_count("check_health", text), None);
+        let clean = r#"{"findings":[],"coverage_gaps":{"summary":{}}}"#;
+        assert_eq!(result_count("check_health", clean), Some(0));
     }
 
     #[test]
@@ -113,13 +144,21 @@ mod tests {
     }
 
     #[test]
+    fn an_unrelated_field_of_another_type_does_not_drop_the_count() {
+        let text = r#"{"total_issues":2,"summary":"text","stats":[1],"findings":3}"#;
+        assert_eq!(result_count("analyze", text), Some(2));
+    }
+
+    #[test]
     fn no_count_for_other_tools_or_unexpected_results() {
         assert_eq!(result_count("project_info", r#"{"total_issues":3}"#), None);
+        assert_eq!(result_count("feature_flags", r#"{"total_flags":3}"#), None);
         assert_eq!(result_count("analyze", "not json"), None);
         assert_eq!(result_count("analyze", r#"{"error":true}"#), None);
         assert_eq!(
             result_count("audit", r#"{"summary":{"dead_code_issues":1}}"#),
             None
         );
+        assert!(!has_count("feature_flags"));
     }
 }

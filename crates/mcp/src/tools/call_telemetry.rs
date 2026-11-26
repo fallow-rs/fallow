@@ -168,19 +168,20 @@ where
     result
 }
 
-/// A copy of the result text when the tool has a finding count and the
-/// cached state says that telemetry is on. The copy happens before the
-/// answer, but the parse runs on the detached task. A server with telemetry
-/// off, or with no state read yet, copies nothing.
+/// A copy of the result text when the tool has a finding count and
+/// telemetry may be on. Only a last known state of "off" skips the copy,
+/// also when that state has expired: a copy that turns out unused costs
+/// less than a count that is lost after each expiry. The parse runs on the
+/// detached task.
 fn text_for_count(tool: &str, result: &Result<CallToolResponse, McpError>) -> Option<String> {
     if !call_counts::has_count(tool) {
         return None;
     }
-    let cached = STATE
+    let last_known = STATE
         .try_lock()
         .ok()
-        .and_then(|state| fresh(*state, Instant::now()));
-    if !matches!(cached, Some(Wanted::Spool | Wanted::Print)) {
+        .and_then(|state| state.map(|reading| reading.wanted));
+    if last_known == Some(Wanted::No) {
         return None;
     }
     let Ok(CallToolResponse::Complete(result)) = result else {
