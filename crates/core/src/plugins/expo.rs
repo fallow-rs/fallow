@@ -7,7 +7,6 @@ use std::path::Path;
 
 use oxc_ast::ast::{
     Argument, ArrayExpression, ArrayExpressionElement, Expression, ObjectExpression, Program,
-    Statement,
 };
 use rustc_hash::FxHashSet;
 
@@ -266,7 +265,11 @@ impl<'a> StaticPluginEntries<'a> {
             return;
         };
         let mut added = Vec::new();
-        collect_added_entries(&self.program.body, binding, &mut added);
+        super::config_parser_array_pushes::collect_added_entries(
+            &self.program.body,
+            binding,
+            &mut added,
+        );
         for argument in added {
             if let Argument::SpreadElement(spread) = argument {
                 self.collect_spread(&spread.argument);
@@ -312,48 +315,6 @@ impl<'a> StaticPluginEntries<'a> {
             && !self.names.contains(&name)
         {
             self.names.push(name);
-        }
-    }
-}
-
-/// Collect the arguments that `binding.push(...)`, `binding.unshift(...)` and
-/// `binding.splice(start, count, ...)` calls add to the array of `binding`.
-/// The calls can be top-level statements or sit in a top-level block or `if`
-/// statement, such as `if (isDev) plugins.push("expo-dev-client")`.
-fn collect_added_entries<'a>(
-    statements: &'a [Statement<'a>],
-    binding: &str,
-    added: &mut Vec<&'a Argument<'a>>,
-) {
-    for statement in statements {
-        match statement {
-            Statement::ExpressionStatement(statement) => {
-                let Expression::CallExpression(call) = statement.expression.get_inner_expression()
-                else {
-                    continue;
-                };
-                let Expression::StaticMemberExpression(member) = &call.callee else {
-                    continue;
-                };
-                if !matches!(member.object.get_inner_expression(), Expression::Identifier(id) if id.name == binding)
-                {
-                    continue;
-                }
-                let skip = match member.property.name.as_str() {
-                    "push" | "unshift" => 0,
-                    "splice" => 2,
-                    _ => continue,
-                };
-                added.extend(call.arguments.iter().skip(skip));
-            }
-            Statement::BlockStatement(block) => collect_added_entries(&block.body, binding, added),
-            Statement::IfStatement(statement) => {
-                collect_added_entries(std::slice::from_ref(&statement.consequent), binding, added);
-                if let Some(alternate) = &statement.alternate {
-                    collect_added_entries(std::slice::from_ref(alternate), binding, added);
-                }
-            }
-            _ => {}
         }
     }
 }

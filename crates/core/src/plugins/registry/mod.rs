@@ -680,7 +680,11 @@ impl AggregatedPluginResult {
                     fallow_graph::resolve::ScopedPathAlias {
                         scope: ws_prefix.to_string(),
                         prefix,
-                        replacement: format!("{ws_prefix}/{replacement}"),
+                        replacement: if replacement.is_empty() {
+                            ws_prefix.to_string()
+                        } else {
+                            format!("{ws_prefix}/{replacement}")
+                        },
                     }
                 }));
         }

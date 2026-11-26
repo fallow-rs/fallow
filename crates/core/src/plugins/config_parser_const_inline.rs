@@ -862,8 +862,12 @@ mod tests {
         assert!(extract_config_string_or_array(source, js_path(), &["c"]).is_empty());
     }
 
+    /// A mutated array is not inlined as a constant. The string reader still
+    /// follows the binding: it reads the literal values and the values that
+    /// `push`, `unshift` and `splice` add. A value that `splice` removes stays
+    /// in the list, so a file that the config can name is never missed.
     #[test]
-    fn constant_that_a_method_call_mutates_does_not_resolve() {
+    fn array_that_a_method_call_mutates_gives_its_listed_and_added_values() {
         let source = r#"
             const PUSHED = ["./a.ts"];
             PUSHED.push("./b.ts");
@@ -873,8 +877,14 @@ mod tests {
             READ.map((file) => file);
             export default { a: PUSHED, b: ASSERTED, c: READ };
         "#;
-        assert!(extract_config_string_or_array(source, ts_path(), &["a"]).is_empty());
-        assert!(extract_config_string_or_array(source, ts_path(), &["b"]).is_empty());
+        assert_eq!(
+            extract_config_string_or_array(source, ts_path(), &["a"]),
+            vec!["./a.ts", "./b.ts"]
+        );
+        assert_eq!(
+            extract_config_string_or_array(source, ts_path(), &["b"]),
+            vec!["./c.ts"]
+        );
         assert_eq!(
             extract_config_string_or_array(source, ts_path(), &["c"]),
             vec!["./d.ts"]

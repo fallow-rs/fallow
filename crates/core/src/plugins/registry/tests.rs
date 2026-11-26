@@ -4280,3 +4280,20 @@ fn anchored_config_file_exports_get_workspace_prefix() {
         )]
     );
 }
+
+#[test]
+fn workspace_path_alias_to_the_plugin_root_is_scoped_to_the_workspace_dir() {
+    let mut workspace = AggregatedPluginResult::default();
+    workspace
+        .path_aliases
+        .push(("@site/".to_string(), String::new()));
+    workspace.apply_workspace_prefix("docs");
+    assert_eq!(
+        workspace.scoped_path_aliases,
+        vec![fallow_graph::resolve::ScopedPathAlias {
+            scope: "docs".to_string(),
+            prefix: "@site/".to_string(),
+            replacement: "docs".to_string(),
+        }]
+    );
+}

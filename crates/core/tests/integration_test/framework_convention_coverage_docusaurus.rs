@@ -82,6 +82,7 @@ fn docusaurus_theme_only_sites_do_not_keep_content_conventions_alive() {
         "src/pages/index.tsx",
         "sidebars.ts",
         "src/helpers/orphan.ts",
+        "src/theme/Navbar/helpers.ts",
     ] {
         assert!(
             unused_files.iter().any(|path| path == expected_unused_file),
@@ -89,7 +90,12 @@ fn docusaurus_theme_only_sites_do_not_keep_content_conventions_alive() {
         );
     }
 
-    for expected_used_file in ["src/theme/Root.tsx", "src/theme/Navbar/index.tsx"] {
+    for expected_used_file in [
+        "src/theme/Root.tsx",
+        "src/theme/Navbar/index.tsx",
+        "src/theme/NavbarItem/ComponentTypes.js",
+        "src/components/version-switcher.tsx",
+    ] {
         assert!(
             !unused_files.iter().any(|path| path == expected_used_file),
             "{expected_used_file} should be treated as framework-used, unused files: {unused_files:?}"

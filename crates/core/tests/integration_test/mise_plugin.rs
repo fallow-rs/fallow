@@ -70,3 +70,29 @@ fn mise_task_commands_credit_packages_and_files() {
         );
     }
 }
+
+#[test]
+fn mise_tasks_credit_build_output_sources_and_email_templates() {
+    // `node ./dist/bin/sync-open-api.js` runs the build output of
+    // `src/bin/sync-open-api.ts` (`tsconfig` `outDir` and `rootDir`), and
+    // `email dev --dir src/emails` reads each template in that folder.
+    let root = fixture_path("mise-task-sources");
+    let config = create_config(root.clone());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_paths = unused_file_paths(&root, &results);
+    for path in [
+        "src/bin/sync-open-api.ts",
+        "src/emails/license.email.tsx",
+        "src/emails/components/futo.layout.tsx",
+    ] {
+        assert!(
+            !unused_paths.contains(&path.to_string()),
+            "{path} should be reachable through a mise task, unused files: {unused_paths:?}"
+        );
+    }
+    assert!(
+        unused_paths.contains(&"src/bin/orphan.ts".to_string()),
+        "ordinary unused files should still report, unused files: {unused_paths:?}"
+    );
+}

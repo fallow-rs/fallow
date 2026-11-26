@@ -20,11 +20,18 @@ const ENTRY_PATTERNS: &[&str] = &[
     "sidebars.{js,ts}",
     "src/theme/*.{ts,tsx,js,jsx}",
     "src/theme/**/index.{ts,tsx,js,jsx}",
+    NESTED_THEME_COMPONENT,
     "versioned_docs/**/*.{md,mdx}",
     "i18n/*/docusaurus-plugin-content-docs/**/*.{md,mdx}",
     "i18n/*/docusaurus-plugin-content-blog/**/*.{md,mdx}",
     "i18n/*/docusaurus-plugin-content-pages/**/*.{md,mdx}",
 ];
+
+/// A nested theme component such as `src/theme/NavbarItem/ComponentTypes.js`,
+/// which shadows `@theme/NavbarItem/ComponentTypes`. Theme component paths
+/// use `PascalCase` names, so a lowercase helper file in a swizzled folder
+/// stays an ordinary module.
+const NESTED_THEME_COMPONENT: &str = "src/theme/**/[A-Z]*.{ts,tsx,js,jsx}";
 
 const CONFIG_PATTERNS: &[&str] = &["docusaurus.config.{js,ts,mjs}"];
 
@@ -88,12 +95,19 @@ impl Plugin for DocusaurusPlugin {
         VIRTUAL_MODULE_PREFIXES
     }
 
+    /// `@site/` names the site directory, so `@site/src/components/x`
+    /// imports a file of the site.
+    fn path_aliases(&self, _root: &Path) -> Vec<(&'static str, String)> {
+        vec![("@site/", String::new())]
+    }
+
     fn used_exports(&self) -> Vec<(&'static str, &'static [&'static str])> {
         vec![
             ("src/pages/**/*.{ts,tsx,js,jsx}", DEFAULT_EXPORTS),
             ("sidebars.{js,ts}", DEFAULT_EXPORTS),
             ("src/theme/*.{ts,tsx,js,jsx}", DEFAULT_EXPORTS),
             ("src/theme/**/index.{ts,tsx,js,jsx}", DEFAULT_EXPORTS),
+            (NESTED_THEME_COMPONENT, DEFAULT_EXPORTS),
         ]
     }
 
@@ -590,6 +604,8 @@ fn add_theme_swizzle_rules(
     entry_patterns.insert("src/theme/**/index.{ts,tsx,js,jsx}".to_string());
     used_exports.insert("src/theme/*.{ts,tsx,js,jsx}".to_string());
     used_exports.insert("src/theme/**/index.{ts,tsx,js,jsx}".to_string());
+    entry_patterns.insert(NESTED_THEME_COMPONENT.to_string());
+    used_exports.insert(NESTED_THEME_COMPONENT.to_string());
 }
 
 fn add_docs_rules(

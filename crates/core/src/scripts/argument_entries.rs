@@ -20,8 +20,13 @@
 //!   expands: `watchee -f './src/**/*'` gives no entry point.
 //!
 //! The built-in test runners of the runtimes (`node --test`, `bun test`,
-//! `deno test`) and `borp` keep all their file arguments. The formatters and
-//! linters of `file_target_tools` and the task runners have their own rules.
+//! `deno test`) and `borp` keep all their file arguments. The `email`
+//! binary of React Email reads the templates of its `--dir` folder. The
+//! formatters and linters of `file_target_tools` and the task runners have
+//! their own rules.
+
+#[path = "react_email.rs"]
+mod react_email;
 
 use super::{
     borp, file_target_tool_loaded_files, is_file_target_tool, looks_like_file_path, node_test,
@@ -314,6 +319,9 @@ pub fn argument_entries<'a>(binary: &str, args: &[&'a str]) -> ArgumentEntries<'
     if is_file_target_tool(name) {
         return ArgumentEntries::Loaded(file_target_tool_loaded_files(name, args));
     }
+    if react_email::is_react_email(name) {
+        return ArgumentEntries::Loaded(react_email::template_globs(args));
+    }
     if let Some(runtime) = script_runtime(name) {
         return runtime_entry_args(name, runtime, args);
     }
@@ -389,7 +397,10 @@ fn is_executable_script(binary: &str) -> bool {
 /// Whether `token` names a program that has its own rules.
 fn is_known_program(token: &str) -> bool {
     let name = tool_name(token);
-    takes_file_arguments(name) || is_file_target_tool(name) || script_runtime(name).is_some()
+    takes_file_arguments(name)
+        || is_file_target_tool(name)
+        || script_runtime(name).is_some()
+        || react_email::is_react_email(name)
 }
 
 /// Return the file arguments of `binary` that become entry points.
