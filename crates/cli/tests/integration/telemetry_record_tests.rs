@@ -283,3 +283,17 @@ fn no_claim_after_a_recorded_decision() {
         );
     }
 }
+
+#[test]
+fn record_reports_the_result_count_of_the_call() {
+    let event = parse_event(&record_inspect("check_health", &["--result-count", "3"]));
+    assert_eq!(event["findings_present"], true);
+    assert_eq!(event["result_count_bucket"], "1-9");
+}
+
+#[test]
+fn record_reports_a_clean_call_as_no_findings() {
+    let event = parse_event(&record_inspect("analyze", &["--result-count", "0"]));
+    assert_eq!(event["findings_present"], false);
+    assert_eq!(event["result_count_bucket"], "0");
+}

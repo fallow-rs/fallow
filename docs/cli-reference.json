@@ -18300,6 +18300,33 @@
               "conflicts_with": [],
               "negates": null,
               "negated_by": null
+            },
+            {
+              "id": "result_count",
+              "long": "--result-count",
+              "short": null,
+              "aliases": [],
+              "value_name": "RESULT_COUNT",
+              "value_names": [
+                "RESULT_COUNT"
+              ],
+              "value_optional": false,
+              "action": "set",
+              "takes_value": true,
+              "multiple": false,
+              "possible_values": [],
+              "default": null,
+              "env": null,
+              "help": "The number of findings in the result, counted as the matching CLI command counts them. Absent when the tool has no such count",
+              "long_help": null,
+              "hidden": false,
+              "hidden_in_short_help": false,
+              "global": false,
+              "help_heading": null,
+              "required": false,
+              "conflicts_with": [],
+              "negates": null,
+              "negated_by": null
             }
           ],
           "subcommands": []

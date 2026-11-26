@@ -4,6 +4,7 @@ mod architecture;
 mod audit;
 #[cfg(test)]
 mod base_root_fixture;
+mod call_counts;
 mod call_telemetry;
 mod cancellation;
 mod check_changed;

@@ -17,10 +17,10 @@ use fallow_config::OutputFormat;
 
 use super::{
     AnalysisMode, ConfigShape, EffectiveMode, FailureReason, IntegrationSurface, OutputDestination,
-    RunAccumulatorSnapshot, RunScope, SPOOL_FILE_NAME, Workflow, WorkflowContext, WorkflowRecord,
+    RunScope, SPOOL_FILE_NAME, Workflow, WorkflowContext, WorkflowRecord,
     build_workflow_event_with, drain_spool_file, effective_config, exit_codes, integration_surface,
-    mcp_tool, parent_run_context, post_telemetry_payload, print_event_to_stderr,
-    resolve_install_id_for_send, spool_event, spool_file,
+    mcp_tool, note_result_count, parent_run_context, post_telemetry_payload, print_event_to_stderr,
+    resolve_install_id_for_send, snapshot_run_accumulators, spool_event, spool_file,
 };
 
 #[path = "telemetry_prompt.rs"]
@@ -49,6 +49,10 @@ pub struct McpCall {
     /// The tool call returned an error.
     #[arg(long)]
     pub failed: bool,
+    /// The number of findings in the result, counted as the matching CLI
+    /// command counts them. Absent when the tool has no such count.
+    #[arg(long)]
+    pub result_count: Option<usize>,
 }
 
 /// Record one in-process MCP tool call. Always exits 0: telemetry never
@@ -57,6 +61,7 @@ fn record_mcp_call(call: McpCall) -> ExitCode {
     let McpCall {
         duration_ms,
         failed,
+        result_count,
     } = call;
     let mode = effective_config().mode;
     if matches!(mode, EffectiveMode::Off | EffectiveMode::DisabledByAdmin) {
@@ -90,8 +95,13 @@ fn record_mcp_call(call: McpCall) -> ExitCode {
             analysis_mode,
         },
     };
+    // This process runs no analysis, so the count from the server is the
+    // only value in the accumulators.
+    if let Some(count) = result_count {
+        note_result_count(count);
+    }
     let parent_run = parent_run_context(None, workflow);
-    let event = build_workflow_event_with(&record, &parent_run, &RunAccumulatorSnapshot::UNSET);
+    let event = build_workflow_event_with(&record, &parent_run, &snapshot_run_accumulators());
     match mode {
         EffectiveMode::Inspect => print_event_to_stderr(&event),
         EffectiveMode::On => {

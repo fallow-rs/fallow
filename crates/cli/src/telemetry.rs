@@ -1341,12 +1341,11 @@ fn inspect(example: bool, output: OutputFormat, json_style: JsonStyle) -> ExitCo
     }
 }
 
-/// Point-in-time copy of every per-run accumulator `build_workflow_event`
-/// consumes. Production snapshots the process globals once per event; tests and
-/// the MCP record command pass `RunAccumulatorSnapshot::UNSET` so it is deterministic
-/// even while a PARALLEL test drives a real command path (e.g.
-/// `load_config_for_analysis` -> `note_config_shape`) that mutates the
-/// globals mid-test. A reset-before-read guard cannot close that race.
+/// Point-in-time copy of every per-run accumulator that `build_workflow_event`
+/// consumes. Tests pass the test-only `RunAccumulatorSnapshot::UNSET`: a parallel
+/// test that drives a real command path (e.g. `load_config_for_analysis` ->
+/// `note_config_shape`) mutates the process globals mid-test, and a
+/// reset-before-read guard cannot close that race.
 struct RunAccumulatorSnapshot {
     failure_reason: Option<FailureReason>,
     config_shape: Option<ConfigShape>,
@@ -1361,6 +1360,7 @@ struct RunAccumulatorSnapshot {
 }
 
 impl RunAccumulatorSnapshot {
+    #[cfg(test)]
     const UNSET: Self = Self {
         failure_reason: None,
         config_shape: None,
