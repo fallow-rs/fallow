@@ -6,7 +6,7 @@ The telemetry contract is documented in three repos:
   - fallow      docs/telemetry.md                              (canonical; ships in npm)
   - fallow-docs cli/telemetry.mdx, explanations/telemetry.mdx,
                 configuration/environment.mdx                  (hosted)
-  - fallow-skills references/cli-reference.md                  (agent guidance)
+  - fallow-skills references/cli/telemetry.md                  (agent guidance)
 
 Within the fallow repo, a Rust test (crates/cli/src/telemetry.rs
 `docs_agent_source_allowlist_matches_code`) already pins docs/telemetry.md to the
@@ -100,7 +100,15 @@ COMPANIONS = (
     (
         "FALLOW_SKILLS_DIR",
         "fallow-skills",
-        (Path("fallow") / "skills" / "fallow" / "references" / "cli-reference.md",),
+        (
+            # The released skill moved the telemetry section from the single CLI
+            # reference into its own file. A companion checkout that still has
+            # the single file keeps passing until it syncs the new layout.
+            (
+                Path("fallow") / "skills" / "fallow" / "references" / "cli" / "telemetry.md",
+                Path("fallow") / "skills" / "fallow" / "references" / "cli-reference.md",
+            ),
+        ),
     ),
 )
 
@@ -119,8 +127,17 @@ def companion_checkouts() -> list[tuple[Path, str, bool, list[Path]]]:
         override = os.environ.get(variable)
         root = Path(override) if override else sibling_of / directory
         named = override is not None
-        checkouts.append((root, variable, named, [root / doc for doc in documents]))
+        checkouts.append((root, variable, named, [resolve_document(root, doc) for doc in documents]))
     return checkouts
+
+
+def resolve_document(root: Path, doc: Path | tuple[Path, ...]) -> Path:
+    """The first candidate path of a document that exists, else the first candidate."""
+    candidates = doc if isinstance(doc, tuple) else (doc,)
+    for candidate in candidates:
+        if (root / candidate).is_file():
+            return root / candidate
+    return root / candidates[0]
 
 
 def missing_values(text: str, allowlist: list[str]) -> list[str]:

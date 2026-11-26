@@ -1,0 +1,4 @@
+### Changed
+
+- **The `fallow` skill has one CLI reference file per command.** The single CLI reference was about 259 KB. A client that read it through the MCP skills extension got the full file in one response, and Claude Code saved a response of more than 50,000 characters to a file. Each command and each shared topic, such as the global flags and the configuration format, now has its own file under `references/cli/`, for example `references/cli/audit.md`. `references/cli-reference.md` is now the command index with a link to each file. No served skill file is larger than 50,000 characters, and `skills/list` lists each new file with its digest. `fallow agent install` writes the new files, and `fallow agent uninstall` removes them.
+  (Closes [#5301](https://github.com/fallow-rs/fallow/issues/5301))

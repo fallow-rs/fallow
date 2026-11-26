@@ -16,11 +16,18 @@ use std::path::{Path, PathBuf};
 use flate2::Compression;
 use flate2::write::GzEncoder;
 
-/// Every released skill with the files it ships, relative to the skill root.
-/// Kept as an explicit list so an unexpected file (for example `_artifacts/`)
-/// never ends up inside the binary. The order matches `RELEASED_SKILLS` in
+/// Every released skill with the files it ships, relative to the skill root,
+/// and the directories whose `.md` files it ships. Kept as an explicit list so
+/// an unexpected file (for example `_artifacts/`) never ends up inside the
+/// binary. The order matches `RELEASED_SKILLS` in
 /// `crates/cli/src/agent_install/skill.rs`.
-const SKILLS: &[(&str, &[&str])] = &[
+type SkillFiles = (
+    &'static str,
+    &'static [&'static str],
+    &'static [&'static str],
+);
+
+const SKILLS: &[SkillFiles] = &[
     (
         "fallow",
         &[
@@ -34,6 +41,9 @@ const SKILLS: &[(&str, &[&str])] = &[
             "references/patterns.md",
             "references/similar-code.md",
         ],
+        // One CLI reference file per command, so that each file fits in one
+        // MCP response.
+        &["references/cli"],
     ),
     (
         "fallow-setup",
@@ -44,6 +54,7 @@ const SKILLS: &[(&str, &[&str])] = &[
             "references/configure-and-install.md",
             "references/tooling-detection.md",
         ],
+        &[],
     ),
 ];
 
@@ -64,19 +75,29 @@ pub fn generate(out_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
     let skills_root = env_path("CARGO_MANIFEST_DIR")?.join("../../npm/fallow/skills");
 
     let mut skills: Vec<String> = Vec::new();
-    for (name, files) in SKILLS {
+    for (name, listed, dirs) in SKILLS {
         let root = skills_root.join(name);
         println!("cargo:rerun-if-changed={}", root.display());
-        for relative in *files {
-            println!("cargo:rerun-if-changed={}", root.join(relative).display());
+        for dir in *dirs {
+            println!("cargo:rerun-if-changed={}", root.join(dir).display());
         }
         if !root.join("SKILL.md").is_file() {
+            for relative in *listed {
+                println!("cargo:rerun-if-changed={}", root.join(relative).display());
+            }
             continue;
+        }
+        let mut files: Vec<String> = listed.iter().map(|file| (*file).to_string()).collect();
+        for dir in *dirs {
+            files.extend(markdown_files(&root, dir)?);
+        }
+        for relative in &files {
+            println!("cargo:rerun-if-changed={}", root.join(relative).display());
         }
         let skill_dir = out_dir.join("embedded-skill").join(name);
         fs::create_dir_all(&skill_dir)?;
         let mut entries: Vec<String> = Vec::new();
-        for relative in *files {
+        for relative in &files {
             let bytes = fs::read(root.join(relative))?;
             let target = skill_dir.join(format!("{}.gz", relative.replace('/', "__")));
             fs::write(&target, gzip(&bytes)?)?;
@@ -116,6 +137,23 @@ pub fn generate(out_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
     );
     write_if_changed(&out_dir.join("embedded_skill.rs"), &generated)?;
     Ok(())
+}
+
+/// The `.md` files directly in `root/dir`, as sorted paths relative to `root`.
+fn markdown_files(root: &Path, dir: &str) -> io::Result<Vec<String>> {
+    let mut files = Vec::new();
+    for entry in fs::read_dir(root.join(dir))? {
+        let entry = entry?;
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let markdown = Path::new(&name)
+            .extension()
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("md"));
+        if !entry.file_type()?.is_dir() && markdown {
+            files.push(format!("{dir}/{name}"));
+        }
+    }
+    files.sort();
+    Ok(files)
 }
 
 /// Render a length with `_` separators so the generated file passes the

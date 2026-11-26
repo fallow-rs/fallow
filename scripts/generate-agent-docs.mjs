@@ -4,7 +4,9 @@
  * `fallow schema` capability manifest (issues #1188 and #1189).
  *
  * Targets: `<target>/SKILL.md` and, when present,
- * `<target>/references/cli-reference.md` and `<target>/references/mcp.md`.
+ * `<target>/references/cli-reference.md` (the command index), every
+ * `<target>/references/cli/*.md` file (one per command or shared topic),
+ * `<target>/references/issue-types.md` and `<target>/references/mcp.md`.
  * SKILL.md sections:
  *
  *   <!-- generated:commands:start -->    ... <!-- generated:commands:end -->
@@ -17,7 +19,9 @@
  * catalogue the server lists under resources/list and
  * resources/templates/list). CLI reference sections use `generated:flags:*` markers for global
  * flags, bare `fallow` combined-mode flags, command-local flags, and the
- * dead-code issue filter table.
+ * dead-code issue filter table. The CLI reference is split over several files
+ * so that each file fits in one MCP response; a section lives in exactly one of
+ * them, and a section that two files carry fails the run.
  *
  * A target whose text contains NEITHER marker of a section has not adopted
  * that section and is skipped; a half-present marker pair still fails loudly.
@@ -74,7 +78,7 @@
  */
 
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -396,7 +400,7 @@ const renderCommandsSection = (schema, existing) => {
   return [
     renderTable(headers, rows),
     "",
-    "Run `fallow <command> --help` for the full flag list per command (see also references/cli-reference.md).",
+    "Run `fallow <command> --help` for the full flag list per command (see also the per-command files under references/cli/).",
   ].join("\n");
 };
 
@@ -532,7 +536,7 @@ const flagByName = (schema, name) => {
 const flagRefs = (schema, names) =>
   names
     .map((name) => flagByName(schema, name).name)
-    .map((name) => `[${code(name)}](#global-flags)`)
+    .map((name) => `[${code(name)}](global-flags.md)`)
     .join(", ");
 
 const nonArgumentFlags = (flags) => flags.filter((flag) => flag.name.startsWith("--"));
@@ -1064,6 +1068,40 @@ const publishedKeyFlagCells = (file, text) => {
   return [{ file, rows }];
 };
 
+/** The CLI reference files of a target, relative to it: the command index
+ * `references/cli-reference.md` and each `references/cli/*.md` file, sorted. */
+export const cliReferenceFiles = (target) => {
+  const files = [];
+  if (existsSync(join(target, "references", "cli-reference.md"))) {
+    files.push("references/cli-reference.md");
+  }
+  const cliDir = join(target, "references", "cli");
+  if (existsSync(cliDir)) {
+    files.push(
+      ...readdirSync(cliDir)
+        .filter((name) => name.endsWith(".md"))
+        .toSorted()
+        .map((name) => `references/cli/${name}`),
+    );
+  }
+  return files;
+};
+
+/** Record the file that carries each CLI section; a second file with the same
+ * section would make two copies that drift apart, so it fails the run. */
+const claimCliSections = (text, file, owners) => {
+  for (const sectionId of CLI_REFERENCE_SECTION_IDS) {
+    if (sectionIsAbsent(text, sectionId)) {
+      continue;
+    }
+    const owner = owners.get(sectionId);
+    if (owner) {
+      throw new Error(`section ${sectionId} is in both ${owner} and ${file}`);
+    }
+    owners.set(sectionId, file);
+  }
+};
+
 const collectAdoptedSections = (text, sectionIds, adopted) => {
   for (const sectionId of sectionIds) {
     if (!sectionIsAbsent(text, sectionId)) {
@@ -1099,16 +1137,18 @@ export const main = (argv = process.argv.slice(2)) => {
       drifted += 1;
     }
 
-    const cliReferenceFile = join(target, "references", "cli-reference.md");
-    if (existsSync(cliReferenceFile)) {
+    const cliSectionOwners = new Map();
+    for (const relativeFile of cliReferenceFiles(target)) {
+      const cliReferenceFile = join(target, relativeFile);
       const cliBefore = readFileSync(cliReferenceFile, "utf8");
+      claimCliSections(cliBefore, cliReferenceFile, cliSectionOwners);
       collectAdoptedSections(cliBefore, CLI_REFERENCE_SECTION_IDS, adoptedSections);
       const cliAfter = regenerateCliReferenceMd(cliBefore, schema, cliReferenceFile);
       keyFlagCells.push(...publishedKeyFlagCells(cliReferenceFile, cliAfter));
       if (
         processFile({
           file: cliReferenceFile,
-          outputFile: join(outputTarget, "references", "cli-reference.md"),
+          outputFile: join(outputTarget, relativeFile),
           before: cliBefore,
           after: cliAfter,
           schema,

@@ -6,6 +6,29 @@
  * to the manifest instead of duplicating this list.
  */
 
+import { existsSync, readdirSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
+
+const SKILL_CLI_REFERENCE_DIR = "npm/fallow/skills/fallow/references/cli";
+
+/**
+ * The per-command CLI reference files of the released `fallow` skill. The
+ * agent docs generator regenerates the marked sections of each file, and the
+ * split keeps each file small enough for one MCP response. A partial checkout
+ * without the skill tree has none.
+ */
+const SKILL_CLI_REFERENCE_FILES = Object.freeze(
+  existsSync(join(REPO_ROOT, SKILL_CLI_REFERENCE_DIR))
+    ? readdirSync(join(REPO_ROOT, SKILL_CLI_REFERENCE_DIR))
+        .filter((name) => name.endsWith(".md"))
+        .toSorted()
+        .map((name) => `${SKILL_CLI_REFERENCE_DIR}/${name}`)
+    : [],
+);
+
 /**
  * The mutation runner companion files that `fallow-api` embeds, as paths
  * relative to `tools/mutation-runner/src`. The generator copies each file to
@@ -136,6 +159,7 @@ export const contractSurfaces = Object.freeze([
     generatedPaths: [
       "npm/fallow/skills/fallow/SKILL.md",
       "npm/fallow/skills/fallow/references/cli-reference.md",
+      ...SKILL_CLI_REFERENCE_FILES,
       "npm/fallow/skills/fallow/references/issue-types.md",
       "npm/fallow/skills/fallow/references/mcp.md",
       "scripts/agent-doc-curated-seeds.json",

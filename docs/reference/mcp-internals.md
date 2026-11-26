@@ -120,6 +120,13 @@ gets the skill of the same version as the tools, with no separate install.
   of the named skill, or every served skill.
 - The manifest lists every file, so the server does not declare
   `directoryRead`.
+- Each served file stays at or below 50,000 characters. Claude Code saves a
+  larger MCP response to a file, and the agent must then read that file in
+  parts. For this reason the CLI reference of the `fallow` skill has one file
+  per command under `references/cli/`, and `references/cli-reference.md` is
+  the command index. `embed_skills.rs` embeds each `.md` file of that folder.
+  `served_skill_files_fit_in_one_response` in
+  `crates/mcp/tests/integration/resources.rs` enforces the limit.
 - Skill files are not in the `fallow://` catalogue and not in
   `resources/list`.
 - `crates/mcp/tests/integration/resources.rs` compares each served file with

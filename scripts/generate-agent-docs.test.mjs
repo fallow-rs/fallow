@@ -756,6 +756,64 @@ test("--check exits 1 on drift, writes nothing, and exits 0 when in sync", async
   rmSync(dir, { recursive: true });
 });
 
+const splitCliReference = (text) => {
+  const start = "<!-- generated:flags:dupes:start -->";
+  const end = "<!-- generated:flags:dupes:end -->";
+  const block = text.slice(text.indexOf(start), text.indexOf(end) + end.length);
+  return { index: text.replace(block, ""), dupes: `# \`dupes\`\n\n${block}\n` };
+};
+
+test("each references/cli file is regenerated and checked", async () => {
+  const { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { main } = await import("./generate-agent-docs.mjs");
+
+  const dir = mkdtempSync(join(tmpdir(), "agent-docs-split-"));
+  const cliDir = join(dir, "references", "cli");
+  const schemaPath = join(dir, "schema.json");
+  writeFileSync(schemaPath, JSON.stringify(SCHEMA));
+  writeFileSync(join(dir, "SKILL.md"), DOC);
+  mkdirSync(cliDir, { recursive: true });
+  const { index, dupes } = splitCliReference(DOC_CLI_REFERENCE);
+  writeFileSync(join(dir, "references", "cli-reference.md"), index);
+  writeFileSync(join(cliDir, "dupes.md"), dupes);
+
+  const args = ["--schema", schemaPath, "--target", dir, "--seed-record", join(dir, "seeds.json")];
+  assert.equal(main(args), 0);
+  const dupesAfter = readFileSync(join(cliDir, "dupes.md"), "utf8");
+  assert.ok(dupesAfter.includes("`--mode`"), dupesAfter);
+  assert.ok(!dupesAfter.includes("](#global-flags)"), dupesAfter);
+  assert.equal(main([...args, "--check"]), 0);
+
+  writeFileSync(join(cliDir, "dupes.md"), dupes);
+  assert.equal(main([...args, "--check"]), 1);
+  rmSync(dir, { recursive: true });
+});
+
+test("a CLI section in two references files fails the run", async () => {
+  const { mkdtempSync, mkdirSync, writeFileSync, rmSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { main } = await import("./generate-agent-docs.mjs");
+
+  const dir = mkdtempSync(join(tmpdir(), "agent-docs-dup-section-"));
+  const cliDir = join(dir, "references", "cli");
+  const schemaPath = join(dir, "schema.json");
+  writeFileSync(schemaPath, JSON.stringify(SCHEMA));
+  writeFileSync(join(dir, "SKILL.md"), DOC);
+  mkdirSync(cliDir, { recursive: true });
+  writeFileSync(join(dir, "references", "cli-reference.md"), DOC_CLI_REFERENCE);
+  writeFileSync(join(cliDir, "dupes.md"), splitCliReference(DOC_CLI_REFERENCE).dupes);
+
+  const args = ["--schema", schemaPath, "--target", dir, "--seed-record", join(dir, "seeds.json")];
+  assert.throws(
+    () => main(args),
+    /section flags:dupes is in both .*cli-reference\.md and .*dupes\.md/,
+  );
+  rmSync(dir, { recursive: true });
+});
+
 test("--output-target stages regenerated docs without changing the source target", async () => {
   const { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } = await import("node:fs");
   const { tmpdir } = await import("node:os");

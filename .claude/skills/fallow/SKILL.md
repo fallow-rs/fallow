@@ -109,7 +109,7 @@ Route by intent before reaching for the big analysis commands. Same matrix as `f
 
 `fallow <command> --help` prints the live flag list for any command; `fallow schema` dumps the whole CLI definition as JSON.
 
-Full command catalogue, one row per command: **[references/cli-reference.md](references/cli-reference.md)**.
+Full command catalogue, one row per command: **[references/cli-reference.md](references/cli-reference.md)**. Each command has its own file with the complete flag specifications, for example [references/cli/audit.md](references/cli/audit.md). Read only the file of the command that you need.
 
 ## Issue Types
 
@@ -134,7 +134,7 @@ Fallow Cloud also runs a hosted MCP server at `POST https://api.fallow.cloud/mcp
 Full tool catalogue, resource catalogue, key params, runtime source-map confidence tiers, shared timeouts, and the `next_steps` dispatch mapping: **[references/mcp.md](references/mcp.md)**.
 
 ## References
-- [CLI Reference](references/cli-reference.md): the command catalogue, complete flag specifications, and configuration field details
+- [CLI Reference](references/cli-reference.md): the command catalogue and an index of the per-command files under `references/cli/`, with complete flag specifications, global flags, and configuration field details
 - [MCP Tools](references/mcp.md): MCP server tool and resource catalogues, CLI fallbacks, params, and agent dispatch guidance
 - [Issue Types](references/issue-types.md): every issue type with its filter flag, fixability, and suppression comment
 - [Gotchas](references/gotchas.md): common pitfalls, edge cases, and correct usage patterns

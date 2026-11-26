@@ -11,10 +11,12 @@ import { dirname, join, resolve } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
+import { cliReferenceFiles } from "./generate-agent-docs.mjs";
+
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const CLI_SOURCE = join(REPO_ROOT, "crates/cli/src/cli_args_root.rs");
 const CAPABILITIES = join(REPO_ROOT, "npm/fallow/capabilities.json");
-const CLI_REFERENCE = join(REPO_ROOT, "npm/fallow/skills/fallow/references/cli-reference.md");
+const SKILL_DIR = join(REPO_ROOT, "npm/fallow/skills/fallow");
 
 /** `--help` and `--version` are clap builtins that `build_cli_schema` drops. */
 const SCHEMA_EXCLUDED_FLAGS = new Set(["--help", "--version"]);
@@ -70,7 +72,9 @@ const capabilityGlobalFlags = () =>
   JSON.parse(readFileSync(CAPABILITIES, "utf8")).global_flags ?? [];
 
 const referenceSection = (id) => {
-  const text = readFileSync(CLI_REFERENCE, "utf8");
+  const text = cliReferenceFiles(SKILL_DIR)
+    .map((file) => readFileSync(join(SKILL_DIR, file), "utf8"))
+    .join("\n");
   const start = text.indexOf(`<!-- generated:${id}:start -->`);
   const end = text.indexOf(`<!-- generated:${id}:end -->`);
   assert.ok(start !== -1 && end > start, `cli-reference should carry the ${id} section`);
@@ -117,7 +121,7 @@ test("the health flags section points at the baseline global flags", () => {
   const section = referenceSection("flags:health");
   for (const flag of ["--baseline", "--baseline-mode", "--save-baseline"]) {
     assert.ok(
-      section.includes(`[\`${flag}\`](#global-flags)`),
+      section.includes(`[\`${flag}\`](global-flags.md)`),
       `health section should reference ${flag}`,
     );
   }

@@ -566,7 +566,7 @@ fn remove_unwritten_managed_files(ctx: &Ctx, target: &Target, files: &[(String, 
         }
     }
     if removed && !ctx.dry_run {
-        for sub in ["references", "agents"] {
+        for sub in managed_dirs(target.skill) {
             let _ = std::fs::remove_dir(target.dir.join(sub));
         }
     }
@@ -587,13 +587,40 @@ fn managed_files(skill: &ReleasedSkill) -> Vec<String> {
     files
 }
 
+/// Every subdirectory a managed skill directory may contain, deepest first,
+/// so that a removal in this order empties each child before its parent.
+/// `references` and `agents` stay in the set without an embedded copy too.
+fn managed_dirs(skill: &ReleasedSkill) -> Vec<String> {
+    let mut dirs: Vec<String> = vec!["references".to_string(), "agents".to_string()];
+    for file in managed_files(skill) {
+        let mut rest = file.as_str();
+        while let Some((parent, _)) = rest.rsplit_once('/') {
+            if !dirs.iter().any(|dir| dir == parent) {
+                dirs.push(parent.to_string());
+            }
+            rest = parent;
+        }
+    }
+    dirs.sort_by(|a, b| {
+        b.matches('/')
+            .count()
+            .cmp(&a.matches('/').count())
+            .then(a.cmp(b))
+    });
+    dirs
+}
+
 /// The first symlink on the way to the skill directory or a file in it.
 /// Install and uninstall write or delete only paths from this set.
 fn symlink_in(ctx: &Ctx, target: &Target) -> Option<PathBuf> {
     let files: Vec<PathBuf> = managed_files(target.skill)
         .iter()
         .map(|relative| target.dir.join(relative))
-        .chain(["references", "agents"].map(|sub| target.dir.join(sub)))
+        .chain(
+            managed_dirs(target.skill)
+                .iter()
+                .map(|sub| target.dir.join(sub)),
+        )
         .collect();
     ctx.symlink_on(std::iter::once(target.dir.as_path()).chain(files.iter().map(PathBuf::as_path)))
 }
@@ -642,7 +669,7 @@ fn uninstall_one(ctx: &Ctx, target: &Target) -> StepReport {
             }
         }
     }
-    for sub in ["references", "agents"] {
+    for sub in managed_dirs(target.skill) {
         let _ = std::fs::remove_dir(target.dir.join(sub));
     }
     let _ = std::fs::remove_dir(&target.dir);
