@@ -38,6 +38,7 @@ mod security;
 mod semantic;
 mod similar_code;
 mod suppressions;
+mod telemetry_consent;
 mod trace;
 
 pub use analyze::{analyze_runs_type_aware, build_analyze_args, run_analyze};
@@ -77,6 +78,7 @@ pub use fix::{run_fix_apply_confirmed, run_fix_preview};
 #[cfg(test)]
 pub use fix_confirm::CONFIRM_INPUT_KEY;
 pub use fix_confirm::CONFIRM_TIMEOUT;
+pub use fix_confirm::confirm_route;
 pub use flags::{build_feature_flags_args, run_feature_flags};
 #[cfg(test)]
 pub use guard::build_guard_args;
@@ -107,6 +109,7 @@ pub use similar_code::{run_find_similar_code, run_inspect_similar_code};
 #[cfg(test)]
 pub use suppressions::build_list_suppressions_args;
 pub use suppressions::run_list_suppressions;
+pub use telemetry_consent::offer_after_call as offer_telemetry_consent;
 pub use trace::{
     build_trace_clone_args, build_trace_dependency_args, build_trace_export_args,
     build_trace_file_args, run_trace_clone_tool, run_trace_dependency_tool, run_trace_error_tool,

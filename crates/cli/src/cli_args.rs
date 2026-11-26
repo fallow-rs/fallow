@@ -1767,16 +1767,21 @@ pub enum TelemetryCli {
     /// Record one in-process MCP tool call. The MCP server runs this.
     #[command(hide = true)]
     Record(crate::telemetry::McpCall),
+    /// Claim the one-time consent form of the MCP server. The MCP server runs this.
+    #[command(hide = true)]
+    ClaimPrompt,
 }
 
 impl From<TelemetryCli> for crate::telemetry::TelemetryCommand {
     fn from(sub: TelemetryCli) -> Self {
+        use crate::telemetry::McpCommand;
         match sub {
             TelemetryCli::Status => Self::Status,
             TelemetryCli::Enable => Self::Enable,
             TelemetryCli::Disable => Self::Disable,
             TelemetryCli::Inspect { example } => Self::Inspect { example },
-            TelemetryCli::Record(call) => Self::Record(call),
+            TelemetryCli::Record(call) => Self::Mcp(McpCommand::Record(call)),
+            TelemetryCli::ClaimPrompt => Self::Mcp(McpCommand::ClaimPrompt),
         }
     }
 }

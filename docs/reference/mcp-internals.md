@@ -611,6 +611,31 @@ and no `package.json` takes it. Without `root`, the server folder decides.
   the `PATH` names the binary. A missing binary gives
   `FALLOW_RUST_BINARY_NOT_FOUND`.
 
+## Telemetry consent form
+
+`crates/mcp/src/tools/telemetry_consent.rs` sends the one-time telemetry
+consent form; `docs/telemetry.md` describes it for users. `call_tool` offers
+it after each completed call, but each process starts at most one attempt,
+and only on the `elicitation/create` route that `fix_confirm::confirm_route`
+selects. The attempt runs on a detached task:
+
+1. It waits until `call_telemetry::idle_for` reports 20 seconds with no
+   running call.
+2. It runs `fallow telemetry claim-prompt`. The CLI owns every rule (kill
+   switches, CI, environment overrides, a recorded decision, the shared ask
+   limit) and counts the ask under a create-new lock. The ask counts
+   before the form goes out, so a lost form uses an ask; that fails safe.
+3. It waits for 20 quiet seconds again, because a call can start while
+   the claim runs.
+4. It sends the form with no timeout and maps the answer: an explicit
+   `true` runs `fallow telemetry enable`, a `false` or a decline runs
+   `fallow telemetry disable`, and anything else records nothing.
+5. After a change, it clears the cached telemetry state of
+   `call_telemetry`, so the next call reads the new state.
+
+The form never reaches the agent: no tool result, description or server
+instruction names it.
+
 ## Execution and telemetry
 
 The standalone tools choose typed execution or an explicit CLI fallback; the

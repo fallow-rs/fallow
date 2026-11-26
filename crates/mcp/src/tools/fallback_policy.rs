@@ -91,9 +91,9 @@ mod tests {
         // The typed route runs first and falls back only when `fallow_api`
         // refuses with a code that `api_runtime::typed_error_needs_cli` names.
         let refusal_cli_backed = ["trace.rs"];
-        // Runs `fallow telemetry status` and `fallow telemetry record` after
-        // a call, never the analysis of a tool.
-        let telemetry_cli = ["call_telemetry.rs"];
+        // Run `fallow telemetry` commands after a call, never the analysis
+        // of a tool.
+        let telemetry_cli = ["call_telemetry.rs", "telemetry_consent.rs"];
 
         for entry in std::fs::read_dir(&tools_dir).expect("read tools dir") {
             let entry = entry.expect("read tools entry");
