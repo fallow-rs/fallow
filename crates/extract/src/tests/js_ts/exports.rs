@@ -121,3 +121,19 @@ fn default_export_of_an_interface_is_type_only() {
     let class = parse_source("export default class Options {}");
     assert!(!is_type_only_export(&class, &ExportName::Default));
 }
+
+#[test]
+fn a_decorator_records_the_decorator_fact_once() {
+    let has_fact = |info: &fallow_types::extract::ModuleInfo| {
+        info.semantic_facts
+            .iter()
+            .filter(|fact| matches!(fact, fallow_types::extract::SemanticFact::HasDecorators))
+            .count()
+    };
+    let decorated = parse_source(
+        "const d = (_t: object, _k: string): void => {};\nexport class A { @d a = 1; @d b = 2; }",
+    );
+    assert_eq!(has_fact(&decorated), 1);
+    let plain = parse_source("export class A { a = 1; }");
+    assert_eq!(has_fact(&plain), 0);
+}

@@ -1,2 +1,2 @@
 import { start } from './a';
-export class Engine { run(): void { start(this); } }
+export class Engine { run(): void { void start; } }

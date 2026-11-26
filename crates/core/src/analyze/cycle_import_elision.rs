@@ -1,16 +1,20 @@
-//! The compiler options that keep a TypeScript type import in the output
-//! (issue #5262).
+//! The compiler options that decide which plain imports TypeScript removes
+//! (issues #5262 and #5309).
 //!
-//! TypeScript removes a plain import of names that are only types, so the
-//! cycle detector does not count it. Some options keep each import:
+//! TypeScript removes a plain import that the file never reads as a value,
+//! so the cycle detector does not count it. Some options keep each import:
 //! `verbatimModuleSyntax`, `preserveValueImports`, and
-//! `importsNotUsedAsValues` with `preserve` or `error`. This reader finds
-//! those options for one importer. It treats a Deno project as one that
-//! keeps imports, because Deno does not read `tsconfig.json`.
+//! `importsNotUsedAsValues` with `preserve` or `error`.
+//! `emitDecoratorMetadata` keeps an import that a decorated file uses as a
+//! type. This reader finds those options for one importer. It treats a Deno
+//! project as one that keeps imports, because Deno does not read
+//! `tsconfig.json`.
 
 use std::path::{Component, Path, PathBuf};
 
 use rustc_hash::FxHashMap;
+
+use crate::graph::ImportElision;
 
 const TSCONFIG: &str = "tsconfig.json";
 const DENO_CONFIGS: [&str; 2] = ["deno.json", "deno.jsonc"];
@@ -21,14 +25,18 @@ const KEEP_IMPORT_FLAGS: [&str; 2] = ["verbatimModuleSyntax", "preserveValueImpo
 /// with these values.
 const KEEP_IMPORT_MODES: [&str; 2] = ["preserve", "error"];
 
-/// A per-folder cache of whether the TypeScript files of a folder keep each
-/// import.
-pub(super) struct ImportKeepingConfigs {
+/// The `compilerOptions` key that turns a decorated type annotation into a
+/// runtime reference.
+const DECORATOR_METADATA_FLAG: &str = "emitDecoratorMetadata";
+
+/// A per-folder cache of the [`ImportElision`] of the TypeScript files of a
+/// folder.
+pub(super) struct ImportElisionConfigs {
     root: PathBuf,
-    by_dir: FxHashMap<PathBuf, bool>,
+    by_dir: FxHashMap<PathBuf, ImportElision>,
 }
 
-impl ImportKeepingConfigs {
+impl ImportElisionConfigs {
     pub(super) fn new(root: &Path) -> Self {
         Self {
             root: root.to_path_buf(),
@@ -36,50 +44,52 @@ impl ImportKeepingConfigs {
         }
     }
 
-    /// Whether the compiler options of `file` keep each import.
+    /// The [`ImportElision`] of the compiler options of `file`.
     ///
     /// The nearest `tsconfig.json` between the file and the project root
     /// decides, together with the `tsconfig.*.json` files next to it and the
     /// configs inside the project root that its `references` name. A
     /// solution-style config (`files: []`) names its real configs there.
-    /// When one of these configs keeps imports, the file keeps imports.
+    /// The strictest of these configs wins.
     ///
     /// Each unclear case keeps imports, so it never hides a cycle: a config
-    /// that does not parse, a Deno config, and a file outside the project
-    /// root. With no config, TypeScript uses its defaults and removes type
-    /// imports.
-    pub(super) fn keeps_imports(&mut self, file: &Path) -> bool {
-        file.parent().is_none_or(|dir| self.dir_keeps_imports(dir))
+    /// that does not parse or whose `extends` chain does not resolve, a Deno
+    /// config, and a file outside the project root. With no config, TypeScript uses its defaults and removes each
+    /// import that the file never reads as a value.
+    pub(super) fn elision_of(&mut self, file: &Path) -> ImportElision {
+        file.parent()
+            .map_or(ImportElision::Keep, |dir| self.dir_elision(dir))
     }
 
-    fn dir_keeps_imports(&mut self, dir: &Path) -> bool {
-        if let Some(&keeps) = self.by_dir.get(dir) {
-            return keeps;
+    fn dir_elision(&mut self, dir: &Path) -> ImportElision {
+        if let Some(&elision) = self.by_dir.get(dir) {
+            return elision;
         }
-        let keeps = if !dir.starts_with(&self.root)
+        let elision = if !dir.starts_with(&self.root)
             || DENO_CONFIGS.iter().any(|name| dir.join(name).is_file())
         {
-            true
+            ImportElision::Keep
         } else if dir.join(TSCONFIG).is_file() {
-            self.dir_configs_keep_imports(dir)
+            self.dir_configs_elision(dir)
         } else if dir == self.root {
-            false
+            ImportElision::RemoveUnread
         } else {
             dir.parent()
-                .is_some_and(|parent| self.dir_keeps_imports(parent))
+                .map_or(ImportElision::Keep, |parent| self.dir_elision(parent))
         };
-        self.by_dir.insert(dir.to_path_buf(), keeps);
-        keeps
+        self.by_dir.insert(dir.to_path_buf(), elision);
+        elision
     }
 }
 
-impl ImportKeepingConfigs {
-    /// Whether `tsconfig.json` in `dir`, a `tsconfig.*.json` next to it, or a
-    /// config that its `references` name keeps each import.
-    fn dir_configs_keep_imports(&self, dir: &Path) -> bool {
+impl ImportElisionConfigs {
+    /// The strictest [`ImportElision`] of `tsconfig.json` in `dir`, the
+    /// `tsconfig.*.json` files next to it, and the configs that its
+    /// `references` name.
+    fn dir_configs_elision(&self, dir: &Path) -> ImportElision {
         let config = dir.join(TSCONFIG);
         let Some(references) = self.references(&config) else {
-            return true;
+            return ImportElision::Keep;
         };
         let siblings = std::fs::read_dir(dir)
             .into_iter()
@@ -94,7 +104,8 @@ impl ImportKeepingConfigs {
         std::iter::once(config)
             .chain(siblings)
             .chain(references)
-            .any(|config| config_keeps_imports(&config))
+            .map(|config| config_elision(&config))
+            .fold(ImportElision::RemoveUnread, stricter)
     }
 
     /// The config files inside the project root that the `references` of
@@ -150,17 +161,48 @@ fn is_sibling_config(name: &str) -> bool {
         .is_some_and(|middle| !middle.is_empty())
 }
 
-fn config_keeps_imports(config: &Path) -> bool {
+/// The elision that keeps more imports of `a` and `b`.
+const fn stricter(a: ImportElision, b: ImportElision) -> ImportElision {
+    match (a, b) {
+        (ImportElision::Keep, _) | (_, ImportElision::Keep) => ImportElision::Keep,
+        (ImportElision::KeepDecoratedTypes, _) | (_, ImportElision::KeepDecoratedTypes) => {
+            ImportElision::KeepDecoratedTypes
+        }
+        _ => ImportElision::RemoveUnread,
+    }
+}
+
+/// The elision of one config and its `extends` chain. A config whose chain
+/// does not resolve keeps imports: a framework can generate the parent at
+/// build time (SvelteKit `$app/tsconfig`), and that parent can set
+/// `verbatimModuleSyntax`.
+fn config_elision(config: &Path) -> ImportElision {
     let Some(merged) = fallow_config::MergedTsconfig::read(config) else {
-        return true;
+        return ImportElision::Keep;
     };
-    KEEP_IMPORT_FLAGS.iter().any(|flag| {
+    if !merged.is_complete() {
+        return ImportElision::Keep;
+    }
+    let is_on = |flag: &str| {
         merged
             .compiler_option(flag)
             .is_some_and(|value| value.value().as_bool() == Some(true))
-    }) || merged
-        .compiler_option_str("importsNotUsedAsValues")
-        .is_some_and(|mode| KEEP_IMPORT_MODES.contains(&mode))
+    };
+    if KEEP_IMPORT_FLAGS.iter().any(|flag| is_on(flag))
+        || merged
+            .compiler_option_str("importsNotUsedAsValues")
+            .is_some_and(|mode| {
+                KEEP_IMPORT_MODES
+                    .iter()
+                    .any(|keep| keep.eq_ignore_ascii_case(mode))
+            })
+    {
+        ImportElision::Keep
+    } else if is_on(DECORATOR_METADATA_FLAG) {
+        ImportElision::KeepDecoratedTypes
+    } else {
+        ImportElision::RemoveUnread
+    }
 }
 
 #[cfg(test)]
@@ -180,15 +222,21 @@ mod tests {
             TSCONFIG,
             r#"{ "compilerOptions": { "strict": true } }"#,
         );
-        let mut configs = ImportKeepingConfigs::new(tmp.path());
-        assert!(!configs.keeps_imports(&tmp.path().join("src/a.ts")));
+        let mut configs = ImportElisionConfigs::new(tmp.path());
+        assert_eq!(
+            configs.elision_of(&tmp.path().join("src/a.ts")),
+            ImportElision::RemoveUnread
+        );
     }
 
     #[test]
     fn no_config_removes_type_imports() {
         let tmp = tempfile::tempdir().expect("tempdir");
-        let mut configs = ImportKeepingConfigs::new(tmp.path());
-        assert!(!configs.keeps_imports(&tmp.path().join("a.ts")));
+        let mut configs = ImportElisionConfigs::new(tmp.path());
+        assert_eq!(
+            configs.elision_of(&tmp.path().join("a.ts")),
+            ImportElision::RemoveUnread
+        );
     }
 
     #[test]
@@ -198,6 +246,7 @@ mod tests {
             r#"{ "preserveValueImports": true }"#,
             r#"{ "importsNotUsedAsValues": "preserve" }"#,
             r#"{ "importsNotUsedAsValues": "error" }"#,
+            r#"{ "importsNotUsedAsValues": "Preserve" }"#,
         ] {
             let tmp = tempfile::tempdir().expect("tempdir");
             write(
@@ -205,8 +254,12 @@ mod tests {
                 TSCONFIG,
                 &format!(r#"{{ "compilerOptions": {options} }}"#),
             );
-            let mut configs = ImportKeepingConfigs::new(tmp.path());
-            assert!(configs.keeps_imports(&tmp.path().join("a.ts")), "{options}");
+            let mut configs = ImportElisionConfigs::new(tmp.path());
+            assert_eq!(
+                configs.elision_of(&tmp.path().join("a.ts")),
+                ImportElision::Keep,
+                "{options}"
+            );
         }
     }
 
@@ -231,10 +284,19 @@ mod tests {
             "tsconfig.app.json",
             r#"{ "compilerOptions": { "preserveValueImports": true } }"#,
         );
-        let mut configs = ImportKeepingConfigs::new(tmp.path());
-        assert!(configs.keeps_imports(&app.join("src/main.ts")));
-        assert!(!configs.keeps_imports(&lib.join("index.ts")));
-        assert!(configs.keeps_imports(&tmp.path().join("other/x.ts")));
+        let mut configs = ImportElisionConfigs::new(tmp.path());
+        assert_eq!(
+            configs.elision_of(&app.join("src/main.ts")),
+            ImportElision::Keep
+        );
+        assert_eq!(
+            configs.elision_of(&lib.join("index.ts")),
+            ImportElision::RemoveUnread
+        );
+        assert_eq!(
+            configs.elision_of(&tmp.path().join("other/x.ts")),
+            ImportElision::Keep
+        );
     }
 
     #[test]
@@ -250,8 +312,11 @@ mod tests {
             "app.json",
             r#"{ "compilerOptions": { "verbatimModuleSyntax": true } }"#,
         );
-        let mut configs = ImportKeepingConfigs::new(tmp.path());
-        assert!(configs.keeps_imports(&tmp.path().join("src/a.ts")));
+        let mut configs = ImportElisionConfigs::new(tmp.path());
+        assert_eq!(
+            configs.elision_of(&tmp.path().join("src/a.ts")),
+            ImportElision::Keep
+        );
     }
 
     #[test]
@@ -268,8 +333,11 @@ mod tests {
             TSCONFIG,
             r#"{ "compilerOptions": { "verbatimModuleSyntax": true } }"#,
         );
-        let mut configs = ImportKeepingConfigs::new(&root);
-        assert!(!configs.keeps_imports(&root.join("a.ts")));
+        let mut configs = ImportElisionConfigs::new(&root);
+        assert_eq!(
+            configs.elision_of(&root.join("a.ts")),
+            ImportElision::RemoveUnread
+        );
     }
 
     #[test]
@@ -277,8 +345,44 @@ mod tests {
         let tmp = tempfile::tempdir().expect("tempdir");
         let root = tmp.path().join("app");
         std::fs::create_dir_all(&root).expect("create dir");
-        let mut configs = ImportKeepingConfigs::new(&root);
-        assert!(configs.keeps_imports(&tmp.path().join("other/a.ts")));
+        let mut configs = ImportElisionConfigs::new(&root);
+        assert_eq!(
+            configs.elision_of(&tmp.path().join("other/a.ts")),
+            ImportElision::Keep
+        );
+    }
+
+    #[test]
+    fn unresolved_extends_keeps_imports() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        write(tmp.path(), TSCONFIG, r#"{ "extends": "$app/tsconfig" }"#);
+        let mut configs = ImportElisionConfigs::new(tmp.path());
+        assert_eq!(
+            configs.elision_of(&tmp.path().join("a.ts")),
+            ImportElision::Keep
+        );
+    }
+
+    #[test]
+    fn decorator_metadata_keeps_decorated_types() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        write(
+            tmp.path(),
+            TSCONFIG,
+            r#"{ "compilerOptions": { "emitDecoratorMetadata": true } }"#,
+        );
+        let both = tmp.path().join("both");
+        write(
+            &both,
+            TSCONFIG,
+            r#"{ "compilerOptions": { "emitDecoratorMetadata": true, "verbatimModuleSyntax": true } }"#,
+        );
+        let mut configs = ImportElisionConfigs::new(tmp.path());
+        assert_eq!(
+            configs.elision_of(&tmp.path().join("a.ts")),
+            ImportElision::KeepDecoratedTypes
+        );
+        assert_eq!(configs.elision_of(&both.join("a.ts")), ImportElision::Keep);
     }
 
     #[test]
@@ -288,8 +392,11 @@ mod tests {
         write(&broken, TSCONFIG, "{ not json");
         let deno = tmp.path().join("deno");
         write(&deno, "deno.json", "{}");
-        let mut configs = ImportKeepingConfigs::new(tmp.path());
-        assert!(configs.keeps_imports(&broken.join("a.ts")));
-        assert!(configs.keeps_imports(&deno.join("a.ts")));
+        let mut configs = ImportElisionConfigs::new(tmp.path());
+        assert_eq!(
+            configs.elision_of(&broken.join("a.ts")),
+            ImportElision::Keep
+        );
+        assert_eq!(configs.elision_of(&deno.join("a.ts")), ImportElision::Keep);
     }
 }

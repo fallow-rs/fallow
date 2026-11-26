@@ -10,6 +10,7 @@ use fallow_types::extract::{
 };
 
 use super::entry_marks::untracked_load_targets;
+use super::import_elision::{BindingUse, BindingUses};
 use super::narrowing::{AttachContext, ReferenceDedup, attach_symbol_reference};
 use super::types::{ExportSymbol, ReExportEdge};
 use super::types::{ModuleNode, ReferencePathInterner};
@@ -196,7 +197,7 @@ fn collect_import_edge(
         import,
         file_id,
         ImportLoadKind::Static,
-        &[],
+        &BindingUses::unknown(&FxHashSet::default()),
         edges_by_target,
         acc,
     );
@@ -204,13 +205,13 @@ fn collect_import_edge(
 
 /// Collect one resolved import whose target loads as `load_kind`. Internal
 /// module imports create an `ImportedSymbol` entry grouped by target, and npm
-/// package imports are recorded in the package usage maps. `value_reads` is
-/// the sorted list of import bindings that the importer reads as a value.
+/// package imports are recorded in the package usage maps. `uses` tells how
+/// the importer uses each import binding.
 fn collect_import_edge_with_kind(
     import: &ResolvedImport,
     file_id: FileId,
     load_kind: ImportLoadKind,
-    value_reads: &[String],
+    uses: &BindingUses<'_>,
     edges_by_target: &mut FxHashMap<FileId, Vec<ImportedSymbol>>,
     acc: &mut EdgeAccumulator<'_>,
 ) {
@@ -245,6 +246,7 @@ fn collect_import_edge_with_kind(
         if matches!(imported_name, ImportedName::Namespace) {
             record_namespace_import(target_id, &mut acc.namespace_imported, acc.total_capacity);
         }
+        let binding_use = uses.of_binding(&local_name);
         edges_by_target
             .entry(target_id)
             .or_default()
@@ -260,8 +262,7 @@ fn collect_import_edge_with_kind(
                     ModuleLoadMechanism::EsModule
                 },
                 load_kind: loader.load_kind,
-                value_read: !loader.through_loader
-                    && value_reads.binary_search(&import.info.local_name).is_ok(),
+                binding_use,
             });
     }
 }
@@ -359,7 +360,7 @@ fn collect_edges_for_module(
 ) -> Vec<(FileId, Vec<ImportedSymbol>)> {
     let mut edges_by_target: FxHashMap<FileId, Vec<ImportedSymbol>> = FxHashMap::default();
     let load_kind_overrides = import_load_kind_overrides(resolved);
-    let reads = &resolved.value_referenced_import_bindings;
+    let reads = &BindingUses::of(resolved);
 
     for import in &resolved.resolved_imports {
         let load_kind = load_kind_overrides
@@ -406,7 +407,7 @@ fn collect_edges_for_module(
                     is_type_only_star: false,
                     mechanism: ModuleLoadMechanism::EsModule,
                     load_kind: loader.load_kind,
-                    value_read: false,
+                    binding_use: BindingUse::Value,
                 });
         }
     }
@@ -467,7 +468,7 @@ fn collect_edges_for_module(
                     is_type_only_star: false,
                     mechanism: pattern.mechanism,
                     load_kind,
-                    value_read: false,
+                    binding_use: BindingUse::Value,
                 });
         }
     }
@@ -496,19 +497,19 @@ fn build_module_node(
     let (re_export_edges, has_namespace_re_exports) = build_re_export_edges(files, resolved);
     let has_namespace_aliases = resolved.is_some_and(|m| !m.namespace_object_aliases.is_empty());
 
+    let mut node = ModuleNode {
+        file_id: file.id,
+        path: file.path.clone(),
+        edge_range,
+        exports,
+        re_exports: re_export_edges,
+        flags: ModuleNode::flags_from(entry_point_ids.contains(&file.id), false, has_cjs_exports),
+    };
+    if resolved.is_some_and(|m| m.semantic_facts.contains(&SemanticFact::HasDecorators)) {
+        node.set_has_decorators();
+    }
     (
-        ModuleNode {
-            file_id: file.id,
-            path: file.path.clone(),
-            edge_range,
-            exports,
-            re_exports: re_export_edges,
-            flags: ModuleNode::flags_from(
-                entry_point_ids.contains(&file.id),
-                false,
-                has_cjs_exports,
-            ),
-        },
+        node,
         NamespaceFeatures {
             has_aliases: has_namespace_aliases,
             has_re_exports: has_namespace_re_exports,

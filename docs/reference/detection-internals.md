@@ -616,21 +616,27 @@ error by suppressing a downstream detector.
   stops at an asset reference. A new consumer that walks edges must pick one
   of these predicates instead of reading the variants.
 - Cycle detection does not count an import that TypeScript removes from its
-  output (issue #5262). That is a static ES import of a named or default
-  binding, in a `.ts`, `.tsx`, `.mts` or `.cts` file, whose name resolves in
-  the type namespace of the target and not in its value namespace
-  (`ModuleGraph::is_elided_type_import`). The import stays a runtime edge
-  when the tsconfig of the importer keeps imports: `verbatimModuleSyntax`,
-  `preserveValueImports`, or `importsNotUsedAsValues` with `preserve` or
-  `error`. The nearest `tsconfig.json` and its `tsconfig.*.json` siblings
-  decide, and a Deno config or a config that does not parse also keeps
-  imports. Namespace, side-effect and re-export edges always stay. An import
-  whose binding the importer reads in a value position also stays
-  (`ImportedSymbol::value_read`): TypeScript keeps it, and the name can have
-  a value meaning that the graph does not record, such as an ambient
-  namespace. An import of a class that the importer uses only as a type
-  stays too (issue #5309), because `emitDecoratorMetadata` can turn a type
-  annotation into a value reference.
+  output (issues #5262 and #5309, `ModuleGraph::is_removed_import`). Only a
+  static ES import of a named or default binding in a `.ts`, `.tsx`, `.mts`
+  or `.cts` file can go away. Each edge symbol records how the importer uses
+  the binding (`BindingUse`): as a value, only in type positions, or not at
+  all. A value use, or a binding that no extraction list names, keeps the
+  import. Otherwise the import goes away when its name resolves only in the
+  type namespace of the target, or when the file uses it only as a type or
+  not at all. Two exceptions keep such an import: a `.tsx` importer, where
+  the binding can be the JSX factory of the classic runtime, and a file with
+  a decorator under `emitDecoratorMetadata`, where a type annotation can
+  become a runtime reference (`SemanticFact::HasDecorators`). The rule
+  follows tsc, esbuild and swc. A Babel setup with `onlyRemoveTypeImports`
+  keeps more imports, and its config is not read.
+- The tsconfig of the importer gives the `ImportElision`: `Keep` under
+  `verbatimModuleSyntax`, `preserveValueImports`, or
+  `importsNotUsedAsValues` with `preserve` or `error`; `KeepDecoratedTypes`
+  under `emitDecoratorMetadata`; else `RemoveUnread`. The nearest
+  `tsconfig.json`, its `tsconfig.*.json` siblings and the in-root configs
+  that its `references` name decide, and the strictest wins. A Deno config,
+  a config that does not parse and a file outside the root keep imports.
+  Namespace, side-effect and re-export edges always stay.
 - `new URL("./x.ts", import.meta.url)` names a module that a path loader can
   run, so the edge credits the `default` export of the target and no other
   export. The edge credits only the file in three cases: a direct argument of

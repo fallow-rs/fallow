@@ -208,6 +208,11 @@ fn is_css_module_import_source(source: &str) -> bool {
 }
 
 impl<'a> Visit<'a> for ModuleInfoExtractor {
+    fn visit_decorator(&mut self, decorator: &Decorator<'a>) {
+        self.record_decorator();
+        walk::walk_decorator(self, decorator);
+    }
+
     fn visit_program(&mut self, program: &Program<'a>) {
         // An SFC or Astro file visits each script with one extractor, and its
         // spans can repeat, so a mark must not reach the next program.
