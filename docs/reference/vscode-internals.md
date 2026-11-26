@@ -153,8 +153,8 @@ directory. Verify extracted artifacts with `verify:vsix` and the matching
 
 For a change to the watched-file events, the analysis scheduler or the stderr
 log of the server, start the `VS Code Watch Loop` workflow by hand. It runs
-`scripts/watch-loop-harness.mjs` in a real VS Code on Linux and Windows. To
-run the harness on a local machine:
+`editors/vscode/scripts/watch-loop-harness.mjs` in a real VS Code on Linux
+and Windows. To run the harness on a local machine:
 
 ```bash
 cargo build -p fallow-cli -p fallow-lsp --bin fallow --bin fallow-lsp

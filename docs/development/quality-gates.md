@@ -543,8 +543,8 @@ cancelled run, or any `[error]` line. The job summary gives the counts, and the
 artifact holds the screenshots and the logs. The `repository` input opens a
 public project in place of the small fixture. Start it for a change to the
 watched-file events, the analysis scheduler or the stderr log filter. A full
-run takes about 30 minutes, so it does not run on pull requests or in a
-release.
+run takes about 10 minutes and needs a Windows runner, so it does not run on
+pull requests or in a release.
 
 ### Oracle proof
 

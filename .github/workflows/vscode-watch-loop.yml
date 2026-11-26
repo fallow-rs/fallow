@@ -4,8 +4,8 @@ name: VS Code Watch Loop
 # selected ref, saves `.fallowrc.json`, and fails when the save starts a loop
 # of analysis runs, a cancelled run, or `[error]` lines in the Output channel
 # (#5278). A second scenario rewrites the config with the same bytes each
-# second, like a virus scanner or a sync client. The run takes too long for
-# pull request CI, so a maintainer starts it by hand for a watcher or
+# second, like a virus scanner or a sync client. A run needs a Windows
+# runner and about 10 minutes, too much for pull request CI, so a maintainer starts it by hand for a watcher or
 # scheduler change. It does not run on pull requests or on push to main, so
 # scripts/verify-release-ci.mjs does not need it in REQUIRED_WORKFLOWS.
 on:
