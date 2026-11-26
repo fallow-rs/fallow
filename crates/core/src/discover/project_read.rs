@@ -98,6 +98,41 @@ pub fn is_project_file(root: &Path, path: &Path) -> bool {
     path.is_file() && is_inside_scope(root, path)
 }
 
+/// The bounded reads of one scan of many candidate files under `root`, such
+/// as the hook scan. The read scope base of `root` and its resolved form are
+/// found once, so a missing candidate costs one `lstat` call. Each read gives
+/// the same result as the matching free function with the same `root`.
+pub struct ProjectReader {
+    scope: fallow_types::read_guard::ReadRoot,
+}
+
+impl ProjectReader {
+    /// A reader for the project root `root`.
+    pub fn new(root: &Path) -> Self {
+        Self {
+            scope: fallow_types::read_guard::ReadRoot::new(&scope_base(root)),
+        }
+    }
+
+    /// [`read_project_file`] with the root of this reader.
+    pub fn read_file(&self, path: &Path) -> Option<String> {
+        self.scope.read_to_string(path, DEFAULT_MAX_READ_BYTES).ok()
+    }
+
+    /// [`read_project_dir`] with the root of this reader.
+    pub fn read_dir(&self, dir: &Path) -> Option<std::fs::ReadDir> {
+        if !self.scope.is_inside(dir) {
+            return None;
+        }
+        std::fs::read_dir(dir).ok()
+    }
+
+    /// [`is_project_file`] with the root of this reader.
+    pub fn is_file(&self, path: &Path) -> bool {
+        path.is_file() && self.scope.is_inside(path)
+    }
+}
+
 /// The `package.json` of the project directory `dir`, or `None` when it is
 /// missing or resolves outside the read scope of `root`.
 pub fn package_json(root: &Path, dir: &Path) -> Option<PackageJson> {

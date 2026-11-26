@@ -114,9 +114,6 @@ pub(super) fn read_manifest_in(
 /// the package directory.
 fn manifest_location_allowed(scope: Option<&std::path::Path>, path: &std::path::Path) -> bool {
     use std::path::Component;
-    let Ok(target) = dunce::canonicalize(path) else {
-        return false;
-    };
     let absolute = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
     let lexical = fallow_types::path_guard::lexically_normalized(&absolute);
     let scope_base = |dir: &std::path::Path| {
@@ -129,12 +126,36 @@ fn manifest_location_allowed(scope: Option<&std::path::Path>, path: &std::path::
     for component in lexical.components() {
         if matches!(component, Component::Normal(name) if name == "node_modules") {
             let base = scope_base(&prefix);
-            return target.starts_with(&base)
+            return dunce::canonicalize(path).is_ok_and(|target| target.starts_with(&base))
                 && dunce::canonicalize(&prefix).is_ok_and(|holder| holder.starts_with(&base));
         }
         prefix.push(component);
     }
     let Some(dir) = lexical.parent() else {
+        return false;
+    };
+    let is_plain = |path: &std::path::Path, want_dir: bool| {
+        path.symlink_metadata().is_ok_and(|meta| {
+            !meta.file_type().is_symlink()
+                && if want_dir {
+                    meta.is_dir()
+                } else {
+                    meta.is_file()
+                }
+        })
+    };
+    // A plain file in a plain directory resolves to its own name in the
+    // resolved directory, so the checks below would pass. Two `lstat` calls
+    // answer that case, which is the case of each member manifest. A `..`
+    // component can pass through a link, so then the lexical path can name
+    // another file, and the full check runs.
+    let has_parent_dir = path
+        .components()
+        .any(|component| matches!(component, Component::ParentDir));
+    if !has_parent_dir && is_plain(&lexical, false) && is_plain(dir, true) {
+        return true;
+    }
+    let Ok(target) = dunce::canonicalize(path) else {
         return false;
     };
     let Ok(canonical_dir) = dunce::canonicalize(dir) else {
@@ -922,6 +943,32 @@ mod tests {
         std::fs::create_dir_all(project.join("packages")).unwrap();
         std::os::unix::fs::symlink(&outside, project.join("packages/x")).unwrap();
         assert!(PackageJson::load(&project.join("packages/x/package.json")).is_err());
+    }
+
+    /// A `..` after a directory link names the file next to the link target,
+    /// not the plain file that the same text names without the link.
+    #[cfg(unix)]
+    #[test]
+    #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+    fn a_dot_dot_through_a_link_out_of_the_scope_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let outside = dir.path().join("outside");
+        std::fs::create_dir_all(outside.join("inner")).unwrap();
+        std::fs::create_dir_all(outside.join("pkg")).unwrap();
+        std::fs::write(outside.join("pkg/package.json"), r#"{"name": "out"}"#).unwrap();
+        let project = dir.path().join("project");
+        std::fs::create_dir_all(project.join("packages/pkg")).unwrap();
+        std::fs::write(
+            project.join("packages/pkg/package.json"),
+            r#"{"name": "in"}"#,
+        )
+        .unwrap();
+        std::os::unix::fs::symlink(outside.join("inner"), project.join("packages/link")).unwrap();
+        let scope = dunce::canonicalize(&project).unwrap();
+        let through_link = project.join("packages/link/../pkg/package.json");
+        assert!(read_manifest_in(Some(&scope), &through_link).is_err());
+        let plain = project.join("packages/pkg/package.json");
+        assert!(read_manifest_in(Some(&scope), &plain).is_ok_and(|text| text.contains("in")));
     }
 
     #[cfg(unix)]
