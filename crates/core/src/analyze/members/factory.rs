@@ -529,7 +529,10 @@ fn factory_return_class_origins(
                 .module_by_id
                 .get(&class_origin.file_id)
                 .is_some_and(|class_module| {
-                    export_is_class_with_members(class_module, class_origin.export_name.as_str())
+                    export_is_class_with_members_or_parent(
+                        class_module,
+                        class_origin.export_name.as_str(),
+                    )
                 })
         })
         .collect()

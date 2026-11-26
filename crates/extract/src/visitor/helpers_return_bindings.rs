@@ -182,3 +182,104 @@ fn is_this_type(ty: &TSType<'_>) -> bool {
         _ => false,
     }
 }
+
+/// Mark each static method whose last statement returns `new Self(...)`
+/// through a chain of instance methods that return `this`, as in
+/// `static from() { return new Self().withA().withB(); }`. Such a method
+/// returns an instance of the class (issue #5298).
+pub(super) fn mark_builder_chain_statics(
+    class: &Class<'_>,
+    class_name: Option<&str>,
+    members: &mut [crate::MemberInfo],
+) {
+    let self_returning: rustc_hash::FxHashSet<&str> = members
+        .iter()
+        .filter(|member| !member.is_static && member.is_self_returning)
+        .map(|member| member.name.as_str())
+        .collect();
+    if self_returning.is_empty() {
+        return;
+    }
+    let mut builder_statics = Vec::new();
+    for element in &class.body.body {
+        let oxc_ast::ast::ClassElement::MethodDefinition(method) = element else {
+            continue;
+        };
+        if !method.r#static || method.value.r#async || method.value.generator {
+            continue;
+        }
+        let Some(name) = method.key.static_name() else {
+            continue;
+        };
+        let returns_chain = method.value.body.as_ref().is_some_and(|body| {
+            every_return_is_builder_chain(&body.statements, class_name, &self_returning)
+        });
+        if returns_chain {
+            builder_statics.push(name.text().into_owned());
+        }
+    }
+    for member in members.iter_mut() {
+        if member.is_static && builder_statics.contains(&member.name) {
+            member.is_instance_returning_static = true;
+        }
+    }
+}
+
+/// Whether the body ends in `return` and every `return` in it gives a
+/// builder chain of the class. An early return of another value, or a bare
+/// `return;`, would make the call result a different type.
+fn every_return_is_builder_chain(
+    statements: &[Statement<'_>],
+    class_name: Option<&str>,
+    self_returning: &rustc_hash::FxHashSet<&str>,
+) -> bool {
+    if !matches!(statements.last(), Some(Statement::ReturnStatement(_))) {
+        return false;
+    }
+    let mut arguments = Vec::new();
+    super::super::visit_impl::collect_return_args_in_statements(statements, &mut arguments);
+    arguments.len() == super::super::visit_impl::count_returns_in_statements(statements)
+        && arguments
+            .iter()
+            .all(|argument| is_builder_chain_of_self(argument, class_name, self_returning))
+}
+
+/// Whether `expr` is `new Self(...)` followed by at least one call of a
+/// method in `self_returning`.
+fn is_builder_chain_of_self(
+    expr: &Expression<'_>,
+    class_name: Option<&str>,
+    self_returning: &rustc_hash::FxHashSet<&str>,
+) -> bool {
+    let mut current = expr;
+    let mut steps = 0usize;
+    loop {
+        match current {
+            Expression::CallExpression(call) => {
+                let Some(member) = call.callee.as_member_expression() else {
+                    return false;
+                };
+                let Some(method) = member.static_property_name() else {
+                    return false;
+                };
+                if !self_returning.contains(method.text().as_ref()) {
+                    return false;
+                }
+                steps += 1;
+                current = member.object();
+            }
+            Expression::ParenthesizedExpression(paren) => current = &paren.expression,
+            Expression::NewExpression(new_expr) => {
+                return steps > 0
+                    && match &new_expr.callee {
+                        Expression::ThisExpression(_) => true,
+                        Expression::Identifier(ident) => {
+                            class_name.is_some_and(|name| ident.name.as_str() == name)
+                        }
+                        _ => false,
+                    };
+            }
+            _ => return false,
+        }
+    }
+}

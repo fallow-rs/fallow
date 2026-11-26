@@ -174,48 +174,9 @@ pub(super) struct MemberHeritageContext<'a> {
     pub(super) interface_implementations: InterfaceImplementationContracts,
 }
 
-#[derive(Default)]
-struct RequiredTypeMemberIndex {
-    by_file: FxHashMap<FileId, FxHashMap<String, FxHashSet<String>>>,
-}
-
 pub(super) struct InterfaceImplementationContracts {
     pub(super) implementers_by_interface: FxHashMap<ExportKey, Vec<ExportKey>>,
     pub(super) required_members_by_implementer: FxHashMap<ExportKey, FxHashSet<String>>,
-}
-
-impl RequiredTypeMemberIndex {
-    fn insert_module(&mut self, module: &ModuleInfo) {
-        for required in SemanticFactView::new(&module.semantic_facts, &module.member_accesses)
-            .required_type_members()
-        {
-            self.by_file
-                .entry(module.file_id)
-                .or_default()
-                .entry(required.type_name.clone())
-                .or_default()
-                .insert(required.member.clone());
-        }
-    }
-
-    fn get(&self, file_id: FileId, type_name: &str) -> Option<&FxHashSet<String>> {
-        self.by_file.get(&file_id)?.get(type_name)
-    }
-
-    fn get_for_export<'a>(
-        &'a self,
-        indexes: &MemberPassIndexes<'_>,
-        key: &ExportKey,
-    ) -> Option<&'a FxHashSet<String>> {
-        let module = indexes.module_by_id.get(&key.file_id)?;
-        let local_name = module
-            .exports
-            .iter()
-            .find(|export| export.name.matches_str(key.export_name.as_str()))
-            .and_then(|export| export.local_name.as_deref())
-            .unwrap_or(key.export_name.as_str());
-        self.get(key.file_id, local_name)
-    }
 }
 
 pub(super) fn build_member_heritage_context<'a>(
@@ -593,24 +554,33 @@ fn build_interface_implementation_contracts(
 
             let implementer_key = ExportKey::new(resolved.file_id, heritage.export_name.clone());
             for interface_name in &heritage.implements {
-                if let Some(required) = required_by_type.get(resolved.file_id, interface_name) {
+                let required = required_by_type.required_closure(
+                    graph,
+                    indexes,
+                    resolved.file_id,
+                    interface_name,
+                );
+                if !required.is_empty() {
                     required_by_implementer
                         .entry(implementer_key.clone())
                         .or_default()
-                        .extend(required.iter().cloned());
+                        .extend(required);
                 }
                 let Some(interface_keys) = local_to_export_keys.get(interface_name.as_str()) else {
                     continue;
                 };
                 for interface_key in interface_keys {
                     for resolved_interface_key in export_key_with_origins(graph, interface_key) {
-                        if let Some(required) =
-                            required_by_type.get_for_export(indexes, &resolved_interface_key)
-                        {
+                        let required = required_by_type.required_closure_for_export(
+                            graph,
+                            indexes,
+                            &resolved_interface_key,
+                        );
+                        if !required.is_empty() {
                             required_by_implementer
                                 .entry(implementer_key.clone())
                                 .or_default()
-                                .extend(required.iter().cloned());
+                                .extend(required);
                         }
                         if seen_pairs
                             .insert((resolved_interface_key.clone(), implementer_key.clone()))

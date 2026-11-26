@@ -33,6 +33,7 @@ mod lifecycle;
 mod member_probe;
 mod namespace;
 mod playwright;
+mod required_members;
 mod typed_property;
 
 use lifecycle::{
@@ -55,6 +56,7 @@ use namespace::{
     namespace_member_credited,
 };
 use playwright::*;
+use required_members::RequiredTypeMemberIndex;
 use typed_property::*;
 
 const NATIVE_CUSTOM_ELEMENT_LIFECYCLE_MEMBERS: &[&str] = &[
@@ -704,6 +706,17 @@ fn export_is_class_with_members(module: &ResolvedModule, name: &str) -> bool {
                 member.kind == MemberKind::ClassMethod || member.kind == MemberKind::ClassProperty
             })
     })
+}
+
+/// Whether `name` is a class export with own members or with a parent class.
+/// A subclass without own members still has the members that it inherits, so
+/// a credit on it reaches the parent class (issue #5298).
+fn export_is_class_with_members_or_parent(module: &ResolvedModule, name: &str) -> bool {
+    export_is_class_with_members(module, name)
+        || module
+            .exports
+            .iter()
+            .any(|export| export.name.matches_str(name) && export.super_class.is_some())
 }
 
 /// Build the set of exported class `ExportKey`s whose heritage chain reaches a

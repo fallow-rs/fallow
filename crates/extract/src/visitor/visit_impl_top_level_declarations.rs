@@ -239,6 +239,7 @@ impl ModuleInfoExtractor {
         let refs = Self::collect_interface_signature_refs(iface);
         self.record_local_signature_refs(&iface.id.name, refs);
         self.record_required_type_members(&iface.id.name, &iface.body.body);
+        self.record_interface_extends(iface);
         self.record_interface_property_types(iface);
         // React props harvest (Feature A): a plain `interface X { a; b }` with no
         // `extends` heritage and no type parameters can back a
@@ -247,6 +248,22 @@ impl ModuleInfoExtractor {
         // members / substitute T), so such a typed param abstains.
         if iface.extends.is_empty() && iface.type_parameters.is_none() {
             self.record_react_object_type_props(&iface.id.name, &iface.body.body);
+        }
+    }
+
+    /// Record each plain-identifier parent of `iface`, so that analysis can
+    /// follow the `extends` chain of an `implements` contract (issue #5299).
+    fn record_interface_extends(&mut self, iface: &TSInterfaceDeclaration<'_>) {
+        for heritage in &iface.extends {
+            let TSTypeName::IdentifierReference(parent) = &heritage.type_name else {
+                continue;
+            };
+            self.semantic_facts.push(SemanticFact::InterfaceExtends(
+                fallow_types::extract::InterfaceExtendsFact {
+                    interface_name: iface.id.name.to_string(),
+                    parent_name: parent.name.to_string(),
+                },
+            ));
         }
     }
 

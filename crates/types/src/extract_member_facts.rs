@@ -105,6 +105,19 @@ pub struct RequiredTypeMemberFact {
     pub member: String,
 }
 
+/// A named interface that a module-local interface extends.
+///
+/// Analysis follows these edges to give an `implements` contract the required
+/// members of each parent interface, also across modules.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, bitcode::Encode, bitcode::Decode)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct InterfaceExtendsFact {
+    /// Module-local interface declaration name.
+    pub interface_name: String,
+    /// Module-local or imported name of the parent interface.
+    pub parent_name: String,
+}
+
 /// One direct contributor to a named type alias's receiver surface.
 ///
 /// Nested property types are deliberately excluded: in

@@ -205,6 +205,14 @@ impl<'a> SemanticFactView<'a> {
         required_type_member_facts(self.semantic_facts)
     }
 
+    /// Collect the parent interfaces of module-local interfaces.
+    pub fn interface_extends(self) -> impl Iterator<Item = &'a InterfaceExtendsFact> + 'a {
+        self.semantic_facts.iter().filter_map(|fact| match fact {
+            SemanticFact::InterfaceExtends(edge) => Some(edge),
+            _ => None,
+        })
+    }
+
     /// Collect type-alias receiver-surface edges.
     pub fn type_alias_surface_targets(self) -> Vec<TypeAliasSurfaceTargetFact> {
         type_alias_surface_target_facts(self.semantic_facts)

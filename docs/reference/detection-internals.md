@@ -153,6 +153,32 @@ error by suppressing a downstream detector.
   `E` (issue #4548). Known limit: only code in a function body reads these
   receivers. A stub at the top level of a module
   (`const stub = env.ROOM.getByName("x")`) gives no credit.
+- A class that `implements` an interface keeps each required (not optional)
+  member of the interface. The extractor records each plain-identifier parent
+  of an `interface X extends Y` as an `InterfaceExtends` fact. The member pass
+  follows these edges, in the same module and through imports, so a class also
+  keeps the required members that the interface inherits (issue #5299). A
+  qualified parent name (`extends NS.Y`) is not followed.
+- A static key of the annotation object in `makeObservable(this, {...})` or
+  `makeAutoObservable(this, {...})` is a read of `this.<key>`, because MobX
+  reads each named member when the constructor runs (issue #5297). The callee
+  must be a named import of `mobx`. The call must be in an instance method of
+  a class, not in a `static` method or a nested `function` with its own
+  `this`. A key with the value `false` excludes the member from MobX, so it
+  gives no credit.
+- A factory credits the class that it returns in these forms (issue #5298):
+  the last top-level statement is `return new X()`; every return gives
+  `new X()` and the body ends in `return` or `throw`; every return of a
+  static method that is not `async` and not a generator gives `new Self()`
+  through instance methods that return `this`. A class without own
+  members qualifies when it has a parent class, so the credit reaches the
+  inherited members. A destructured property of an object factory result
+  (`const { ctx } = newService()`) resolves as the property path `ctx` of the
+  result. The member accesses of a module are not scoped, so this credit
+  applies only when the module binds the local name once and the pattern
+  gives the property no default value. Known limit: a receiver that a second local helper returns again
+  (`const setup = () => { const { ctx } = newService(); return { ctx }; }`)
+  needs type inference and gives no credit.
 - A member name probe (`"name" in value` or `Reflect.has(value, "name")` with
   a static name) is a `MemberNameProbe` fact. The member pass credits class
   members with that name only in the probe module and in its direct import
