@@ -2235,7 +2235,7 @@ These are global flags with behavior specific to bare `fallow` combined mode.
 | `FALLOW_FORMAT` | Default output format. CLI `--format` overrides. |
 | `FALLOW_QUIET` | Set to `1` to suppress progress. CLI `--quiet` overrides. |
 | `FALLOW_BIN` | Path to fallow binary (used by the MCP server). |
-| `FALLOW_TIMEOUT_SECS` | MCP server subprocess timeout in seconds (default: `120`; similar-code discovery and inspection default to `900`). Increase or reduce it to override either bound. |
+| `FALLOW_TIMEOUT_SECS` | MCP server subprocess timeout in seconds (default: `120`; similar-code discovery and inspection default to `900`; a call that runs as an MCP task defaults to `1800`). Increase or reduce it to override each bound. |
 | `FALLOW_EXTENDS_TIMEOUT_SECS` | Timeout for fetching remote config inheritance in seconds (default: `5`). Do not raise this for untrusted sources. |
 | `FALLOW_CACHE_DIR` | Override the persistent extraction cache directory. Wins over `cache.dir`. Useful for read-only checkouts or CI cache volumes. `--no-cache` disables this knob. |
 | `FALLOW_CACHE_MAX_SIZE` | Maximum on-disk extraction cache (`.fallow/cache.bin`) size in megabytes (default: `256`). Triggers LRU eviction when crossed. Wins over `cache.maxSizeMb` config field. Intended for CI runners with disk quotas. `--no-cache` short-circuits this knob. |
