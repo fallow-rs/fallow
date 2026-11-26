@@ -77,7 +77,11 @@ fs.mkdirSync(outDir, { recursive: true });
 const workspace = path.join(outDir, "workspace");
 fs.cpSync(path.resolve(opts.workspace), workspace, {
   recursive: true,
-  filter: (source) => !/[\\/](?:node_modules|\.fallow)$/.test(source),
+  // Workspace trust is off, so a `.vscode` folder or a workspace file of a
+  // foreign project could set `fallow.lspPath` or start a task. The copy
+  // leaves them out.
+  filter: (source) =>
+    !/[\\/](?:node_modules|\.fallow|\.vscode|[^\\/]*\.code-workspace)$/.test(source),
 });
 const configFile = path.join(workspace, ".fallowrc.json");
 if (!fs.existsSync(configFile)) fs.writeFileSync(configFile, "{}\n");
@@ -160,6 +164,7 @@ fs.writeFileSync(
       "git.enabled": false,
       "window.restoreWindows": "none",
       "window.dialogStyle": "custom",
+      "task.allowAutomaticTasks": "off",
       ...JSON.parse(opts.settings),
     },
     null,
