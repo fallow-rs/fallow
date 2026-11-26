@@ -40,8 +40,9 @@ pub struct WriteScope {
     /// The Git work tree that contains the root, wherever the run starts.
     /// A symlink in it is a link that the repository controls.
     checkout: Option<PathBuf>,
-    /// The Git directory and common Git directory of the root. No symlink
-    /// may resolve into them, wherever they are.
+    /// The Git directory and common Git directory of the root and of each
+    /// superproject above it. No symlink may resolve into them, wherever
+    /// they are.
     git_dirs: fallow_types::path_guard::GitDirs,
     shared_dirs: Vec<PathBuf>,
 }
@@ -154,8 +155,9 @@ impl WriteScope {
     /// - No symlink on the way, wherever it lies, may resolve into a `.git`
     ///   or `node_modules` directory
     ///   ([`fallow_types::path_guard::is_protected_link_target`]), or into
-    ///   the Git directory or common Git directory of the root, also when
-    ///   that directory is outside the work tree. A shared
+    ///   the Git directory or common Git directory of the root or of a
+    ///   superproject above it, also when that directory is outside the work
+    ///   tree. A shared
     ///   directory or a device is allowed only for a path that reaches it
     ///   without such a link.
     /// - An existing target that is not a regular file or a directory is
@@ -1314,5 +1316,112 @@ mod tests {
 
         assert!(super::open_no_follow(&link).is_err());
         assert_eq!(std::fs::read_to_string(&real).unwrap(), "keep");
+    }
+
+    /// Run a fixture `git` command in `dir` and require that it succeeds.
+    #[cfg(unix)]
+    fn git(dir: &Path, args: &[&str]) {
+        let output = crate::git_fixture::fixture_git_command(dir)
+            .args([
+                "-c",
+                "protocol.file.allow=always",
+                "-c",
+                "init.defaultBranch=main",
+            ])
+            .args(args)
+            .output()
+            .expect("run git");
+        assert!(
+            output.status.success(),
+            "git {args:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    /// A superproject with its Git directory in `shared`
+    /// (`git init --separate-git-dir`) and a submodule at `vendor/lib`.
+    /// Returns the submodule root and the Git directory of the superproject.
+    #[cfg(unix)]
+    fn submodule_with_separate_superproject_git_dir(
+        dir: &Path,
+        shared: &Path,
+    ) -> (std::path::PathBuf, std::path::PathBuf) {
+        let lib = dir.join("lib");
+        std::fs::create_dir_all(&lib).unwrap();
+        git(&lib, &["init", "-q"]);
+        std::fs::write(lib.join("index.ts"), "export const a = 1;\n").unwrap();
+        git(&lib, &["add", "."]);
+        git(&lib, &["commit", "-q", "-m", "lib"]);
+        let superproject = dir.join("super");
+        let git_dir = shared.join("super.git");
+        std::fs::create_dir_all(&superproject).unwrap();
+        git(
+            &superproject,
+            &[
+                "init",
+                "-q",
+                "--separate-git-dir",
+                git_dir.to_str().unwrap(),
+            ],
+        );
+        git(
+            &superproject,
+            &[
+                "submodule",
+                "add",
+                "-q",
+                lib.to_str().unwrap(),
+                "vendor/lib",
+            ],
+        );
+        (superproject.join("vendor/lib"), git_dir)
+    }
+
+    /// The analysis root is a submodule, and the superproject keeps its Git
+    /// directory in a shared directory. A link in the shared directory into
+    /// the hooks of the superproject is refused.
+    #[cfg(unix)]
+    #[test]
+    fn an_outside_link_into_the_git_dir_of_the_superproject_is_refused() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let shared = dir.path().join("shared");
+        std::fs::create_dir_all(&shared).unwrap();
+        let (root, git_dir) = submodule_with_separate_superproject_git_dir(dir.path(), &shared);
+        let hook = git_dir.join("hooks/pre-commit");
+        std::fs::write(&hook, "keep").unwrap();
+        let link = shared.join("r.json");
+        std::os::unix::fs::symlink(&hook, &link).unwrap();
+        let config_link = shared.join("c.json");
+        std::os::unix::fs::symlink(git_dir.join("config"), &config_link).unwrap();
+        let module_link = shared.join("m.json");
+        std::os::unix::fs::symlink(git_dir.join("modules/vendor/lib/config"), &module_link)
+            .unwrap();
+        let scope =
+            WriteScope::new(&root, &root, vec![shared.canonicalize().unwrap()]).expect("scope");
+        assert!(scope.check("--output-file", &link, &root).is_some());
+        assert!(scope.check("--output-file", &config_link, &root).is_some());
+        assert!(scope.check("--output-file", &module_link, &root).is_some());
+        assert!(create_checked(&link, &link, Some(&scope)).is_err());
+        assert_eq!(std::fs::read_to_string(&hook).unwrap(), "keep");
+    }
+
+    /// In a submodule, a link to an ordinary file of the submodule and a
+    /// plain path in the shared directory stay allowed.
+    #[cfg(unix)]
+    #[test]
+    fn a_link_inside_a_submodule_is_allowed() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let shared = dir.path().join("shared");
+        std::fs::create_dir_all(&shared).unwrap();
+        let (root, _) = submodule_with_separate_superproject_git_dir(dir.path(), &shared);
+        std::fs::create_dir_all(root.join("reports")).unwrap();
+        std::os::unix::fs::symlink("reports", root.join("out")).unwrap();
+        let scope =
+            WriteScope::new(&root, &root, vec![shared.canonicalize().unwrap()]).expect("scope");
+        assert_eq!(
+            scope.check("--output-file", Path::new("out/r.json"), &root),
+            None
+        );
+        assert!(scope.contains(&shared.join("r.json")));
     }
 }

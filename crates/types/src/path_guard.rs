@@ -202,9 +202,10 @@ fn base_protected_link(base: &Path, canonical_base: &Path) -> Option<Refusal> {
 /// The target is protected when the part of it below `within` (all of it when
 /// it is not below `within`) has a `.git` component (in any case) or a
 /// `node_modules` component, or when [`GitDirs::holds`] it for the work tree
-/// that contains `within`. A `.git` file can name a Git directory with any
-/// name, so the second test covers a linked worktree, a submodule and a
-/// separate Git directory.
+/// that contains `within` and the work trees above it. A `.git` file can
+/// name a Git directory with any name, so the second test covers a linked
+/// worktree, a submodule, the superproject of a submodule and a separate Git
+/// directory.
 ///
 /// The rule is for links only. A direct path into `.git`, such as a hook that
 /// `fallow hooks install` writes on purpose, does not go through it.
@@ -233,54 +234,72 @@ fn protected_kind(within: &Path, resolved: &Path) -> Option<Refusal> {
         .then_some(Refusal::GitMetadata)
 }
 
-/// The canonical Git directory and common Git directory of the work tree
-/// that contains a directory. The two can be outside the work tree, for a
-/// separate Git directory or a worktree of a bare repository.
+/// The canonical Git directories of the work tree that contains a directory
+/// and of each work tree above it: for each, the Git directory and the common
+/// Git directory. The directories can be outside the work trees, for a
+/// separate Git directory, a worktree of a bare repository, or a submodule
+/// whose superproject keeps its Git directory elsewhere.
 #[derive(Clone, Debug, Default)]
 pub struct GitDirs {
-    /// The canonical top of the work tree.
+    /// The canonical top of the nearest work tree.
     work_tree: Option<PathBuf>,
     dirs: Vec<PathBuf>,
-    /// The `commondir` file exists but cannot be read or resolved, so the
-    /// common Git directory is not known.
+    /// A `.git` file or a `commondir` file exists but cannot be read or
+    /// resolved, so a Git directory is not known.
     unknown: bool,
 }
 
 impl GitDirs {
-    /// The Git directories of the work tree that contains `dir`. Empty when
-    /// no ancestor of `dir` has a `.git` entry, or when the entry names no
-    /// Git directory that exists.
+    /// The Git directories of the work tree that contains `dir` and of each
+    /// enclosing work tree, such as the superproject of a submodule. Empty
+    /// when no ancestor of `dir` has a `.git` entry, or when each entry names
+    /// no Git directory that exists.
     #[must_use]
     pub fn of(dir: &Path) -> Self {
         let Some(top) = work_tree_top(dir) else {
             return Self::default();
         };
-        let work_tree = std::fs::canonicalize(top).ok();
-        let Some(git_dir) = git_dir_of_entry(&top.join(GIT_ENTRY)) else {
-            return Self {
-                work_tree,
-                ..Self::default()
-            };
+        let mut git_dirs = Self {
+            work_tree: std::fs::canonicalize(top).ok(),
+            ..Self::default()
+        };
+        let mut next = Some(top);
+        while let Some(tree) = next {
+            git_dirs.add_entry(&tree.join(GIT_ENTRY));
+            next = tree.parent().and_then(work_tree_top);
+        }
+        git_dirs
+    }
+
+    /// Add the Git directory and the common Git directory that the `.git`
+    /// entry `entry` stands for.
+    fn add_entry(&mut self, entry: &Path) {
+        let git_dir = match read_git_entry(entry) {
+            Ok(Some(git_dir)) => git_dir,
+            Ok(None) => return,
+            Err(Unreadable) => {
+                self.unknown = true;
+                return;
+            }
         };
         let common = common_dir_of(&git_dir);
-        let unknown = common.is_none();
-        let mut dirs = vec![git_dir];
-        if let Some(common) = common
-            && !dirs.contains(&common)
-        {
-            dirs.push(common);
+        self.add(git_dir);
+        match common {
+            Some(common) => self.add(common),
+            None => self.unknown = true,
         }
-        Self {
-            work_tree,
-            dirs,
-            unknown,
+    }
+
+    fn add(&mut self, dir: PathBuf) {
+        if !self.dirs.contains(&dir) {
+            self.dirs.push(dir);
         }
     }
 
     /// Whether the canonical `path` is in one of the Git directories. A
     /// path in the work tree does not count when the work tree itself is in
     /// that Git directory, as for a worktree inside a bare repository. When
-    /// the common Git directory is not known, every path counts.
+    /// a Git directory is not known, every path counts.
     #[must_use]
     pub fn holds(&self, path: &Path) -> bool {
         if self.unknown {
@@ -305,20 +324,44 @@ pub fn work_tree_top(dir: &Path) -> Option<&Path> {
         .find(|ancestor| ancestor.join(GIT_ENTRY).symlink_metadata().is_ok())
 }
 
+/// A `.git` entry or a `commondir` file that exists but cannot be read,
+/// is not a regular file, or names no Git directory.
+struct Unreadable;
+
+/// The size limit for a `.git` file or a `commondir` file. Git writes one
+/// short line, so a larger file is not Git metadata.
+const GIT_FILE_MAX_BYTES: u64 = 64 * 1024;
+
 /// The canonical Git directory that the `.git` entry `entry` stands for: the
 /// directory itself, or the directory that a `.git` file names.
 fn git_dir_of_entry(entry: &Path) -> Option<PathBuf> {
-    let meta = std::fs::metadata(entry).ok()?;
+    read_git_entry(entry).ok().flatten()
+}
+
+/// [`git_dir_of_entry`] that tells a missing entry from one that cannot be
+/// read. `Ok(None)` when the entry does not resolve, or when it names a Git
+/// directory that does not exist.
+fn read_git_entry(entry: &Path) -> Result<Option<PathBuf>, Unreadable> {
+    let meta = match std::fs::metadata(entry) {
+        Ok(meta) => meta,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(_) => return Err(Unreadable),
+    };
     if meta.is_dir() {
-        return std::fs::canonicalize(entry).ok();
+        return std::fs::canonicalize(entry)
+            .map(Some)
+            .map_err(|_| Unreadable);
     }
-    let text = std::fs::read_to_string(entry).ok()?;
+    let text = crate::read_guard::read_to_string_bounded(entry, GIT_FILE_MAX_BYTES)
+        .map_err(|_| Unreadable)?;
     let named = text
         .lines()
-        .find_map(|line| line.strip_prefix(GITDIR_PREFIX))?
-        .trim();
-    let parent = entry.parent()?;
-    std::fs::canonicalize(parent.join(named)).ok()
+        .find_map(|line| line.strip_prefix(GITDIR_PREFIX))
+        .map(str::trim)
+        .filter(|named| !named.is_empty())
+        .ok_or(Unreadable)?;
+    let parent = entry.parent().ok_or(Unreadable)?;
+    Ok(std::fs::canonicalize(parent.join(named)).ok())
 }
 
 /// The canonical common Git directory of the Git directory `git_dir`: the
@@ -326,9 +369,12 @@ fn git_dir_of_entry(entry: &Path) -> Option<PathBuf> {
 /// has no `commondir` file. `None` when the file cannot be read or names a
 /// directory that does not resolve.
 fn common_dir_of(git_dir: &Path) -> Option<PathBuf> {
-    match std::fs::read_to_string(git_dir.join(COMMONDIR_FILE)) {
+    match crate::read_guard::read_to_string_bounded(
+        &git_dir.join(COMMONDIR_FILE),
+        GIT_FILE_MAX_BYTES,
+    ) {
         Ok(text) => std::fs::canonicalize(git_dir.join(text.trim())).ok(),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Some(git_dir.to_path_buf()),
+        Err(error) if error.is_not_found() => Some(git_dir.to_path_buf()),
         Err(_) => None,
     }
 }
@@ -1120,5 +1166,142 @@ mod tests {
         let target = CacheTarget::new(&f.root, &f.outside);
         target.write_file("cache.bin", b"data").expect("file");
         assert!(f.outside.join("cache.bin").exists());
+    }
+
+    /// A submodule below a superproject whose Git directory is outside its
+    /// work tree (`git init --separate-git-dir`). The submodule keeps its
+    /// own Git directory below `modules/` of that directory. Returns the
+    /// canonical submodule root and the canonical Git directory of the
+    /// superproject.
+    fn submodule_of_separate_git_dir(f: &Fixture) -> (PathBuf, PathBuf) {
+        let git_dir = f.outside.join("super.git");
+        let module = git_dir.join("modules/lib");
+        std::fs::create_dir_all(git_dir.join("hooks")).expect("super hooks");
+        std::fs::create_dir_all(module.join("hooks")).expect("module hooks");
+        let superproject = f.root.join("super");
+        let submodule = superproject.join("vendor/lib");
+        std::fs::create_dir_all(submodule.join("src")).expect("submodule");
+        std::fs::write(
+            superproject.join(".git"),
+            format!("gitdir: {}\n", git_dir.display()),
+        )
+        .expect("super git file");
+        std::fs::write(
+            submodule.join(".git"),
+            format!("gitdir: {}\n", module.display()),
+        )
+        .expect("submodule git file");
+        (
+            std::fs::canonicalize(&submodule).expect("submodule"),
+            std::fs::canonicalize(&git_dir).expect("super git dir"),
+        )
+    }
+
+    /// The Git directory of the superproject holds its hooks and config.
+    /// A link target there counts as Git metadata also from the submodule.
+    #[test]
+    fn a_link_into_the_git_dir_of_the_superproject_is_refused() {
+        let f = fixture();
+        let (submodule, git_dir) = submodule_of_separate_git_dir(&f);
+        assert!(is_protected_link_target(
+            &submodule,
+            &git_dir.join("hooks/pre-commit")
+        ));
+        assert!(is_protected_link_target(
+            &submodule.join("src"),
+            &git_dir.join("config")
+        ));
+    }
+
+    /// The Git directory of the submodule itself stays protected, and a link
+    /// to an ordinary file of the submodule stays allowed.
+    #[test]
+    fn a_submodule_root_protects_its_own_git_dir_only() {
+        let f = fixture();
+        let (submodule, git_dir) = submodule_of_separate_git_dir(&f);
+        assert!(is_protected_link_target(
+            &submodule,
+            &git_dir.join("modules/lib/hooks/pre-commit")
+        ));
+        assert!(!is_protected_link_target(
+            &submodule,
+            &submodule.join("src/a.ts")
+        ));
+        let other = std::fs::canonicalize(&f.outside).expect("outside");
+        assert!(!is_protected_link_target(
+            &submodule,
+            &other.join("report.json")
+        ));
+    }
+
+    /// The common Git directory of a worktree of the superproject is
+    /// protected for a submodule in that worktree.
+    #[test]
+    fn a_link_into_the_common_dir_of_the_superproject_is_refused() {
+        let f = fixture();
+        let common = f.outside.join("super.git");
+        std::fs::create_dir_all(common.join("hooks")).expect("hooks");
+        let superproject = f.root.join("wt");
+        linked_work_tree(&common, &superproject, "wt");
+        let submodule = superproject.join("lib");
+        let module = common.join("worktrees/wt/modules/lib");
+        std::fs::create_dir_all(&module).expect("module");
+        std::fs::create_dir_all(&submodule).expect("submodule");
+        std::fs::write(
+            submodule.join(".git"),
+            format!("gitdir: {}\n", module.display()),
+        )
+        .expect("git file");
+        let submodule = std::fs::canonicalize(&submodule).expect("submodule");
+        let common = std::fs::canonicalize(&common).expect("common");
+        assert!(is_protected_link_target(
+            &submodule,
+            &common.join("hooks/pre-commit")
+        ));
+    }
+
+    /// A `.git` file that names no Git directory leaves the Git directory
+    /// unknown, so every link target counts as protected. The same holds
+    /// for such a file in a superproject.
+    #[test]
+    fn a_git_file_without_a_gitdir_line_protects_every_link_target() {
+        let f = fixture();
+        let superproject = f.root.join("super");
+        let submodule = superproject.join("lib");
+        std::fs::create_dir_all(&submodule).expect("submodule");
+        std::fs::create_dir_all(submodule.join(".git")).expect("submodule git dir");
+        std::fs::write(superproject.join(".git"), "not a git file\n").expect("git file");
+        let submodule = std::fs::canonicalize(&submodule).expect("submodule");
+        assert!(is_protected_link_target(
+            &submodule,
+            &submodule.join("src/a.ts")
+        ));
+    }
+
+    /// A `.git` file that is not text leaves the Git directory unknown too.
+    #[test]
+    fn an_unreadable_git_file_protects_every_link_target() {
+        let f = fixture();
+        let root = f.root.join("repo");
+        std::fs::create_dir_all(&root).expect("repo");
+        std::fs::write(root.join(".git"), [0xff, 0xfe, b'\n']).expect("git file");
+        let root = std::fs::canonicalize(&root).expect("repo");
+        assert!(is_protected_link_target(&root, &root.join("src/a.ts")));
+    }
+
+    /// A `.git` entry that is a named pipe is not read, because the read
+    /// would block. The Git directory stays unknown.
+    #[test]
+    fn a_named_pipe_git_entry_protects_every_link_target() {
+        let f = fixture();
+        let root = f.root.join("repo");
+        std::fs::create_dir_all(&root).expect("repo");
+        let made = std::process::Command::new("mkfifo")
+            .arg(root.join(".git"))
+            .status()
+            .expect("run mkfifo");
+        assert!(made.success());
+        let root = std::fs::canonicalize(&root).expect("repo");
+        assert!(is_protected_link_target(&root, &root.join("src/a.ts")));
     }
 }

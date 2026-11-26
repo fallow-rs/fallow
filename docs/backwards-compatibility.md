@@ -798,7 +798,10 @@ These are documented for the rare CI script that depended on the old behavior. N
     allow, but not into a `.git` or `node_modules` directory, and not into
     the Git directory or common Git directory of the root, also when that
     directory is outside the work tree (`git init --separate-git-dir`, or a
-    worktree of a bare repository). For example,
+    worktree of a bare repository). When the root is in a submodule, the Git
+    directories of each superproject are protected too. A `.git` file that
+    fallow cannot read or that names no Git directory makes each link
+    target count as protected. For example,
     `--output-file /tmp/r.json` is refused when `/tmp/r.json` is a link to
     a file in `.git`.
   - A character device or named pipe stays allowed only when the path that
