@@ -40,21 +40,30 @@ row on the other projects, or add a new held-out project.
      --command dead-code
    ```
 
-   The script checks out each project at its pinned commit. When the checkout
-   has no `node_modules`, the script installs the dependencies from the
-   lockfile, with install scripts off. Then it runs
-   `fallow <command> --format json --quiet --no-cache` in the project root. Each
-   top-level array of findings in the report is one rule. For each rule and
-   project, the script takes up to 30 findings (`--sample-size`) in a seeded
-   random order. The seed is the rule, the project and the commit, so the same
-   binary gives the same sample. `--rules a,b` keeps only some rules.
+   The script checks out each project at its pinned commit, in its own clean
+   repository. It installs the dependencies from the lockfile once per commit,
+   with install scripts off. Then it runs
+   `fallow <command> <args> --format json --quiet --no-cache` in the project
+   root. `--args="--css --coverage-gaps"` passes flags to fallow, for example
+   to turn on opt-in sections.
+
+   The rule of a finding comes from its finding ID (`dc1:<rule>:...`).
+   `health` and `dupes` findings have no finding ID, so the script gives each
+   one an ID from its identifying fields: the fingerprint of a clone group,
+   the path of an untested file, or the code, path, line and value of a
+   styling finding. For each rule and project, the script takes up to 30
+   findings (`--sample-size`) in a seeded random order. The seed is the rule,
+   the project and the commit, so the same binary gives the same sample.
+   `--rules a,b` keeps only some rules.
 
    For each rule, the script writes these files to `<work dir>/<rule>/`:
 
    - `sample.json`: the sampled finding IDs and the finding counts;
    - `review.json`: each sampled finding with its file, line and a code excerpt;
    - `contract.txt`: the `fallow explain <rule>` text, which states the claim
-     of the rule;
+     of the rule. A rule without explain text gets a `NO CONTRACT` line and a
+     warning: write its claim there, for example from the JSON output schema,
+     before the review;
    - `all-findings.json`: the file and line of every finding of the rule, not
      only the sample.
 3. Give these files to a reviewer who did not write or tune the rule.
@@ -112,7 +121,11 @@ Judge the finding against the contract of the command that reported it. For
 
 - `real`: the claim of the rule is true for the finding. For example, the
   export has no user, so the removal of the `export` keyword changes no
-  behavior.
+  behavior. A finding stays `real` when the code is like this on purpose:
+  two standalone examples that copy each other are still duplicated code.
+  For `untested-file` and `untested-export`, a test dependency path is a
+  chain of imports from a test file. A browser, HTTP or subprocess test that
+  reaches the code only at runtime does not import it, so the claim holds.
 - `noise`: the claim is false, or the fix changes behavior. Give a
   `class` that names the cause, for example "framework convention export",
   "dynamic import by string", or "used by a script outside the source tree".
@@ -120,6 +133,19 @@ Judge the finding against the contract of the command that reported it. For
 - `unsure`: the code does not decide it, for example a use that only a
   deployment config outside the repository can show. Keep this verdict rare.
   The ratio leaves it out, and the summary shows its count.
+
+## Scope
+
+A row needs a claim that a reviewer can call true or false for one finding.
+These `health` outputs have no row:
+
+- complexity findings, file scores and large functions: the claim is a
+  computed number above a threshold;
+- hotspots and refactoring targets: they rank files, and a rank is not true
+  or false.
+
+`fallow dupes` clone groups and mirrored directories have rows, and so do the
+`health` coverage gaps, shallow directories and styling findings.
 
 ## Freshness
 

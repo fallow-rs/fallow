@@ -32,6 +32,15 @@ Reviews is the count of independent reviews; the percentage is how often the fir
 | `dead-code` | `unused-load-data-key` | 5 | 5 | 2 | 3 | 0 | 40% (1 to 88) | 1 | 3.48.0, 2026-11-25 |
 | `dead-code` | `unused-tagged-error` | 1 | 1 | 1 | 0 | 0 | 100% (2 to 100) | 2 (100% agree) | 3.48.0, 2026-11-25 |
 | `dead-code` | `unused-type` | 579 | 91 | 90 | 1 | 0 | 100% (84 to 100) | 2 (100% agree) | 3.48.0, 2026-11-25 |
+| `dupes` | `code-duplication` | 2020 | 120 | 117 | 3 | 0 | 96% (78 to 100) | 3 (84% agree) | 3.48.0, 2026-11-25 |
+| `dupes` | `mirrored-directory` | 8 | 8 | 0 | 8 | 0 | 0% (0 to 74) | 2 (100% agree) | 3.48.0, 2026-11-25 |
+| `health --coverage-gaps --shallow-directories --css` | `css-dead-surface` | 54 | 41 | 19 | 22 | 0 | 48% (26 to 72) | 2 (100% agree) | 3.48.0, 2026-11-25 |
+| `health --coverage-gaps --shallow-directories --css` | `css-duplicate-block` | 6 | 6 | 6 | 0 | 0 | 100% (13 to 100) | 2 (100% agree) | 3.48.0, 2026-11-25 |
+| `health --coverage-gaps --shallow-directories --css` | `css-selector-complexity` | 115 | 39 | 36 | 3 | 0 | 91% (68 to 99) | 3 (90% agree) | 3.48.0, 2026-11-25 |
+| `health --coverage-gaps --shallow-directories --css` | `css-token-drift` | 1 | 1 | 0 | 1 | 0 | 0% (0 to 98) | 3 (0% agree) | 3.48.0, 2026-11-25 |
+| `health --coverage-gaps --shallow-directories --css` | `shallow-directory` | 8 | 8 | 8 | 0 | 0 | 100% (23 to 100) | 2 (100% agree) | 3.48.0, 2026-11-25 |
+| `health --coverage-gaps --shallow-directories --css` | `untested-export` | 5830 | 120 | 99 | 21 | 0 | 95% (77 to 98) | 2 (100% agree) | 3.48.0, 2026-11-25 |
+| `health --coverage-gaps --shallow-directories --css` | `untested-file` | 3962 | 120 | 90 | 30 | 0 | 99% (83 to 99) | 3 (61% agree) | 3.48.0, 2026-11-25 |
 
 ## Noise classes
 
@@ -49,6 +58,13 @@ Reviews is the count of independent reviews; the percentage is how often the fir
 - `unused-file`: dynamic database migration (25), React Router preview entry (11), documented Deno command (4), standalone test fixture generator (4), TypeScript test discovery (4), configured task command (2), shell script invocation (2), computed worker entry (1), tool-discovered configuration (1)
 - `unused-load-data-key`: HTTP resource response (3)
 - `unused-type`: imported by type tests (1)
+- `code-duplication`: unrelated markup skeleton (2), generated code (1)
+- `mirrored-directory`: partial file clones (8)
+- `css-dead-surface`: library-generated class (11), framework-generated class (5), programmatically assigned class (5), persisted configuration class (1)
+- `css-selector-complexity`: simple contextual selector (3)
+- `css-token-drift`: unused third-party override (1)
+- `untested-export`: decorator metadata on test import path (12), type-only export (4), value binding imported by type test (2), same-module use on test import path (1), test path uses export alias (1), type-only production usage (1)
+- `untested-file`: test fixture treated as production (30)
 
 ## Corpus
 

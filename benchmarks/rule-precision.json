@@ -26,6 +26,7 @@
     {
       "rule": "circular-dependency",
       "command": "dead-code",
+      "args": [],
       "fallow_version": "3.48.0",
       "reviewed_on": "2026-11-25",
       "sample_size": 30,
@@ -83,6 +84,7 @@
     {
       "rule": "duplicate-export",
       "command": "dead-code",
+      "args": [],
       "fallow_version": "3.48.0",
       "reviewed_on": "2026-11-25",
       "sample_size": 30,
@@ -127,6 +129,7 @@
     {
       "rule": "duplicate-export-alias",
       "command": "dead-code",
+      "args": [],
       "fallow_version": "3.48.0",
       "reviewed_on": "2026-11-25",
       "sample_size": 30,
@@ -175,6 +178,7 @@
     {
       "rule": "package-cycle",
       "command": "dead-code",
+      "args": [],
       "fallow_version": "3.48.0",
       "reviewed_on": "2026-11-25",
       "sample_size": 30,
@@ -201,6 +205,7 @@
     {
       "rule": "test-only-dependency",
       "command": "dead-code",
+      "args": [],
       "fallow_version": "3.48.0",
       "reviewed_on": "2026-11-25",
       "sample_size": 30,
@@ -222,6 +227,7 @@
     {
       "rule": "unlisted-binary",
       "command": "dead-code",
+      "args": [],
       "fallow_version": "3.48.0",
       "reviewed_on": "2026-11-25",
       "sample_size": 30,
@@ -248,6 +254,7 @@
     {
       "rule": "unlisted-dependency",
       "command": "dead-code",
+      "args": [],
       "fallow_version": "3.48.0",
       "reviewed_on": "2026-11-25",
       "sample_size": 30,
@@ -296,6 +303,7 @@
     {
       "rule": "unresolved-import",
       "command": "dead-code",
+      "args": [],
       "fallow_version": "3.48.0",
       "reviewed_on": "2026-11-25",
       "sample_size": 30,
@@ -361,6 +369,7 @@
     {
       "rule": "unused-catalog-entry",
       "command": "dead-code",
+      "args": [],
       "fallow_version": "3.48.0",
       "reviewed_on": "2026-11-25",
       "sample_size": 30,
@@ -382,6 +391,7 @@
     {
       "rule": "unused-class-member",
       "command": "dead-code",
+      "args": [],
       "fallow_version": "3.48.0",
       "reviewed_on": "2026-11-25",
       "sample_size": 30,
@@ -454,6 +464,7 @@
     {
       "rule": "unused-component-prop",
       "command": "dead-code",
+      "args": [],
       "fallow_version": "3.48.0",
       "reviewed_on": "2026-11-25",
       "sample_size": 30,
@@ -475,6 +486,7 @@
     {
       "rule": "unused-dependency",
       "command": "dead-code",
+      "args": [],
       "fallow_version": "3.48.0",
       "reviewed_on": "2026-11-25",
       "sample_size": 30,
@@ -532,6 +544,7 @@
     {
       "rule": "unused-dependency-override",
       "command": "dead-code",
+      "args": [],
       "fallow_version": "3.48.0",
       "reviewed_on": "2026-11-25",
       "sample_size": 30,
@@ -553,6 +566,7 @@
     {
       "rule": "unused-dev-dependency",
       "command": "dead-code",
+      "args": [],
       "fallow_version": "3.48.0",
       "reviewed_on": "2026-11-25",
       "sample_size": 30,
@@ -610,6 +624,7 @@
     {
       "rule": "unused-enum-member",
       "command": "dead-code",
+      "args": [],
       "fallow_version": "3.48.0",
       "reviewed_on": "2026-11-25",
       "sample_size": 30,
@@ -649,6 +664,7 @@
     {
       "rule": "unused-export",
       "command": "dead-code",
+      "args": [],
       "fallow_version": "3.48.0",
       "reviewed_on": "2026-11-25",
       "sample_size": 30,
@@ -706,6 +722,7 @@
     {
       "rule": "unused-file",
       "command": "dead-code",
+      "args": [],
       "fallow_version": "3.48.0",
       "reviewed_on": "2026-11-25",
       "sample_size": 30,
@@ -791,6 +808,7 @@
     {
       "rule": "unused-load-data-key",
       "command": "dead-code",
+      "args": [],
       "fallow_version": "3.48.0",
       "reviewed_on": "2026-11-25",
       "sample_size": 30,
@@ -826,6 +844,7 @@
     {
       "rule": "unused-tagged-error",
       "command": "dead-code",
+      "args": [],
       "fallow_version": "3.48.0",
       "reviewed_on": "2026-11-25",
       "sample_size": 30,
@@ -847,6 +866,7 @@
     {
       "rule": "unused-type",
       "command": "dead-code",
+      "args": [],
       "fallow_version": "3.48.0",
       "reviewed_on": "2026-11-25",
       "sample_size": 30,
@@ -894,6 +914,474 @@
         {
           "class": "imported by type tests",
           "count": 1
+        }
+      ]
+    },
+    {
+      "rule": "code-duplication",
+      "command": "dupes",
+      "args": [],
+      "fallow_version": "3.48.0",
+      "reviewed_on": "2026-11-25",
+      "sample_size": 30,
+      "reviews": 3,
+      "agreement_percent": 84,
+      "projects": [
+        {
+          "project": "documenso",
+          "commit": "cc491f1ec224bda8d3e09338e291ca11fe47641a",
+          "findings": 984,
+          "sampled": 30,
+          "real": 28,
+          "noise": 2,
+          "unsure": 0
+        },
+        {
+          "project": "plane",
+          "commit": "723bb178f97b87e80a23df9eed134eb1388d7465",
+          "findings": 615,
+          "sampled": 30,
+          "real": 30,
+          "noise": 0,
+          "unsure": 0
+        },
+        {
+          "project": "immich",
+          "commit": "7b27863b13d7ec52340e87637d71a39aa8d7efc0",
+          "findings": 336,
+          "sampled": 30,
+          "real": 29,
+          "noise": 1,
+          "unsure": 0
+        },
+        {
+          "project": "react-hook-form",
+          "commit": "f3fd1bf4a3cb1265171adfc778f279a3c7e06fc5",
+          "findings": 85,
+          "sampled": 30,
+          "real": 30,
+          "noise": 0,
+          "unsure": 0
+        }
+      ],
+      "noise_classes": [
+        {
+          "class": "unrelated markup skeleton",
+          "count": 2
+        },
+        {
+          "class": "generated code",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "rule": "mirrored-directory",
+      "command": "dupes",
+      "args": [],
+      "fallow_version": "3.48.0",
+      "reviewed_on": "2026-11-25",
+      "sample_size": 30,
+      "reviews": 2,
+      "agreement_percent": 100,
+      "projects": [
+        {
+          "project": "documenso",
+          "commit": "cc491f1ec224bda8d3e09338e291ca11fe47641a",
+          "findings": 1,
+          "sampled": 1,
+          "real": 0,
+          "noise": 1,
+          "unsure": 0
+        },
+        {
+          "project": "plane",
+          "commit": "723bb178f97b87e80a23df9eed134eb1388d7465",
+          "findings": 5,
+          "sampled": 5,
+          "real": 0,
+          "noise": 5,
+          "unsure": 0
+        },
+        {
+          "project": "react-hook-form",
+          "commit": "f3fd1bf4a3cb1265171adfc778f279a3c7e06fc5",
+          "findings": 2,
+          "sampled": 2,
+          "real": 0,
+          "noise": 2,
+          "unsure": 0
+        }
+      ],
+      "noise_classes": [
+        {
+          "class": "partial file clones",
+          "count": 8
+        }
+      ]
+    },
+    {
+      "rule": "css-dead-surface",
+      "command": "health",
+      "args": [
+        "--coverage-gaps",
+        "--shallow-directories",
+        "--css"
+      ],
+      "fallow_version": "3.48.0",
+      "reviewed_on": "2026-11-25",
+      "sample_size": 30,
+      "reviews": 2,
+      "agreement_percent": 100,
+      "projects": [
+        {
+          "project": "documenso",
+          "commit": "cc491f1ec224bda8d3e09338e291ca11fe47641a",
+          "findings": 3,
+          "sampled": 3,
+          "real": 3,
+          "noise": 0,
+          "unsure": 0
+        },
+        {
+          "project": "plane",
+          "commit": "723bb178f97b87e80a23df9eed134eb1388d7465",
+          "findings": 43,
+          "sampled": 30,
+          "real": 16,
+          "noise": 14,
+          "unsure": 0
+        },
+        {
+          "project": "immich",
+          "commit": "7b27863b13d7ec52340e87637d71a39aa8d7efc0",
+          "findings": 8,
+          "sampled": 8,
+          "real": 0,
+          "noise": 8,
+          "unsure": 0
+        }
+      ],
+      "noise_classes": [
+        {
+          "class": "library-generated class",
+          "count": 11
+        },
+        {
+          "class": "framework-generated class",
+          "count": 5
+        },
+        {
+          "class": "programmatically assigned class",
+          "count": 5
+        },
+        {
+          "class": "persisted configuration class",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "rule": "css-duplicate-block",
+      "command": "health",
+      "args": [
+        "--coverage-gaps",
+        "--shallow-directories",
+        "--css"
+      ],
+      "fallow_version": "3.48.0",
+      "reviewed_on": "2026-11-25",
+      "sample_size": 30,
+      "reviews": 2,
+      "agreement_percent": 100,
+      "projects": [
+        {
+          "project": "documenso",
+          "commit": "cc491f1ec224bda8d3e09338e291ca11fe47641a",
+          "findings": 1,
+          "sampled": 1,
+          "real": 1,
+          "noise": 0,
+          "unsure": 0
+        },
+        {
+          "project": "plane",
+          "commit": "723bb178f97b87e80a23df9eed134eb1388d7465",
+          "findings": 3,
+          "sampled": 3,
+          "real": 3,
+          "noise": 0,
+          "unsure": 0
+        },
+        {
+          "project": "immich",
+          "commit": "7b27863b13d7ec52340e87637d71a39aa8d7efc0",
+          "findings": 2,
+          "sampled": 2,
+          "real": 2,
+          "noise": 0,
+          "unsure": 0
+        }
+      ],
+      "noise_classes": []
+    },
+    {
+      "rule": "css-selector-complexity",
+      "command": "health",
+      "args": [
+        "--coverage-gaps",
+        "--shallow-directories",
+        "--css"
+      ],
+      "fallow_version": "3.48.0",
+      "reviewed_on": "2026-11-25",
+      "sample_size": 30,
+      "reviews": 3,
+      "agreement_percent": 90,
+      "projects": [
+        {
+          "project": "documenso",
+          "commit": "cc491f1ec224bda8d3e09338e291ca11fe47641a",
+          "findings": 1,
+          "sampled": 1,
+          "real": 1,
+          "noise": 0,
+          "unsure": 0
+        },
+        {
+          "project": "plane",
+          "commit": "723bb178f97b87e80a23df9eed134eb1388d7465",
+          "findings": 106,
+          "sampled": 30,
+          "real": 27,
+          "noise": 3,
+          "unsure": 0
+        },
+        {
+          "project": "immich",
+          "commit": "7b27863b13d7ec52340e87637d71a39aa8d7efc0",
+          "findings": 8,
+          "sampled": 8,
+          "real": 8,
+          "noise": 0,
+          "unsure": 0
+        }
+      ],
+      "noise_classes": [
+        {
+          "class": "simple contextual selector",
+          "count": 3
+        }
+      ]
+    },
+    {
+      "rule": "css-token-drift",
+      "command": "health",
+      "args": [
+        "--coverage-gaps",
+        "--shallow-directories",
+        "--css"
+      ],
+      "fallow_version": "3.48.0",
+      "reviewed_on": "2026-11-25",
+      "sample_size": 30,
+      "reviews": 3,
+      "agreement_percent": 0,
+      "projects": [
+        {
+          "project": "plane",
+          "commit": "723bb178f97b87e80a23df9eed134eb1388d7465",
+          "findings": 1,
+          "sampled": 1,
+          "real": 0,
+          "noise": 1,
+          "unsure": 0
+        }
+      ],
+      "noise_classes": [
+        {
+          "class": "unused third-party override",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "rule": "shallow-directory",
+      "command": "health",
+      "args": [
+        "--coverage-gaps",
+        "--shallow-directories",
+        "--css"
+      ],
+      "fallow_version": "3.48.0",
+      "reviewed_on": "2026-11-25",
+      "sample_size": 30,
+      "reviews": 2,
+      "agreement_percent": 100,
+      "projects": [
+        {
+          "project": "documenso",
+          "commit": "cc491f1ec224bda8d3e09338e291ca11fe47641a",
+          "findings": 4,
+          "sampled": 4,
+          "real": 4,
+          "noise": 0,
+          "unsure": 0
+        },
+        {
+          "project": "plane",
+          "commit": "723bb178f97b87e80a23df9eed134eb1388d7465",
+          "findings": 1,
+          "sampled": 1,
+          "real": 1,
+          "noise": 0,
+          "unsure": 0
+        },
+        {
+          "project": "immich",
+          "commit": "7b27863b13d7ec52340e87637d71a39aa8d7efc0",
+          "findings": 3,
+          "sampled": 3,
+          "real": 3,
+          "noise": 0,
+          "unsure": 0
+        }
+      ],
+      "noise_classes": []
+    },
+    {
+      "rule": "untested-export",
+      "command": "health",
+      "args": [
+        "--coverage-gaps",
+        "--shallow-directories",
+        "--css"
+      ],
+      "fallow_version": "3.48.0",
+      "reviewed_on": "2026-11-25",
+      "sample_size": 30,
+      "reviews": 2,
+      "agreement_percent": 100,
+      "projects": [
+        {
+          "project": "documenso",
+          "commit": "cc491f1ec224bda8d3e09338e291ca11fe47641a",
+          "findings": 2979,
+          "sampled": 30,
+          "real": 29,
+          "noise": 1,
+          "unsure": 0
+        },
+        {
+          "project": "plane",
+          "commit": "723bb178f97b87e80a23df9eed134eb1388d7465",
+          "findings": 2371,
+          "sampled": 30,
+          "real": 30,
+          "noise": 0,
+          "unsure": 0
+        },
+        {
+          "project": "immich",
+          "commit": "7b27863b13d7ec52340e87637d71a39aa8d7efc0",
+          "findings": 413,
+          "sampled": 30,
+          "real": 16,
+          "noise": 14,
+          "unsure": 0
+        },
+        {
+          "project": "react-hook-form",
+          "commit": "f3fd1bf4a3cb1265171adfc778f279a3c7e06fc5",
+          "findings": 67,
+          "sampled": 30,
+          "real": 24,
+          "noise": 6,
+          "unsure": 0
+        }
+      ],
+      "noise_classes": [
+        {
+          "class": "decorator metadata on test import path",
+          "count": 12
+        },
+        {
+          "class": "type-only export",
+          "count": 4
+        },
+        {
+          "class": "value binding imported by type test",
+          "count": 2
+        },
+        {
+          "class": "same-module use on test import path",
+          "count": 1
+        },
+        {
+          "class": "test path uses export alias",
+          "count": 1
+        },
+        {
+          "class": "type-only production usage",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "rule": "untested-file",
+      "command": "health",
+      "args": [
+        "--coverage-gaps",
+        "--shallow-directories",
+        "--css"
+      ],
+      "fallow_version": "3.48.0",
+      "reviewed_on": "2026-11-25",
+      "sample_size": 30,
+      "reviews": 3,
+      "agreement_percent": 61,
+      "projects": [
+        {
+          "project": "documenso",
+          "commit": "cc491f1ec224bda8d3e09338e291ca11fe47641a",
+          "findings": 1671,
+          "sampled": 30,
+          "real": 30,
+          "noise": 0,
+          "unsure": 0
+        },
+        {
+          "project": "plane",
+          "commit": "723bb178f97b87e80a23df9eed134eb1388d7465",
+          "findings": 2078,
+          "sampled": 30,
+          "real": 30,
+          "noise": 0,
+          "unsure": 0
+        },
+        {
+          "project": "immich",
+          "commit": "7b27863b13d7ec52340e87637d71a39aa8d7efc0",
+          "findings": 167,
+          "sampled": 30,
+          "real": 30,
+          "noise": 0,
+          "unsure": 0
+        },
+        {
+          "project": "react-hook-form",
+          "commit": "f3fd1bf4a3cb1265171adfc778f279a3c7e06fc5",
+          "findings": 46,
+          "sampled": 30,
+          "real": 0,
+          "noise": 30,
+          "unsure": 0
+        }
+      ],
+      "noise_classes": [
+        {
+          "class": "test fixture treated as production",
+          "count": 30
         }
       ]
     }
