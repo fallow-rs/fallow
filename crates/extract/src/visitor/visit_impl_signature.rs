@@ -31,6 +31,7 @@ pub(super) struct MethodVisitState {
     span: Option<Span>,
     independent_this_depth: usize,
     this_result_locals: FxHashMap<String, Vec<ThisResultLocal>>,
+    in_static_method: bool,
 }
 
 impl ModuleInfoExtractor {
@@ -569,6 +570,7 @@ impl ModuleInfoExtractor {
             span: self.class_method_function_span.replace(method.value.span),
             independent_this_depth: std::mem::replace(&mut self.independent_this_depth, 0),
             this_result_locals: std::mem::take(&mut self.this_result_locals),
+            in_static_method: std::mem::replace(&mut self.in_static_method, method.r#static),
         }
     }
 
@@ -577,6 +579,7 @@ impl ModuleInfoExtractor {
         self.class_method_function_span = previous.span;
         self.independent_this_depth = previous.independent_this_depth;
         self.this_result_locals = previous.this_result_locals;
+        self.in_static_method = previous.in_static_method;
     }
 
     /// Record a `this` binding for an instance method or getter that declares

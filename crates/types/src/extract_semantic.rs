@@ -138,4 +138,7 @@ pub enum SemanticFact {
     /// A value under a static key of an exported object literal.
     /// Appended because bitcode encodes enum variants by ordinal.
     HolderValue(Box<HolderValueFact>),
+    /// A named interface that a module-local interface extends.
+    /// Appended because bitcode encodes enum variants by ordinal.
+    InterfaceExtends(InterfaceExtendsFact),
 }

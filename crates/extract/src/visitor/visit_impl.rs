@@ -134,11 +134,13 @@ pub(super) use visit_chain_names::jsx_member_object_name;
 pub use visit_chain_names::push_member_tag_accesses;
 use visit_chain_names::{call_receiver_name, static_member_object_name, type_name_member_path};
 pub(super) use visit_dynamic_imports::{ComponentLoaderImport, NewUrlContext};
-pub(super) use visit_factory_returns::count_returns_in_statements;
 use visit_factory_returns::{
     FactoryReturnFunctionInput, classify_factory_assigned_value, collect_self_scope_assignments,
     function_body_is_terminal, function_body_returns_identifier, function_body_returns_new_class,
     function_body_returns_new_class_unanimous, function_body_returns_object_shape,
+};
+pub(super) use visit_factory_returns::{
+    collect_return_args_in_statements, count_returns_in_statements,
 };
 use visit_helpers::*;
 use visit_object_helpers::*;
@@ -158,6 +160,8 @@ mod visit_cjs_exports;
 mod visit_expression_shapes;
 #[path = "visit_impl_framework_elements.rs"]
 mod visit_framework_elements;
+#[path = "visit_impl_mobx.rs"]
+mod visit_mobx;
 #[path = "visit_impl_module_items.rs"]
 mod visit_module_items;
 #[path = "visit_impl_namespace_references.rs"]
@@ -1493,6 +1497,13 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         }
         self.record_computed_key_access(expr);
         walk::walk_computed_member_expression(self, expr);
+    }
+
+    fn visit_binding_identifier(&mut self, it: &BindingIdentifier<'a>) {
+        *self
+            .binding_name_counts
+            .entry(it.name.to_string())
+            .or_default() += 1;
     }
 
     fn visit_ts_interface_heritage(&mut self, it: &TSInterfaceHeritage<'a>) {

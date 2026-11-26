@@ -862,6 +862,12 @@ mod issue_5098_astro_tag_attrs;
 mod issue_5162_css_module_barrel;
 #[path = "integration_test/issue_5231_shadowed_namespace_member.rs"]
 mod issue_5231_shadowed_namespace_member;
+#[path = "integration_test/issue_5297_mobx_annotation_members.rs"]
+mod issue_5297_mobx_annotation_members;
+#[path = "integration_test/issue_5298_proven_receiver_forms.rs"]
+mod issue_5298_proven_receiver_forms;
+#[path = "integration_test/issue_5299_inherited_interface_contract.rs"]
+mod issue_5299_inherited_interface_contract;
 #[path = "integration_test/issue_609_velite.rs"]
 mod issue_609_velite;
 #[path = "integration_test/issue_704_auto_import_components.rs"]

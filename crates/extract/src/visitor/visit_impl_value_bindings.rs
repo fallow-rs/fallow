@@ -33,7 +33,11 @@ impl ModuleInfoExtractor {
         } else if input.is_generator {
             self.generator_factory_functions.insert(name.to_string());
         }
-        if let Some(class_name) = function_body_returns_new_class(body) {
+        // The unanimous proof also covers a body whose only `return new X()`
+        // sits in a branch before a final `throw` (issue #5298).
+        if let Some(class_name) = function_body_returns_new_class(body)
+            .or_else(|| function_body_returns_new_class_unanimous(body))
+        {
             // An all-paths-unanimous, non-falling-through proof additionally
             // qualifies this factory for cross-module export (see
             // `strict_factory_return_functions`); the same-file map below keeps
@@ -267,6 +271,7 @@ impl ModuleInfoExtractor {
                         local_name: id.name.to_string(),
                         callee_name,
                         awaited,
+                        property_path: None,
                     });
             }
             // `const { a, b } = useApi()`. The instance is never named, so queue one
@@ -298,6 +303,9 @@ impl ModuleInfoExtractor {
                 } else {
                     None
                 };
+                if !awaited {
+                    self.record_destructured_property_candidates(pattern, &callee_name);
+                }
                 for key in keys {
                     if let Some(id) = captured {
                         self.pending_subclass_member_accesses.push(
@@ -315,6 +323,36 @@ impl ModuleInfoExtractor {
                 }
             }
             _ => {}
+        }
+    }
+
+    /// Record `const { key: local } = callee()` so that a read on `local`
+    /// resolves through the `key` property of the factory result (issue
+    /// #5298).
+    fn record_destructured_property_candidates(
+        &mut self,
+        pattern: &ObjectPattern<'_>,
+        callee_name: &str,
+    ) {
+        for property in &pattern.properties {
+            if self.factory_return_candidates.len() >= MAX_FACTORY_RETURN_CANDIDATES {
+                return;
+            }
+            let Some(key) = property.key.static_name() else {
+                continue;
+            };
+            // A default value (`{ key: local = other }`) can replace the
+            // property, so only a plain binding is followed.
+            let BindingPattern::BindingIdentifier(local) = &property.value else {
+                continue;
+            };
+            self.factory_return_candidates
+                .push(crate::visitor::FactoryReturnCandidate {
+                    local_name: local.name.to_string(),
+                    callee_name: callee_name.to_string(),
+                    awaited: false,
+                    property_path: Some(key.text().into_owned()),
+                });
         }
     }
 

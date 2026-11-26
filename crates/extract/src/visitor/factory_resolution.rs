@@ -316,6 +316,15 @@ impl ModuleInfoExtractor {
         let mut deferred_object_property_facts: Vec<(String, String, String)> = Vec::new();
         let mut deferred_member_accesses: Vec<MemberAccess> = Vec::new();
         for candidate in candidates {
+            if let Some(property) = &candidate.property_path {
+                self.resolve_destructured_property_candidate(
+                    &candidate,
+                    property,
+                    &mut deferred_member_accesses,
+                    &mut deferred_object_property_facts,
+                );
+                continue;
+            }
             // Same-file factory returning `new Class()`: bind the local to the
             // class so `resolve_bound_member_accesses` credits `x.member` directly.
             if let Some(class_name) = self.factory_return_functions.get(&candidate.callee_name) {
@@ -402,6 +411,62 @@ impl ModuleInfoExtractor {
                         member,
                     },
                 ));
+        }
+    }
+
+    /// Resolve the reads on `local` from `const { property: local } = callee()`
+    /// as reads on `callee().property` (issue #5298). A same-file object
+    /// factory credits the class of the matching shape path. An imported callee
+    /// emits the object-property fact that the analyze layer joins against the
+    /// exported object shape of the factory.
+    fn resolve_destructured_property_candidate(
+        &self,
+        candidate: &FactoryReturnCandidate,
+        property: &str,
+        member_accesses: &mut Vec<MemberAccess>,
+        object_property_facts: &mut Vec<(String, String, String)>,
+    ) {
+        if self
+            .binding_name_counts
+            .get(&candidate.local_name)
+            .is_some_and(|count| *count > 1)
+        {
+            return;
+        }
+        let object_prefix = format!("{}.", candidate.local_name);
+        let paths = self.member_accesses.iter().filter_map(|access| {
+            if access.object == candidate.local_name {
+                return Some((property.to_string(), access.member.clone()));
+            }
+            let rest = access.object.strip_prefix(&object_prefix)?;
+            Some((format!("{property}.{rest}"), access.member.clone()))
+        });
+        if let Some(shape) = self
+            .factory_return_object_shapes
+            .get(&candidate.callee_name)
+        {
+            if !self.call_result_is_returned_value(&candidate.callee_name, false) {
+                return;
+            }
+            for (path, member) in paths {
+                if let Some(entry) = shape.iter().find(|entry| entry.property_path == path) {
+                    member_accesses.push(MemberAccess {
+                        object: entry.class_local_name.clone(),
+                        member,
+                    });
+                }
+            }
+            return;
+        }
+        let callee_is_imported = self
+            .imports
+            .iter()
+            .any(|import| import.local_name == candidate.callee_name);
+        if !callee_is_imported {
+            return;
+        }
+        for (path, member) in paths {
+            object_property_facts.push((candidate.callee_name.clone(), path, member));
         }
     }
 

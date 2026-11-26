@@ -28,7 +28,7 @@ use host_refs::extract_host_member_refs;
 use host_refs::{extract_identifiers_from_host_expr, is_valid_member_identifier};
 use return_bindings::{
     collect_getter_binding, collect_method_return_binding, is_self_returning_instance_method,
-    push_array_element_binding, returns_named_class_type,
+    mark_builder_chain_statics, push_array_element_binding, returns_named_class_type,
 };
 
 pub struct AngularComponentMetadata {
@@ -890,6 +890,7 @@ pub fn extract_class_members(
         }
     }
     mark_symbol_dispose_pairs(class, &mut members);
+    mark_builder_chain_statics(class, class_name, &mut members);
     members
 }
 

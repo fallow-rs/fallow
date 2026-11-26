@@ -98,6 +98,7 @@ impl<'a> ModuleInfoExtractor {
         self.record_callee_use(&expr.callee, expr.span.start, false);
         self.record_imported_call_site(expr);
         self.record_this_binding_call(expr);
+        self.record_mobx_annotation_members(expr);
     }
 
     /// Record the facts of an assignment before the walk visits its children.

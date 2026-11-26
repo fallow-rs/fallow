@@ -455,6 +455,9 @@ struct FactoryReturnCandidate {
     callee_name: String,
     /// `const local = await callee()`: the local holds the awaited result.
     awaited: bool,
+    /// `const { key: local } = callee()`: the local holds the `key` property
+    /// of the result, not the result itself (issue #5298).
+    property_path: Option<String>,
 }
 
 /// An unresolved object-literal property value captured while visiting a factory
@@ -906,6 +909,9 @@ pub(crate) struct ModuleInfoExtractor {
         FxHashMap<Span, FxHashMap<String, fallow_types::extract::FactoryPropertySource>>,
     factory_property_classes: FxHashMap<Span, FxHashMap<String, BindingClassProof>>,
     independent_this_depth: usize,
+    /// Whether the walk is in a `static` class method, where `this` is the
+    /// class constructor and not an instance.
+    in_static_method: bool,
     class_method_function_span: Option<Span>,
     independent_this: independent_this::IndependentThisState,
     this_result_locals: FxHashMap<String, Vec<visit_impl::visit_signature::ThisResultLocal>>,
@@ -976,6 +982,11 @@ pub(crate) struct ModuleInfoExtractor {
     /// `f().member`, `const { member } = await f()`.
     factory_unnamed_result_accesses: Vec<(String, String, bool)>,
     factory_return_candidates: Vec<FactoryReturnCandidate>,
+    /// How many binding identifiers in the module declare each name. A
+    /// destructured factory property credits only through a local name that
+    /// the module binds once, because the member accesses are not scoped
+    /// (issue #5298).
+    binding_name_counts: FxHashMap<String, u32>,
     /// Same-file functions whose body returns a bare identifier (e.g.
     /// `useApi() { return api }`). Resolved against `binding_target_names` at
     /// finalize: a typed local (`let api: RESTApi`) promotes the function to a
