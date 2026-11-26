@@ -641,6 +641,54 @@ still builds a `FALLOW_MCP_CANCELLED` result, but only tests that call a tool
 directly see it. Only a timeout gives the client a structured error:
 `FALLOW_MCP_SUBPROCESS_TIMEOUT` or `FALLOW_MCP_API_TIMEOUT`.
 
+### Tasks
+
+The server advertises the tasks extension (`io.modelcontextprotocol/tasks`).
+`crates/mcp/src/tasks.rs` decides which calls run as a task:
+
+- The request itself must declare the extension in
+  `_meta["io.modelcontextprotocol/clientCapabilities"].extensions`. The
+  capabilities of `initialize` do not count. Any other request gets the
+  synchronous result.
+- The tool must be a task tool: `audit`, `mutation_plan`,
+  `find_similar_code`, or `analyze` with a type-aware parameter
+  (`type_aware: true`, `type_aware_projects` or `type_aware_require`). A
+  syntactic `analyze` ends in seconds, and a task adds a poll round trip.
+
+On a large repository `audit` and `mutation_plan` can approach the 120 s
+default deadline (`audit --base HEAD~30` took 96 s and `mutation --plan --all`
+took 45 s on a 27,000-file TypeScript monorepo under host load).
+`find_similar_code` has a 15-minute window outside a task.
+
+rmcp's `TaskManager` holds the tasks in the server process and answers
+`tasks/get`, `tasks/update` and `tasks/cancel`. The task id is a UUID. The
+task carries `createdAt`, `lastUpdatedAt`, `ttlMs`, `pollIntervalMs` and a
+`statusMessage` with the tool name and the elapsed time.
+
+- In a task the default deadline of every tool is 30 minutes
+  (`TASK_DEFAULT_TIMEOUT_SECS`), because the client waits on polls, not on
+  one request. `FALLOW_TIMEOUT_SECS` still sets the deadline.
+- A call whose arguments do not parse stays synchronous, so the client gets
+  the same invalid-params error as without the extension.
+- `ttlMs` is the deadline plus one hour. rmcp fails a task that runs past
+  `ttlMs` and keeps a finished task for one more `ttlMs`, so a result stays
+  readable for at least an hour.
+- `pollIntervalMs` is 2000 for `audit` and `mutation_plan`, and 10000 for
+  `find_similar_code` and type-aware `analyze`.
+- The work of a task gets its own cancellation token in the request scope
+  above. `tasks/cancel` sets it, so a cancel acts as `notifications/cancelled`
+  does. The task then settles as `cancelled`.
+- Each task token is a child of one server token. When the client
+  disconnects, rmcp cancels the tokens of the synchronous calls, and
+  `serve_stdio` cancels the server token, then waits up to 5 seconds. A task
+  therefore does not leave its subprocess running after the server stops.
+- The work runs inside a task-local scope. `tasks::current_task()` gives a
+  tool its `TaskContext`, for example to ask the client for input with
+  `request_input`, which sets the task to `input_required`.
+
+The store lives in memory. A client that resumes on a new server process gets
+`-32602` (unknown task) for an old task id.
+
 Each typed options builder starts from `typed_call` in `run_inputs.rs`. The
 handler passes `EnvSnapshot::capture()` once per call. `typed_call` maps root,
 config, remote extends, cache and threads through `shared_analysis_options`

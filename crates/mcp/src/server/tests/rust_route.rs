@@ -59,6 +59,7 @@ impl Fixture {
             cargo_fallow: cargo_fallow.to_string_lossy().into_owned(),
             tool_router: FallowMcp::tool_router(),
             confirm_timeout: crate::tools::CONFIRM_TIMEOUT,
+            tasks: crate::tasks::TaskStore::new(),
         };
         Self { dir, server }
     }
