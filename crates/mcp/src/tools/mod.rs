@@ -17,6 +17,7 @@ mod dupes;
 mod explain;
 mod fallback_policy;
 mod fix;
+mod fix_confirm;
 mod flags;
 mod gate_verdicts;
 mod guard;
@@ -67,8 +68,13 @@ pub use decision_surface::run_decision_surface;
 pub use dupes::{build_find_dupes_args, run_find_dupes};
 pub use explain::{build_explain_args, run_explain};
 #[cfg(test)]
+pub use fix::run_fix_apply;
+#[cfg(test)]
 pub use fix::{build_fix_apply_args, build_fix_preview_args};
-pub use fix::{run_fix_apply, run_fix_preview};
+pub use fix::{run_fix_apply_confirmed, run_fix_preview};
+#[cfg(test)]
+pub use fix_confirm::CONFIRM_INPUT_KEY;
+pub use fix_confirm::CONFIRM_TIMEOUT;
 pub use flags::{build_feature_flags_args, run_feature_flags};
 #[cfg(test)]
 pub use guard::build_guard_args;

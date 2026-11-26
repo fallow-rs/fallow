@@ -33,7 +33,7 @@ fn cargo_profile_dir() -> PathBuf {
 }
 
 /// Resolve the fallow binary from `FALLOW_BIN`, or the Cargo profile directory.
-fn fallow_binary() -> String {
+pub(super) fn fallow_binary() -> String {
     if let Ok(bin) = std::env::var("FALLOW_BIN") {
         return bin;
     }

@@ -88,7 +88,7 @@ const MAX_TOOL_DESCRIPTION_BYTES: usize = 2_000;
 ///
 /// The target is 35_000, reached by moving one tool's per-flag prose into its
 /// `fallow://tools/{name}` guide at a time.
-const RECORDED_TOTAL_DESCRIPTION_BYTES: usize = 57_606;
+const RECORDED_TOTAL_DESCRIPTION_BYTES: usize = 57_444;
 
 /// Deliberate headroom over [`RECORDED_TOTAL_DESCRIPTION_BYTES`].
 ///
@@ -179,7 +179,9 @@ const SCHEMA_REPIN_BYTES: usize = 1_024;
 /// fully analyze. That is the one kind of growth this row exists to allow,
 /// and it is not per-flag prose;
 /// an agent that does not know a removal was withheld reads the run as a
-/// clean no-op.
+/// clean no-op. The allowance stays below 4,096 bytes, because Claude Code
+/// cuts a longer description and the cut removes the closing contract
+/// sentences.
 ///
 /// Temporary: every other row. Those descriptions still carry per-flag detail
 /// that belongs in a `fallow://tools/{name}` guide, and a row disappears when
@@ -190,7 +192,7 @@ const SCHEMA_REPIN_BYTES: usize = 1_024;
 /// a fix a row has already received.
 const DESCRIPTION_BUDGET_EXCEPTIONS: &[(&str, usize)] = &[
     ("code_execute", 4_650),
-    ("fix_apply", 4_200),
+    ("fix_apply", 4_050),
     ("check_health", 5_400),
     ("fix_preview", 2_750),
     ("analyze", 2_150),

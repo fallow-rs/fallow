@@ -1,4 +1,4 @@
-use rmcp::handler::server::tool::{ToolCallContext, ToolRouter};
+use rmcp::handler::server::tool::{InputResponses, RequestState, ToolCallContext, ToolRouter};
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{
     CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, GetSkillRequestParams,
@@ -26,7 +26,7 @@ use crate::tools::{
     mutation_inspect_call, mutation_plan_call, request_cancellation, resolve_cargo_fallow,
     run_analyze, run_architecture, run_audit, run_check_changed, run_check_runtime_coverage,
     run_decision_surface, run_explain, run_feature_flags, run_find_dupes, run_find_similar_code,
-    run_fix_apply, run_fix_preview, run_get_blast_radius, run_get_cleanup_candidates,
+    run_fix_apply_confirmed, run_fix_preview, run_get_blast_radius, run_get_cleanup_candidates,
     run_get_cloud_deployment_changes, run_get_cloud_review_packet, run_get_cloud_runtime_context,
     run_get_hot_paths, run_get_importance, run_get_token_blast_radius, run_guard, run_health,
     run_impact, run_impact_all, run_impact_closure, run_inspect_similar_code, run_list_boundaries,
@@ -74,6 +74,8 @@ pub struct FallowMcp {
     /// The `cargo-fallow` binary for a call on a Rust workspace.
     cargo_fallow: String,
     tool_router: ToolRouter<Self>,
+    /// How long `fix_apply` waits for an answer to its confirmation form.
+    confirm_timeout: std::time::Duration,
 }
 
 impl FallowMcp {
@@ -83,6 +85,7 @@ impl FallowMcp {
             binary,
             cargo_fallow: resolve_cargo_fallow(),
             tool_router: Self::tool_router(),
+            confirm_timeout: crate::tools::CONFIRM_TIMEOUT,
         }
     }
 }
@@ -327,10 +330,24 @@ impl FallowMcp {
         run_fix_preview(&self.binary, params.0).await
     }
 
-    /// Apply auto-fixes to the project. Removes unused exports from the public API, may delete dead exported enum declarations, deletes unused dependencies from package.json, removes unused enum members, removes unused pnpm catalog entries (rewriting empty groups to `{}` so pnpm install does not reject null), and appends duplicate-export `ignoreExports` rules to the fallow config file. When no fallow config exists outside a monorepo subpackage, this CREATES `.fallowrc.json` using `fallow init`'s framework-aware scaffolding (`$schema`, `entry`, `ignorePatterns`, framework defaults) and layers the `ignoreExports` rules on top. Inside a monorepo subpackage (workspace marker `pnpm-workspace.yaml` / `package.json#workspaces` / `turbo.json` / `lerna.json` / `rush.json` above the invocation directory) the create-fallback refuses and emits `skip_reason: "monorepo_subpackage"` with a relative `workspace_root` path; the agent should re-run `fallow init` at the workspace root or invoke from there. Set `no_create_config: true` to opt out of the create-fallback entirely (recommended for CI and unattended use); the duplicate-export path is skipped with `skip_reason: "no_create_config"` and source-file edits proceed normally. When a source file's xxh3 content hash at fix time differs from the hash captured during the in-process analysis (parallel editor save, CI rebase, or other tool mutated the file between analysis and write), the per-file fix is skipped with `skip_reason: "content_changed"`; the envelope's top-level `skipped_content_changed` count is incremented and the run exits with code 2 so CI surfaces the mismatch instead of treating the partial run as a clean no-op. When a source file mixes CRLF and bare-LF line endings, the per-file fix is skipped with `skip_reason: "mixed_line_endings"`; the envelope's top-level `skipped_mixed_line_endings` count is incremented and the run exits with code 2. This skip is NOT self-healing: re-running fallow alone does not normalize the file and will loop. The agent must run `dos2unix <path>` (or instruct the user to set `git config core.autocrlf input` and re-checkout) before re-running. When an unused export lives in a test, mock, or fixture directory (`__mocks__`, `e2e`, `e2e-tests`, `cypress`, `playwright`, `examples`, `fixtures`, `__fixtures__`, `evals`, `golden`), or in a file that itself has an unresolved import, its removal is withheld as low confidence because the consumer may be invisible to static analysis (Vitest mock aliases, off-workspace e2e trees, fixture build steps): the per-file fix carries `skip_reason: "low_confidence_off_graph"` or `"low_confidence_unresolved_imports"` and the envelope's top-level `skipped_low_confidence_exports` count is incremented. A finding carrying `reachability_caveats` (a source file was skipped, unreadable, or unparseable, so the reference that would credit it may never have been seen) is withheld the same way, `remove-dependency`, `remove-enum-member` and `remove-class-member` included, under `skip_reason: "low_confidence_incomplete_analysis"` and the counts `skipped_low_confidence_dependencies` and `skipped_low_confidence_members` (the member count covers both kinds; a class-member removal is only ever opened by the type-aware pass, so only members it had approved can be withheld here); apply the `action` of each `incomplete_analysis_diagnostics[]` entry, and re-run. Unlike the two skips above these are INTENTIONAL: they do NOT change the exit code, and the finding stays reported by `fallow dead-code` for manual confirmation. Writes are batched: each per-file rewrite is staged to a sibling temp file, and the orchestrator promotes the batch only after every stage succeeds, so a single stage failure leaves the project untouched. Files with a UTF-8 BOM are read with the BOM stripped (so line offsets align with the parser) and written with the BOM re-prepended (so Windows-authored files round-trip unchanged); fallow does not add or remove a BOM. This modifies files on disk. Use fix_preview first to review planned changes including any `proposed_diff` and `created_files` fields. Supports workspace scoping and performance tuning (no_cache, threads).
+    /// Apply auto-fixes to the project. When the client declares form elicitation, fix_apply first shows the dry-run plan in one confirmation form and writes only on a yes; on a decline, cancel or timeout it changes no file and returns `applied: false` with `confirmation` set to `declined`, `cancelled`, `timed_out`, `failed` or `plan_changed`; do not apply those fixes another way. A session with no person to answer, such as `claude -p`, cancels the form. Removes unused exports from the public API, may delete dead exported enum declarations, deletes unused dependencies from package.json, removes unused enum members, removes unused pnpm catalog entries (rewriting empty groups to `{}` so pnpm install does not reject null), and appends duplicate-export `ignoreExports` rules to the fallow config file. When no fallow config exists outside a monorepo subpackage, this CREATES `.fallowrc.json` using `fallow init`'s framework-aware scaffolding (`$schema`, `entry`, `ignorePatterns`, framework defaults) and layers the `ignoreExports` rules on top. Inside a monorepo subpackage (workspace marker `pnpm-workspace.yaml` / `package.json#workspaces` / `turbo.json` / `lerna.json` / `rush.json` above the invocation directory) the create-fallback refuses and emits `skip_reason: "monorepo_subpackage"` with a relative `workspace_root` path; the agent should re-run `fallow init` at the workspace root or invoke from there. Set `no_create_config: true` to opt out of the create-fallback entirely (recommended for CI and unattended use); the duplicate-export path is skipped with `skip_reason: "no_create_config"` and source-file edits proceed normally. When a source file's xxh3 content hash at fix time differs from the hash captured during the in-process analysis, the per-file fix is skipped with `skip_reason: "content_changed"`; the envelope's top-level `skipped_content_changed` count is incremented and the run exits with code 2 so CI surfaces the mismatch instead of treating the partial run as a clean no-op. When a source file mixes CRLF and bare-LF line endings, the per-file fix is skipped with `skip_reason: "mixed_line_endings"`; the envelope's top-level `skipped_mixed_line_endings` count is incremented and the run exits with code 2. This skip is NOT self-healing: re-running fallow alone does not normalize the file and will loop. The agent must run `dos2unix <path>` (or instruct the user to set `git config core.autocrlf input` and re-checkout) before re-running. When an unused export lives in a test, mock, or fixture directory, or in a file that itself has an unresolved import, its removal is withheld as low confidence because the consumer may be invisible to static analysis: the per-file fix carries `skip_reason: "low_confidence_off_graph"` or `"low_confidence_unresolved_imports"` and the envelope's top-level `skipped_low_confidence_exports` count is incremented. A finding carrying `reachability_caveats` (a source file was skipped, unreadable, or unparseable, so the reference that would credit it may never have been seen) is withheld the same way, `remove-dependency`, `remove-enum-member` and `remove-class-member` included, under `skip_reason: "low_confidence_incomplete_analysis"` and the counts `skipped_low_confidence_dependencies` and `skipped_low_confidence_members` (the member count covers both kinds; a class-member removal is only ever opened by the type-aware pass, so only members it had approved can be withheld here); apply the `action` of each `incomplete_analysis_diagnostics[]` entry, and re-run. Unlike the two skips above these are INTENTIONAL: they do NOT change the exit code, and the finding stays reported by `fallow dead-code` for manual confirmation. Writes are staged and promoted as one batch, so a failed stage leaves the project untouched. A UTF-8 BOM is kept as it is. This modifies files on disk. Use fix_preview first to review planned changes including any `proposed_diff` and `created_files` fields. Supports workspace scoping and performance tuning (no_cache, threads).
     #[tool(annotations(destructive_hint = true, read_only_hint = false))]
-    async fn fix_apply(&self, params: Parameters<FixParams>) -> Result<CallToolResult, McpError> {
-        run_fix_apply(&self.binary, params.0).await
+    async fn fix_apply(
+        &self,
+        params: Parameters<FixParams>,
+        context: RequestContext<RoleServer>,
+        InputResponses(responses): InputResponses,
+        RequestState(state): RequestState,
+    ) -> Result<CallToolResponse, McpError> {
+        run_fix_apply_confirmed(
+            &self.binary,
+            params.0,
+            &context,
+            responses.as_ref(),
+            state.as_deref(),
+            self.confirm_timeout,
+        )
+        .await
     }
 
     /// Get project metadata: active framework plugins, discovered source files, and detected entry points. Useful for understanding how fallow sees the project before running analysis. Supports performance tuning (no_cache, threads).
