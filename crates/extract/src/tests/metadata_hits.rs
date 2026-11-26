@@ -1,8 +1,15 @@
 use fallow_types::discover::{DiscoveredFile, FileId};
+use fallow_types::extract::{FlagPatterns, ParseResult};
+use fallow_types::shared_state::ExtractionMode;
 use fallow_types::source_fingerprint::SourceFingerprint;
 
 use crate::cache::CacheStore;
-use crate::parse_all_files;
+use crate::{ParseNeeds, parse_all_files, parse_all_files_with_mode};
+
+const NO_FACTS: ParseNeeds = ParseNeeds {
+    complexity: false,
+    call_facts: false,
+};
 
 fn source_file(root: &std::path::Path, name: &str, source: &str) -> DiscoveredFile {
     let path = root.join(name);
@@ -14,12 +21,13 @@ fn source_file(root: &std::path::Path, name: &str, source: &str) -> DiscoveredFi
     }
 }
 
-/// Store the module of a first parse with the fingerprint that
-/// `fingerprint_of` builds from the file metadata, then parse again
-/// with that store.
-fn second_parse_metadata_hits(
+/// Store the module of a first parse without complexity and call facts, with
+/// the fingerprint that `fingerprint_of` builds from the file metadata. Then
+/// parse again with that store and `needs`.
+fn second_parse(
     fingerprint_of: fn(&std::fs::Metadata) -> SourceFingerprint,
-) -> Vec<FileId> {
+    needs: ParseNeeds,
+) -> ParseResult {
     let project = tempfile::tempdir().expect("create project");
     let file = source_file(project.path(), "api.ts", "export const alpha = 1;\n");
     let files = [file];
@@ -35,24 +43,54 @@ fn second_parse_metadata_hits(
         false,
     );
 
-    let second = parse_all_files(&files, Some(&store), false);
-    assert_eq!(second.cache_hits, 1);
-    second.metadata_hits
+    parse_all_files_with_mode(
+        &files,
+        Some(&store),
+        needs,
+        None,
+        &FlagPatterns::default(),
+        ExtractionMode::Standard,
+    )
 }
 
 #[test]
 fn a_hit_on_a_trusted_fingerprint_is_a_metadata_hit() {
-    let hits = second_parse_metadata_hits(SourceFingerprint::from_metadata);
-    assert_eq!(hits, vec![FileId(0)]);
+    let second = second_parse(SourceFingerprint::from_metadata, NO_FACTS);
+    assert_eq!(second.cache_hits, 1);
+    assert_eq!(second.metadata_hits, vec![FileId(0)]);
 }
 
 #[test]
 fn a_hit_that_compared_the_content_hash_is_not_a_metadata_hit() {
-    let hits = second_parse_metadata_hits(|metadata| {
-        let full = SourceFingerprint::from_metadata(metadata);
-        SourceFingerprint::new(full.mtime_ns, full.file_size)
-    });
-    assert!(hits.is_empty(), "content-hash hit listed: {hits:?}");
+    let second = second_parse(
+        |metadata| {
+            let full = SourceFingerprint::from_metadata(metadata);
+            SourceFingerprint::new(full.mtime_ns, full.file_size)
+        },
+        NO_FACTS,
+    );
+    assert_eq!(second.cache_hits, 1);
+    assert!(second.metadata_hits.is_empty());
+}
+
+#[test]
+fn an_entry_without_the_complexity_of_the_run_is_not_a_metadata_hit() {
+    let needs = ParseNeeds {
+        complexity: true,
+        call_facts: false,
+    };
+    let second = second_parse(SourceFingerprint::from_metadata, needs);
+    assert!(second.metadata_hits.is_empty());
+}
+
+#[test]
+fn an_entry_without_the_call_facts_of_the_run_is_not_a_metadata_hit() {
+    let needs = ParseNeeds {
+        complexity: false,
+        call_facts: true,
+    };
+    let second = second_parse(SourceFingerprint::from_metadata, needs);
+    assert!(second.metadata_hits.is_empty());
 }
 
 #[test]

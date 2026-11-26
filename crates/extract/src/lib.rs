@@ -389,6 +389,8 @@ struct ParseFileResult {
 }
 
 impl ParseFileResult {
+    /// A hit from metadata alone. A hit that read the source adds
+    /// `with_source_bytes_read`, so a hit without read bytes is a metadata hit.
     fn cache_hit(module: ModuleInfo) -> Self {
         Self {
             module: Some(module),
