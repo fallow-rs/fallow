@@ -50,7 +50,7 @@ pub fn redact(text: &str, home: Option<&str>) -> String {
     let text = redact_url_passwords(&text);
     let text = redact_tokens(&text);
     match home {
-        Some(home) => replace_home(&text, home, cfg!(windows)),
+        Some(home) => replace_home(&text, home),
         None => text,
     }
 }
@@ -165,8 +165,9 @@ fn tail_len(text: &str, allow_dots: bool) -> usize {
 
 /// Replace each path that starts with `home` by `~`. A match must end at a
 /// path separator or at the end of a path, so `/home/dev` does not change
-/// `/home/developer`. Windows matches without case and with either slash.
-fn replace_home(text: &str, home: &str, windows: bool) -> String {
+/// `/home/developer`. The match ignores ASCII case and the slash direction,
+/// because Windows and macOS paths can differ in both.
+fn replace_home(text: &str, home: &str) -> String {
     let home = home.trim_end_matches(['/', '\\']);
     if home.is_empty() {
         return text.to_owned();
@@ -175,7 +176,7 @@ fn replace_home(text: &str, home: &str, windows: bool) -> String {
     let mut index = 0;
     while index < text.len() {
         let rest = &text[index..];
-        if let Some(len) = home_match_len(rest, home, windows)
+        if let Some(len) = home_match_len(rest, home)
             && starts_path(&text[..index])
             && ends_path(&rest[len..])
         {
@@ -190,20 +191,16 @@ fn replace_home(text: &str, home: &str, windows: bool) -> String {
     out
 }
 
-fn home_match_len(text: &str, home: &str, windows: bool) -> Option<usize> {
+fn home_match_len(text: &str, home: &str) -> Option<usize> {
     let candidate = text.get(..home.len())?;
-    let same = if windows {
-        candidate
-            .bytes()
-            .zip(home.bytes())
-            .all(|(a, b)| normalize_windows(a) == normalize_windows(b))
-    } else {
-        candidate == home
-    };
+    let same = candidate
+        .bytes()
+        .zip(home.bytes())
+        .all(|(a, b)| normalize_path_byte(a) == normalize_path_byte(b));
     same.then_some(home.len())
 }
 
-const fn normalize_windows(byte: u8) -> u8 {
+const fn normalize_path_byte(byte: u8) -> u8 {
     if byte == b'\\' {
         b'/'
     } else {
@@ -286,17 +283,11 @@ mod tests {
     }
 
     #[test]
-    fn windows_home_matches_any_case_and_slash() {
+    fn home_matches_any_case_and_slash() {
         let home = r"C:\Users\Bob";
-        assert_eq!(replace_home(r"c:\users\bob\app", home, true), r"~\app");
-        assert_eq!(replace_home("C:/Users/Bob/app", home, true), "~/app");
-        assert_eq!(
-            replace_home(r"C:\Users\Bobby", home, true),
-            r"C:\Users\Bobby"
-        );
-        assert_eq!(
-            replace_home(r"c:\users\bob\app", home, false),
-            r"c:\users\bob\app"
-        );
+        assert_eq!(replace_home(r"c:\users\bob\app", home), r"~\app");
+        assert_eq!(replace_home("C:/Users/Bob/app", home), "~/app");
+        assert_eq!(replace_home(r"C:\Users\Bobby", home), r"C:\Users\Bobby");
+        assert_eq!(replace_home("/Users/bob/x", "/Users/Bob"), "~/x");
     }
 }
