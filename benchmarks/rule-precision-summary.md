@@ -28,7 +28,7 @@ Reviews is the count of independent reviews; the percentage is how often the fir
 | `dead-code` | `unused-dev-dependency` | 19 | 19 | 14 | 5 | 0 | 74% (28 to 99) | 2 (100% agree) | 3.48.0, 2026-11-25 |
 | `dead-code` | `unused-enum-member` | 385 | 60 | 29 | 31 | 0 | 40% (33 to 49) | 1 | 3.48.0, 2026-11-25 |
 | `dead-code` | `unused-export` | 670 | 91 | 85 | 6 | 0 | 94% (75 to 99) | 1 | 3.48.0, 2026-11-25 |
-| `dead-code` | `unused-file` | 262 | 104 | 69 | 35 | 0 | 80% (60 to 91) | 3 (97% agree) | 3.49.0, 2026-11-26 |
+| `dead-code` | `unused-file` | 255 | 97 | 69 | 28 | 0 | 82% (62 to 93) | 3 (97% agree) | 3.49.0, 2026-11-26 |
 | `dead-code` | `unused-load-data-key` | 2 | 2 | 2 | 0 | 0 | 100% (1 to 100) | 1 | 3.49.0, 2026-11-25 |
 | `dead-code` | `unused-tagged-error` | 1 | 1 | 1 | 0 | 0 | 100% (2 to 100) | 2 (100% agree) | 3.48.0, 2026-11-25 |
 | `dead-code` | `unused-type` | 579 | 91 | 90 | 1 | 0 | 100% (84 to 100) | 2 (100% agree) | 3.48.0, 2026-11-25 |
@@ -55,7 +55,7 @@ Reviews is the count of independent reviews; the percentage is how often the fir
 - `unused-dev-dependency`: loaded by tool configuration (4), invoked through a package binary (1)
 - `unused-enum-member`: published SDK enum contract (29), serialized value in live type (2)
 - `unused-export`: used in a Svelte component (4), tooling configuration export (2)
-- `unused-file`: computed worker path (4), documented Deno command (4), standalone test fixture generator (4), TypeScript test discovery (4), Vite dependency scan entry (4), configured task command (2), documented direct script (2), Docusaurus theme override (2), React Email preview discovery (2), shell script invocation (2), computed worker entry (1), Mise task entry (1), Prisma seed directory loader (1), tool-discovered configuration (1), Vitest global setup (1)
+- `unused-file`: computed worker path (4), documented Deno command (4), standalone test fixture generator (4), TypeScript test discovery (4), Vite dependency scan entry (4), documented direct script (2), shell script invocation (2), computed worker entry (1), configured task command (1), Prisma seed directory loader (1), tool-discovered configuration (1)
 - `unused-type`: imported by type tests (1)
 - `code-duplication`: unrelated markup skeleton (2), generated code (1)
 - `mirrored-directory`: partial file clones (8)

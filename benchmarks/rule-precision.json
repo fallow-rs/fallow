@@ -774,10 +774,10 @@
         {
           "project": "immich",
           "commit": "7b27863b13d7ec52340e87637d71a39aa8d7efc0",
-          "findings": 17,
-          "sampled": 17,
+          "findings": 10,
+          "sampled": 10,
           "real": 4,
-          "noise": 13,
+          "noise": 6,
           "unsure": 0
         },
         {
@@ -812,19 +812,7 @@
           "count": 4
         },
         {
-          "class": "configured task command",
-          "count": 2
-        },
-        {
           "class": "documented direct script",
-          "count": 2
-        },
-        {
-          "class": "Docusaurus theme override",
-          "count": 2
-        },
-        {
-          "class": "React Email preview discovery",
           "count": 2
         },
         {
@@ -836,7 +824,7 @@
           "count": 1
         },
         {
-          "class": "Mise task entry",
+          "class": "configured task command",
           "count": 1
         },
         {
@@ -845,10 +833,6 @@
         },
         {
           "class": "tool-discovered configuration",
-          "count": 1
-        },
-        {
-          "class": "Vitest global setup",
           "count": 1
         }
       ]
