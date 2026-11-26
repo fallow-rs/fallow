@@ -161,16 +161,19 @@ gets the skill of the same version as the tools, with no separate install.
     - The set of tools comes from a measurement on two public projects
       (excalidraw and cal.com). These tools passed 50,000 characters:
       `analyze`, `audit`, `check_architecture`, `check_changed`,
-      `check_health`, `code_execute`, `find_dupes`, `fix_preview`,
+      `check_health`, `check_runtime_coverage`, `code_execute`,
+      `find_dupes`, `fix_preview`, `get_blast_radius`,
+      `get_cleanup_candidates`, `get_hot_paths`, `get_importance`,
       `get_token_blast_radius`, `impact_all`, `project_info`,
       `security_candidates` and `trace_file`.
+    - The measurement of the runtime-coverage tools used the Istanbul
+      coverage of the excalidraw test suite. Each tool returns the full
+      health JSON: about 14 million characters, and 256,458 characters with
+      `top: 20`.
     - These tools stayed below it: `trace_dependency`, `trace_export`,
       `trace_clone`, `trace_import_path`, `feature_flags`, `list_boundaries`,
       `list_suppressions`, `decision_surface`, `recommend` and
       `mutation_plan`.
-    - The runtime-coverage tools (`check_runtime_coverage`, `get_hot_paths`,
-      `get_blast_radius`, `get_importance`, `get_cleanup_candidates`) need a
-      coverage input, and the measurement did not run them.
     - `crates/mcp/src/server/tests/tool_meta.rs` pins the set. Measure a tool
       on a large public project before you add it.
   - No tool declares `_meta["anthropic/alwaysLoad"]`. An upfront tool puts

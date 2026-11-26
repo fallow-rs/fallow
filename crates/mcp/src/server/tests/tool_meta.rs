@@ -11,15 +11,20 @@ const HOST_MAX_RESULT_CHARS: u64 = 500_000;
 
 /// The tools whose result passed 50,000 characters on a large public
 /// project. Measure a tool on such a project before you add it here.
-const LARGE_RESULT_TOOLS: [&str; 13] = [
+const LARGE_RESULT_TOOLS: [&str; 18] = [
     "analyze",
     "audit",
     "check_architecture",
     "check_changed",
     "check_health",
+    "check_runtime_coverage",
     "code_execute",
     "find_dupes",
     "fix_preview",
+    "get_blast_radius",
+    "get_cleanup_candidates",
+    "get_hot_paths",
+    "get_importance",
     "get_token_blast_radius",
     "impact_all",
     "project_info",
