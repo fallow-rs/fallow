@@ -31,12 +31,12 @@ const NOT_CATEGORY_FIELDS: &[&str] = &[
 /// Arrays of the CLI `check` section that the notification has no field for.
 /// The extension does not count them in its total (`COUNTED_FINDING_KEYS`
 /// in `editors/vscode/src/analysis-utils.ts`).
-const NOT_SENT_ARRAYS: &[&str] = &[
-    "deprecated_exports_in_use",
-    "prop_drilling_chains",
-    "thin_wrappers",
-    "duplicate_prop_shapes",
-];
+const NOT_SENT_ARRAYS: &[&str] = &["deprecated_exports_in_use"];
+
+/// The prefix of a field that counts only the findings of its array at
+/// `error` severity: the component health arrays, as `total_issues` counts
+/// them.
+const ENFORCED_PREFIX: &str = "enforced";
 
 /// The CLI arrays that one notification field counts. The notification sends
 /// one count for the three boundary arrays; each other field counts the array
@@ -105,6 +105,18 @@ pub fn cli_category_counts(
             envelope["dupes"]["clone_groups"]
                 .as_array()
                 .map_or(0, Vec::len) as u64
+        } else if let Some(rest) = field.strip_prefix(ENFORCED_PREFIX) {
+            let mut lowered = rest.to_string();
+            lowered[..1].make_ascii_lowercase();
+            let array = cli_arrays(&lowered).remove(0);
+            let enforced = check[array.as_str()].as_array().map_or(0, |findings| {
+                findings
+                    .iter()
+                    .filter(|finding| finding["effective_severity"] == "error")
+                    .count()
+            }) as u64;
+            counted.push(array);
+            enforced
         } else {
             let arrays = cli_arrays(field);
             let count = arrays.iter().map(|array| length(array)).sum();

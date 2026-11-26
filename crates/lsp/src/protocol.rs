@@ -104,6 +104,14 @@ pub struct AnalysisCompleteParams {
     pub misplaced_directives: usize,
     pub route_collisions: usize,
     pub dynamic_segment_name_conflicts: usize,
+    /// The prop drilling chains at `error` severity. `total_issues` counts
+    /// only these, so the three component health fields hold the enforced
+    /// findings and not the advisory ones.
+    pub enforced_prop_drilling_chains: usize,
+    /// The thin wrappers at `error` severity.
+    pub enforced_thin_wrappers: usize,
+    /// The duplicate prop shapes at `error` severity.
+    pub enforced_duplicate_prop_shapes: usize,
     pub duplication_percentage: f64,
     pub clone_groups: usize,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -211,6 +219,9 @@ pub fn analysis_complete_params(input: AnalysisCompleteInput<'_>) -> AnalysisCom
         misplaced_directives: results.misplaced_directives.len(),
         route_collisions: results.route_collisions.len(),
         dynamic_segment_name_conflicts: results.dynamic_segment_name_conflicts.len(),
+        enforced_prop_drilling_chains: results.enforced_prop_drilling_count(),
+        enforced_thin_wrappers: results.enforced_thin_wrapper_count(),
+        enforced_duplicate_prop_shapes: results.enforced_duplicate_prop_shape_count(),
         duplication_percentage: duplication.stats.duplication_percentage,
         clone_groups: duplication.stats.clone_groups,
         changed_since_scope: changed_since_scope.cloned(),

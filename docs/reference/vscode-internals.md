@@ -126,11 +126,14 @@ Do not duplicate the full setting list in durable prose.
   the server as `FALLOW_TYPE_AWARE_TIMEOUT_SECS`.
 - A category label of the sidebar counts findings, not rows. An unlisted
   dependency, an unlisted binary and a duplicate export have one row for
-  each site. The advisory component categories (prop drilling, thin
-  wrappers, duplicate prop shapes) show `advisory`, because the total does
-  not count them. The hover breakdown has a line for each category of
-  `COUNTED_FINDING_KEYS`, and `buildParamsFromCli` derives its fields from
-  that list.
+  each site. The total counts a component health finding (prop drilling,
+  thin wrapper, duplicate prop shape) only at `error` severity, as the CLI
+  `total_issues` does (`ENFORCED_ONLY_FINDING_KEYS`). Its category shows
+  `advisory` when the total counts none of its findings, and `N counted`
+  when the total counts some. The hover breakdown has a line for each field
+  of `COUNTED_PARAMS_FIELDS`, and `buildParamsFromCli` derives its fields
+  from the same keys. The hover also says that the Problems panel lists each
+  location, so its count can be higher than the total.
 - A click on the item runs `fallow.showStatusMenu`. Each menu row runs an
   existing command (`fallow.analyze`, `fallow.toggleAllDiagnostics`,
   `fallow.audit`, `fallow.selectWorkspace`, the license commands and

@@ -482,6 +482,31 @@ describe("DeadCodeTreeProvider", () => {
     expect(advisory?.description).toBe("advisory");
   });
 
+  it("does not call a category advisory when its findings are at error severity", () => {
+    // `thin-wrapper: "error"` gates the CLI run and counts in the total.
+    const wrapper = (severity: string): Record<string, unknown> => ({
+      component: "Wrapper",
+      child_component: "Button",
+      file: "src/w.tsx",
+      line: 1,
+      effective_severity: severity,
+    });
+    const provider = new DeadCodeTreeProvider();
+    const thin = (): TestTreeItem | undefined =>
+      (provider.getChildren() as TestTreeItem[]).find((item) =>
+        String(item.label).startsWith("Thin"),
+      );
+
+    provider.update({ ...emptyCheck(), thin_wrappers: [wrapper("error")] } as never);
+    expect(thin()?.description).toBeUndefined();
+
+    provider.update({
+      ...emptyCheck(),
+      thin_wrappers: [wrapper("error"), wrapper("warn")],
+    } as never);
+    expect(thin()?.description).toBe("1 counted");
+  });
+
   it("keeps a stable category id when the issue count changes", () => {
     const provider = new DeadCodeTreeProvider();
     provider.update({ ...emptyCheck(), unused_files: [{ path: "a.ts", actions: [] }] });

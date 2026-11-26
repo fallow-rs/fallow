@@ -458,15 +458,18 @@ tests are in `crates/engine/src/changed_files.rs`,
   same name in snake case. `boundaryViolations` counts the three boundary
   arrays, and `cloneGroups` counts `dupes.clone_groups`. A non-empty CLI array
   that no field counts fails the check, so a new category must get a field.
-- **Designed exceptions**: `deprecated_exports_in_use` and the advisory
-  component arrays (`prop_drilling_chains`, `thin_wrappers`,
-  `duplicate_prop_shapes`). The extension does not count them in its total.
+  The `enforced` fields (`enforcedPropDrillingChains`,
+  `enforcedThinWrappers`, `enforcedDuplicatePropShapes`) count only the
+  findings of their component array at `error` severity, as `total_issues`
+  does.
+- **Designed exceptions**: `deprecated_exports_in_use`. The editor has no
+  surface for it, and the extension does not count it in its total.
 - **Controls**: a project with one private type leak, with type-aware
   analysis from the config, from the editor setting (`--type-aware` on the
   CLI side), with the rule explicitly off, and without type-aware analysis.
   The harness has no type-aware companion, so both surfaces keep the
-  syntactic candidates. The language server once skipped the type-aware
-  default of `private-type-leaks` (#5321).
+  syntactic candidates. A second control runs the `thin-wrapper` fixture at
+  `error` and at `warn` severity.
 - **Status**: checked by the harness.
 
 ## How the harness works
