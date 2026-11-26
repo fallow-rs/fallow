@@ -9,6 +9,7 @@ mod production_excludes;
 pub(crate) mod project_read;
 
 mod walk;
+mod web_server_apps;
 
 use std::path::{Component, Path, PathBuf};
 
@@ -39,6 +40,7 @@ pub use walk::{
     discover_files_and_config_candidates, discover_files_config_candidates_and_diagnostics,
     is_allowed_hidden_dir,
 };
+pub(crate) use web_server_apps::move_web_server_app_entries;
 
 /// The paths of `entries` that a source other than the `entry` config
 /// declares. The root pass collects them before its dedup, which keeps the

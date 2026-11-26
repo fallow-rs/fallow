@@ -488,6 +488,22 @@ from a package script. Playwright resolves `testDir`, `globalSetup`,
 the directory that it runs in, so the plugin reads a script config the same
 way as a config that it finds by name.
 
+A Playwright `webServer` can start an app that exists only for the tests,
+such as `app/` for `pnpm start` with a `start` script
+`cd ./app && pnpm run dev`. The plugin follows each `webServer.command`
+through `cd`, the `--dir`, `-C`, `--prefix` and `--cwd` options, the
+`webServer.cwd` and the package scripts that it runs (`web_server_app.rs`).
+A folder counts when a command that can start a server runs in it. A setup
+command such as `install` or `build` does not count. The plugin keeps a
+folder below the config folder that has its own `package.json`. Entry
+discovery then moves the runtime entry points below such a folder to the
+support role. Two kinds of entry stay runtime: an entry that the user
+lists in `entry`, and an entry in a folder that a workspace pattern of the
+root manifest declares, the app folder included. The coverage gap rules then
+skip the files that only the app reaches. A server that runs in the config
+folder itself, such as `vite dev` next to the config, adds no folder
+(issue #5270).
+
 The run directory is not always the base of the globs. The Vitest root is
 `test.root`, else the Vite `root`, against the run directory. `setupFiles`,
 `globalSetup` and a reporter path are relative to the Vitest root. A value

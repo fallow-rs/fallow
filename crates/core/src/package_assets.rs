@@ -73,6 +73,26 @@ fn looks_like_file(pattern: &str) -> bool {
     !last_segment.contains('*') && Path::new(last_segment).extension().is_some()
 }
 
+/// Add the asset patterns of the `files` of `pkg` as always-used files,
+/// below the project-relative package folder `prefix`.
+pub fn append_package_file_asset_patterns(
+    result: &mut crate::plugins::AggregatedPluginResult,
+    prefix: &str,
+    pkg: &PackageJson,
+) {
+    let prefix = prefix.trim_matches('/');
+    for pattern in scaffold_template_asset_patterns(pkg) {
+        let pattern = if prefix.is_empty() {
+            pattern
+        } else {
+            format!("{prefix}/{pattern}")
+        };
+        result
+            .discovered_always_used
+            .push((pattern, PACKAGE_FILES_SOURCE.to_string()));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

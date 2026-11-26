@@ -9,7 +9,7 @@ use rustc_hash::FxHashMap;
 use oxc_ast::ast::{Expression, LogicalOperator, ObjectExpression, ObjectPropertyKind};
 
 use super::config_parser;
-use super::{PathRule, Plugin, PluginResult};
+use super::{PathRule, Plugin, PluginResult, web_server_app};
 use crate::scripts;
 
 /// Test entry patterns for a project without a config, or with a config whose
@@ -124,9 +124,12 @@ impl Plugin for PlaywrightPlugin {
 
         add_reporters(&mut result, source, config_path, root, config_dir);
 
-        let (web_deps, web_setup) = collect_web_server(source, config_path, root, config_dir);
-        result.referenced_dependencies.extend(web_deps);
-        result.setup_files.extend(web_setup);
+        let web_server = collect_web_server(source, config_path, root, config_dir);
+        result
+            .referenced_dependencies
+            .extend(web_server.referenced_dependencies);
+        result.setup_files.extend(web_server.setup_files);
+        result.web_server_app_dirs.extend(web_server.app_dirs);
 
         // Every config states its full set of test entries, so that two
         // configs in one project keep the entries of both. A config without
@@ -596,12 +599,15 @@ fn test_dir_prefix(test_dir: &str, root: &Path, config_dir: &Path) -> Option<Str
 /// binary-to-package resolution (it owns `node_modules`). Commands that delegate to a
 /// package manager (`npm run start`, `yarn dev`) credit nothing, since the underlying
 /// script's own dependencies are analyzed separately.
+///
+/// The directories of the apps that the commands start below `config_dir`
+/// go to `app_dirs` (see [`super::web_server_app`]).
 fn collect_web_server(
     source: &str,
     config_path: &Path,
     root: &Path,
     config_dir: &Path,
-) -> (Vec<String>, Vec<PathBuf>) {
+) -> WebServer {
     let mut commands: Vec<(String, Option<String>)> = Vec::new();
 
     if let Some(command) =
@@ -621,6 +627,7 @@ fn collect_web_server(
 
     let mut referenced_dependencies = Vec::new();
     let mut setup_files = Vec::new();
+    let mut app_dirs = Vec::new();
 
     for (command, cwd) in commands {
         let analysis = scripts::analyze_command(&command, root, &FxHashMap::default());
@@ -630,6 +637,9 @@ fn collect_web_server(
             || config_dir.to_path_buf(),
             |dir| config_dir.join(dir.trim_start_matches("./")),
         );
+        app_dirs.extend(web_server_app::entered_app_dirs(
+            &command, &base, config_dir,
+        ));
         for file in analysis
             .config_files
             .into_iter()
@@ -639,7 +649,18 @@ fn collect_web_server(
         }
     }
 
-    (referenced_dependencies, setup_files)
+    WebServer {
+        referenced_dependencies,
+        setup_files,
+        app_dirs,
+    }
+}
+
+/// What the `webServer` commands of a Playwright config contribute.
+struct WebServer {
+    referenced_dependencies: Vec<String>,
+    setup_files: Vec<PathBuf>,
+    app_dirs: Vec<PathBuf>,
 }
 
 #[cfg(test)]

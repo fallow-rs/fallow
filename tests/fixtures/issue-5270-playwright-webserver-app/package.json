@@ -1,0 +1,12 @@
+{
+  "name": "form-lib",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "start": "cd ./app && npm install && npm run dev",
+    "test:e2e": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.50.0"
+  }
+}

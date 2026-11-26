@@ -936,6 +936,10 @@ fn merge_plugin_result_fields(
             result.jsx_package_credits.push(rule);
         }
     }
+    super::push_missing(
+        &mut result.web_server_app_dirs,
+        plugin_result.web_server_app_dirs,
+    );
     for dir in plugin_result.tsconfig_jsx_dirs {
         if !result.tsconfig_jsx_dirs.contains(&dir) {
             result.tsconfig_jsx_dirs.push(dir);

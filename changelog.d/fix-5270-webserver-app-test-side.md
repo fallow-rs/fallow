@@ -1,0 +1,4 @@
+### Fixed
+
+- **The coverage gap rules no longer report the app that a Playwright `webServer` starts for the tests.** A `webServer.command` such as `pnpm start`, with a `start` script `cd ./app && pnpm run dev`, starts a nested package that exists only for the end-to-end tests. `untested-file` and `untested-export` reported each file of that app as untested production code. Fallow now follows the command through `cd`, the `--dir`, `-C`, `--prefix` and `--cwd` options, `webServer.cwd` and package scripts. When a command that can start a server runs in a folder below the config folder, and that folder has its own `package.json`, its runtime entry points become support entry points. A folder that a workspace pattern declares stays production code, and so does an entry that you list in `entry`. The files of the app stay in use. A file that a production entry point also reaches stays runtime code.
+  (Closes [#5270](https://github.com/fallow-rs/fallow/issues/5270))
