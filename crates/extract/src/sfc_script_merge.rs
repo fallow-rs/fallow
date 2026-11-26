@@ -16,7 +16,7 @@ pub(super) struct SfcScriptMergeInput<'a> {
     /// The script bindings that the markup of the component can call.
     pub(super) script_binding_context: &'a mut crate::template_usage::ScriptBindingContext,
     pub(super) need_complexity: bool,
-    pub(super) mode: fallow_types::shared_state::ExtractionMode,
+    pub(super) gates: crate::module_parse::ExtractionGates,
 }
 
 pub(super) fn merge_script_into_module(input: &mut SfcScriptMergeInput<'_>) {
@@ -47,7 +47,7 @@ pub(super) fn merge_script_into_module(input: &mut SfcScriptMergeInput<'_>) {
         &parser_return.program,
         &mut extractor,
         &empty_template_used,
-        input.mode,
+        input.gates,
     );
     if input.kind == SfcKind::Vue || is_template_visible_script(input.kind, input.script) {
         crate::component_contracts::merge(

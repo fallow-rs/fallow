@@ -13,6 +13,36 @@ use fallow_types::extract::FlagPatterns;
 pub struct ExtractionOptions<'a> {
     pub flag_patterns: &'a FlagPatterns,
     pub mode: fallow_types::shared_state::ExtractionMode,
+    /// Collect the call facts (`ModuleInfo::function_contracts`). A run
+    /// whose rules do not read them leaves this off, and each module then
+    /// has `function_contracts: None`.
+    pub call_facts: bool,
+}
+
+impl ExtractionOptions<'_> {
+    pub const fn gates(&self) -> ExtractionGates {
+        ExtractionGates {
+            mode: self.mode,
+            call_facts: self.call_facts,
+        }
+    }
+}
+
+/// The optional semantic facts that a parse collects, carried from
+/// [`ExtractionOptions`] to the semantic pass of each embedded script.
+#[derive(Clone, Copy)]
+pub struct ExtractionGates {
+    pub mode: fallow_types::shared_state::ExtractionMode,
+    pub call_facts: bool,
+}
+
+#[cfg(test)]
+impl ExtractionGates {
+    /// Every fact in the standard mode, for tests that expect a full module.
+    pub const STANDARD: Self = Self {
+        mode: fallow_types::shared_state::ExtractionMode::Standard,
+        call_facts: true,
+    };
 }
 
 /// Parse source text into a [`ModuleInfo`].
@@ -63,6 +93,7 @@ pub fn parse_source_to_module_with_flags(
         &ExtractionOptions {
             flag_patterns,
             mode: fallow_types::shared_state::ExtractionMode::Standard,
+            call_facts: true,
         },
     )
 }
@@ -74,6 +105,30 @@ pub fn parse_source_to_module_with_flags(
 /// remove a U+FEFF again: a second U+FEFF is source text, and the spans
 /// count it.
 pub fn parse_source_without_bom(
+    file_id: FileId,
+    path: &Path,
+    source: &str,
+    content_hash: u64,
+    need_complexity: bool,
+    options: &ExtractionOptions<'_>,
+) -> ModuleInfo {
+    let mut module = parse_source_bounded(
+        file_id,
+        path,
+        source,
+        content_hash,
+        need_complexity,
+        options,
+    );
+    if !options.call_facts {
+        // The visitor and the HTML host mark call facts outside the gated
+        // collection, so an empty marker must not reach a run without them.
+        module.function_contracts = None;
+    }
+    module
+}
+
+fn parse_source_bounded(
     file_id: FileId,
     path: &Path,
     source: &str,
@@ -122,6 +177,7 @@ pub fn parse_source_to_module_with_mode(
         &ExtractionOptions {
             flag_patterns: &FlagPatterns::default(),
             mode,
+            call_facts: true,
         },
     )
 }

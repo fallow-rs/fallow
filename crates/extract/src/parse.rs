@@ -276,9 +276,9 @@ fn parse_source_to_module_inner(
     options: &crate::module_parse::ExtractionOptions<'_>,
 ) -> ModuleInfo {
     let flag_patterns = options.flag_patterns;
-    let mode = options.mode;
+    let gates = options.gates();
     if let Some(module) =
-        parse_non_js_source_to_module(file_id, path, source, content_hash, need_complexity, mode)
+        parse_non_js_source_to_module(file_id, path, source, content_hash, need_complexity, gates)
     {
         return module;
     }
@@ -298,7 +298,7 @@ fn parse_source_to_module_inner(
         crate::suppress::parse_suppressions(&parser_return.program.comments, source);
 
     let (mut extractor, mut semantic_usage) =
-        build_primary_extractor(&parser_return.program, path, source, source_type, mode);
+        build_primary_extractor(&parser_return.program, path, source, source_type, gates);
 
     let line_offsets = fallow_types::extract::compute_line_offsets(source);
 
@@ -322,7 +322,7 @@ fn parse_source_to_module_inner(
             source,
             export_statements: &crate::jsdoc_attach::export_statement_spans(&parser_return.program),
             flag_patterns,
-            mode,
+            gates,
         },
         &mut ParseOutputs {
             extractor: &mut extractor,
@@ -358,7 +358,7 @@ struct JsxRetryOrJsdocInput<'a> {
     source: &'a str,
     export_statements: &'a [oxc_span::Span],
     flag_patterns: &'a FlagPatterns,
-    mode: fallow_types::shared_state::ExtractionMode,
+    gates: crate::module_parse::ExtractionGates,
 }
 
 struct ModuleAssemblyInput {
@@ -380,7 +380,7 @@ fn build_primary_extractor(
     path: &Path,
     source: &str,
     source_type: SourceType,
-    mode: fallow_types::shared_state::ExtractionMode,
+    gates: crate::module_parse::ExtractionGates,
 ) -> (ModuleInfoExtractor, SemanticUsage) {
     let mut extractor = ModuleInfoExtractor::new();
     extractor.set_route_load_harvest_mode(route_load_harvest_mode_for_path(path));
@@ -397,7 +397,7 @@ fn build_primary_extractor(
         program,
         &mut extractor,
         &template_used_imports,
-        mode,
+        gates,
     );
     extractor.resolve_vitest_mock_operations(&semantic_usage.mock_api_reference_spans);
     (extractor, semantic_usage)
@@ -451,7 +451,7 @@ fn apply_jsx_retry_or_jsdoc(input: &JsxRetryOrJsdocInput<'_>, outputs: &mut Pars
         need_complexity: input.need_complexity,
         line_offsets: input.line_offsets,
         flag_patterns: input.flag_patterns,
-        mode: input.mode,
+        gates: input.gates,
         primary_error_count: outputs.degradation.error_count,
     };
     let Some(retry) = parse_with_jsx_retry(&retry_input) else {
@@ -587,7 +587,7 @@ struct JsxRetryInput<'a> {
     need_complexity: bool,
     line_offsets: &'a [u32],
     flag_patterns: &'a FlagPatterns,
-    mode: fallow_types::shared_state::ExtractionMode,
+    gates: crate::module_parse::ExtractionGates,
     primary_error_count: u32,
 }
 
@@ -628,7 +628,7 @@ fn parse_with_jsx_retry(input: &JsxRetryInput<'_>) -> Option<JsxRetryParse> {
         &retry_return.program,
         &mut extractor,
         &template_used_imports,
-        input.mode,
+        input.gates,
     );
     extractor.resolve_vitest_mock_operations(&semantic_usage.mock_api_reference_spans);
     let complexity = retry_complexity(
@@ -700,7 +700,7 @@ fn parse_non_js_source_to_module(
     source: &str,
     content_hash: u64,
     need_complexity: bool,
-    mode: fallow_types::shared_state::ExtractionMode,
+    gates: crate::module_parse::ExtractionGates,
 ) -> Option<ModuleInfo> {
     if is_sfc_file(path) {
         return Some(crate::sfc::parse_sfc_to_module_with_mode(
@@ -709,7 +709,7 @@ fn parse_non_js_source_to_module(
             source,
             content_hash,
             need_complexity,
-            mode,
+            gates,
         ));
     }
     if is_astro_file(path) {
@@ -718,7 +718,7 @@ fn parse_non_js_source_to_module(
             source,
             content_hash,
             need_complexity,
-            mode,
+            gates,
         ));
     }
     if is_mdx_file(path) {
@@ -726,7 +726,7 @@ fn parse_non_js_source_to_module(
             file_id,
             source,
             content_hash,
-            mode,
+            gates,
         ));
     }
     if is_css_file(path) {
@@ -1544,6 +1544,7 @@ fn report_unreferenced_import_equals_bindings(
 #[derive(Clone, Copy)]
 struct SemanticReferenceCandidates<'a> {
     mode: fallow_types::shared_state::ExtractionMode,
+    call_facts: bool,
     module_bindings: &'a rustc_hash::FxHashSet<Span>,
     subclass_bindings: &'a rustc_hash::FxHashSet<Span>,
     callback_captures: &'a rustc_hash::FxHashSet<Span>,
@@ -1719,10 +1720,6 @@ fn compute_semantic_usage_with_candidates(
         &imported_call_reference_spans,
     );
     let namespace_member_uses = crate::namespace_member_uses::collect(&semantic, imports, exports);
-    let opaque = crate::function_contracts::OpaqueLoadInput {
-        loads: candidates.opaque_loads,
-        template_reads_root: candidates.template_reads_root,
-    };
     let (auto_import_candidates, unresolved_type_names) = compute_root_unresolved_names(scoping);
     SemanticUsage {
         import_binding_usage: ImportBindingUsage {
@@ -1747,9 +1744,15 @@ fn compute_semantic_usage_with_candidates(
         component_contracts: crate::component_contracts::collect(&semantic, imports, exports),
         effect_facts: crate::effect_facts::collect(&semantic, program, imports, exports),
         shared_state: crate::shared_state::collect(&semantic, imports, candidates.mode),
-        function_contracts: crate::function_contracts::collect(
-            &semantic, program, imports, &opaque,
-        ),
+        function_contracts: if candidates.call_facts {
+            let opaque = crate::function_contracts::OpaqueLoadInput {
+                loads: candidates.opaque_loads,
+                template_reads_root: candidates.template_reads_root,
+            };
+            crate::function_contracts::collect(&semantic, program, imports, &opaque)
+        } else {
+            fallow_types::extract::FunctionContractFacts::default()
+        },
     }
 }
 
@@ -1974,6 +1977,8 @@ pub fn compute_import_binding_usage(
         template_used,
         SemanticReferenceCandidates {
             mode: fallow_types::shared_state::ExtractionMode::Standard,
+            // Only the import binding usage of this probe has a reader.
+            call_facts: false,
             module_bindings: &rustc_hash::FxHashSet::default(),
             subclass_bindings: &rustc_hash::FxHashSet::default(),
             callback_captures: &rustc_hash::FxHashSet::default(),
