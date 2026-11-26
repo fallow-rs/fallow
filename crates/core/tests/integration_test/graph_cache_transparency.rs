@@ -14,7 +14,7 @@
 //! warm run with a cache-free run over generated edit sequences, and check
 //! that the graph cache key covers each path that import resolution reads.
 
-use fallow_core::graph_cache::{GraphCacheManifest, GraphCacheMode};
+use fallow_core::graph_cache::{GraphCacheFileHashes, GraphCacheManifest, GraphCacheMode};
 use fallow_types::discover::FileId;
 
 use super::common::{copy_fixture_tree, create_config_with_cache, fixture_path};
@@ -65,19 +65,24 @@ fn current_manifest_with_cached_mode(
     let files = fallow_core::discover::discover_files(config);
     let hashes = content_hashes_for(&files);
     GraphCacheManifest::from_discovered_files(&config.root, &files, store.manifest.mode, |file| {
-        hashes.get(file.id.0 as usize).copied().unwrap_or_default()
+        hashes
+            .get(file.id.0 as usize)
+            .copied()
+            .unwrap_or(GraphCacheFileHashes::NO_MODULE)
     })
 }
 
-/// Content hash per `FileId`, mirroring what the analysis path feeds the
-/// manifest. Parsing without a cache is what the production builder gets from
-/// the parse stage it runs anyway.
-fn content_hashes_for(files: &[fallow_types::discover::DiscoveredFile]) -> Vec<u64> {
+/// The manifest hashes per `FileId`, mirroring what the analysis path feeds
+/// the manifest. Parsing without a cache is what the production builder gets
+/// from the parse stage it runs anyway.
+fn content_hashes_for(
+    files: &[fallow_types::discover::DiscoveredFile],
+) -> Vec<GraphCacheFileHashes> {
     let parsed = fallow_core::extract::parse_all_files(files, None, false);
-    let mut hashes = vec![0u64; files.len()];
+    let mut hashes = vec![GraphCacheFileHashes::NO_MODULE; files.len()];
     for module in &parsed.modules {
         if let Some(slot) = hashes.get_mut(module.file_id.0 as usize) {
-            *slot = module.content_hash;
+            *slot = GraphCacheFileHashes::of_module(module);
         }
     }
     hashes
@@ -146,6 +151,98 @@ fn warm_graph_cache_hit_skips_import_resolution() {
         warm_timings.resolve_imports_ms.abs() <= f64::EPSILON,
         "warm graph-cache hit must skip import resolution, got {}ms",
         warm_timings.resolve_imports_ms
+    );
+}
+
+/// An edit that keeps every import statement keeps the resolver payload: the
+/// warm run resolves no specifier, builds the graph again from the edited
+/// modules, and still names the reason that the persisted graph was refused.
+/// An edit of an import statement resolves the imports again.
+#[test]
+#[expect(
+    deprecated,
+    reason = "trace timings are still the internal contract for this cache performance gate"
+)]
+fn body_edit_reuses_the_resolver_payload_and_matches_the_cache_free_run() {
+    let temp = tempfile::tempdir().expect("create temp dir");
+    let root = temp.path().join("project");
+    copy_fixture_tree(&fixture_path("barrel-exports"), &root);
+    let config = create_config_with_cache(root.clone(), temp.path().join("cache"));
+    let mut cache_free = create_config_with_cache(root.clone(), temp.path().join("cold-cache"));
+    cache_free.no_cache = true;
+    let entry = root.join("src/index.ts");
+    let original = std::fs::read_to_string(&entry).expect("read the entry file");
+
+    let cold = fallow_core::analyze_with_trace(&config).expect("cold analysis");
+    let cold_calls = cold
+        .timings
+        .expect("trace timings retained")
+        .counters
+        .resolve_specifier_calls;
+    assert!(cold_calls > 0, "the fixture must have imports to resolve");
+
+    let body_edit = original.replace("console.log(foo);", "console.log('foo');");
+    assert_ne!(body_edit, original, "the fixture entry must use `foo`");
+    std::fs::write(&entry, &body_edit).expect("edit below the imports");
+    let warm = fallow_core::analyze_with_trace(&config).expect("warm analysis");
+    let expected = fallow_core::analyze(&cache_free).expect("cache-free analysis");
+    assert_eq!(
+        serde_json::to_value(&warm.results).expect("serialize warm results"),
+        serde_json::to_value(&expected).expect("serialize cache-free results"),
+        "a run that reuses the resolver payload must match the cache-free run"
+    );
+    assert_ne!(
+        serde_json::to_value(&warm.results).expect("serialize warm results"),
+        serde_json::to_value(&cold.results).expect("serialize cold results"),
+        "the edit must change the result, or a stale graph would pass"
+    );
+    let warm_timings = warm.timings.expect("trace timings retained");
+    assert_eq!(
+        warm_timings.counters.resolve_specifier_calls, 0,
+        "an edit below the imports must not resolve a specifier again"
+    );
+    assert_eq!(
+        warm_timings.graph_cache_rejection,
+        Some(fallow_types::cache_rejection::CacheRejection::FingerprintChanged),
+        "the run must still name why the persisted graph was not reused"
+    );
+
+    let reused_cache = std::fs::read(temp.path().join("cache/graph-cache.bin"))
+        .expect("the run that reused the resolver payload wrote the graph cache");
+    let fresh = create_config_with_cache(root, temp.path().join("fresh-cache"));
+    fallow_core::analyze(&fresh).expect("first run with an empty cache");
+    let fresh_cache = std::fs::read(temp.path().join("fresh-cache/graph-cache.bin"))
+        .expect("the first run wrote the graph cache");
+    assert!(
+        reused_cache == fresh_cache,
+        "the cache written after a resolver payload reuse must equal the cache of a first run"
+    );
+    let unchanged = fallow_core::analyze_with_trace(&config).expect("run with no change");
+    assert_eq!(
+        unchanged
+            .timings
+            .expect("trace timings retained")
+            .graph_cache_rejection,
+        None,
+        "the next run with no change must reuse the graph"
+    );
+
+    std::fs::write(&entry, format!("import './missing-module';\n{original}"))
+        .expect("edit an import statement");
+    let resolved_again = fallow_core::analyze_with_trace(&config).expect("warm analysis");
+    let expected = fallow_core::analyze(&cache_free).expect("cache-free analysis");
+    assert_eq!(
+        serde_json::to_value(&resolved_again.results).expect("serialize warm results"),
+        serde_json::to_value(&expected).expect("serialize cache-free results"),
+    );
+    assert!(
+        resolved_again
+            .timings
+            .expect("trace timings retained")
+            .counters
+            .resolve_specifier_calls
+            > 0,
+        "an edit of an import statement must resolve the imports again"
     );
 }
 
@@ -373,7 +470,10 @@ fn manifest_matches_only_on_identical_inputs() {
 
     let hashes = content_hashes_for(&files);
     let content_hash_provider = |file: &fallow_types::discover::DiscoveredFile| {
-        hashes.get(file.id.0 as usize).copied().unwrap_or_default()
+        hashes
+            .get(file.id.0 as usize)
+            .copied()
+            .unwrap_or(GraphCacheFileHashes::NO_MODULE)
     };
 
     let manifest_a = GraphCacheManifest::from_discovered_files(

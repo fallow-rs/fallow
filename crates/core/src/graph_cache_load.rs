@@ -11,6 +11,11 @@ use super::*;
 /// are the most expensive refusals in the pipeline; leaving them silent made a
 /// fully paid, fully wasted load indistinguishable from a first run.
 /// `Err(None)` means there was nothing to refuse: the run disabled caching.
+///
+/// An `Ok` hit can still reuse less than the graph. When each file kept its
+/// resolver inputs, the resolver payload is restored and the graph is built
+/// again; [`GraphCacheHit::graph_rejection`] then names why the persisted
+/// graph was not reused.
 pub fn try_load_analysis_graph_cache(
     input: &AnalysisCoreSharedInput<'_>,
     entry_points: &TimedEntryPoints,
@@ -50,6 +55,7 @@ pub fn try_load_analysis_graph_cache(
             graph,
             project,
             elapsed_ms: t.elapsed().as_secs_f64() * 1000.0,
+            graph_rejection: None,
         });
     }
 
@@ -72,6 +78,10 @@ pub fn try_load_analysis_graph_cache(
         return Err(Some(rejection));
     }
 
+    let graph_rejection = store
+        .manifest
+        .content_differs(&current)
+        .then_some(CacheRejection::FingerprintChanged);
     let mut project = restore_cached_resolved_project(input, modules, &store.resolved_project)?;
     tracing::debug!("Graph resolver cache hit: skipping import resolution and rebuilding graph");
     let graph = build_analysis_graph_timed(input, &mut project, entry_points, modules);
@@ -80,5 +90,6 @@ pub fn try_load_analysis_graph_cache(
         graph: graph.graph,
         project,
         elapsed_ms: t.elapsed().as_secs_f64() * 1000.0,
+        graph_rejection,
     })
 }
