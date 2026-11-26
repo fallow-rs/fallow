@@ -382,7 +382,7 @@ gate_check_targets() {
 
 # Returns 0 when a target tree holds the directory of file $1 or of a hop of
 # its link chain, as found or resolved, and sets GATE_HOP to that hop. A link
-# chain that the gate cannot follow counts as held.
+# that readlink cannot read, or a chain of more than 40 links, counts as held.
 gate_link_hop_excluded() {
   local file="$1" link hops=0
   while :; do
@@ -392,6 +392,9 @@ gate_link_hop_excluded() {
       gate_target_only "$RESOLVED" && return 0
     fi
     [ -L "$file" ] || return 1
+    # Without readlink the chain cannot be followed. The PATH filter still
+    # removes each target tree, so the check ends here.
+    command -v readlink >/dev/null 2>&1 || return 1
     hops=$((hops + 1))
     [ "$hops" -le 40 ] || return 0
     link="$(readlink -- "$file" 2>/dev/null)" || return 0
