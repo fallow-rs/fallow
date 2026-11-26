@@ -9,6 +9,7 @@ mod linear_cost;
 mod markup_events;
 mod markup_parity;
 mod mdx;
+mod metadata_hits;
 mod nesting;
 mod object_pattern_defaults;
 mod regex_compile;

@@ -301,6 +301,7 @@ pub fn parse_all_files_with_mode(
     let mut files_read = 0u64;
     let mut source_bytes_read = 0u64;
     let mut css_masked_bytes = 0u64;
+    let mut metadata_hits = Vec::new();
 
     // `results` is a positional map over `files`, so zipping recovers the path
     // for a module without carrying one on `ModuleInfo`.
@@ -311,6 +312,8 @@ pub fn parse_all_files_with_mode(
         if let Some(bytes) = result.source_bytes_read {
             files_read += 1;
             source_bytes_read += bytes;
+        } else if result.cache_hits == 1 && result.module.is_some() {
+            metadata_hits.push(file.id);
         }
         css_masked_bytes += result.css_masked_bytes;
         if let Some(module) = result.module {
@@ -330,6 +333,10 @@ pub fn parse_all_files_with_mode(
         }
     }
 
+    // A caller can pass the files in any id order, and a cache writer looks
+    // the ids up by binary search.
+    metadata_hits.sort_unstable_by_key(|id| id.0);
+
     if hits > 0 || misses > 0 {
         tracing::info!(
             cache_hits = hits,
@@ -348,7 +355,23 @@ pub fn parse_all_files_with_mode(
         files_read,
         source_bytes_read,
         css_masked_bytes,
+        metadata_hits,
     }
+}
+
+/// Whether the parse served `file_id` from cache metadata, given the sorted
+/// [`ParseResult::metadata_hits`] of that parse.
+///
+/// A cache writer can keep the stored fingerprint of such a file and skip its
+/// metadata read. The parse found that the stored fingerprint has a ctime and
+/// equals the metadata of the open file, so the entry is current. A write after
+/// that check moves the ctime. The next run then compares the content hash, as
+/// it does when the writer stores the new metadata.
+#[must_use]
+pub fn is_metadata_hit(metadata_hits: &[FileId], file_id: FileId) -> bool {
+    metadata_hits
+        .binary_search_by_key(&file_id.0, |id| id.0)
+        .is_ok()
 }
 
 #[derive(Default)]

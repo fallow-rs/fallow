@@ -345,6 +345,7 @@ impl AnalysisSession {
                 modules: &cache.modules,
                 files,
                 need_complexity: cache.need_complexity,
+                metadata_hits: &[],
                 fingerprint_of: &|file: &DiscoveredFile| {
                     cache.fingerprints.get(file.id.0 as usize).map_or_else(
                         || SourceFingerprint::new(0, 0),
@@ -1173,7 +1174,7 @@ struct SourceProblems {
 mod duplication;
 #[path = "session_parse.rs"]
 mod parsing;
-use parsing::parse_files_with_config;
+use parsing::{ParseCacheWrite, parse_files_with_config, write_parse_cache};
 fn token_is_set(cancellation: Option<&AtomicBool>) -> bool {
     cancellation.is_some_and(|cancelled| cancelled.load(Ordering::SeqCst))
 }
@@ -1219,83 +1220,6 @@ fn source_fingerprints_for_files(files: &[DiscoveredFile]) -> Option<Vec<SourceF
                 .filter(|fingerprint| fingerprint.has_known_mtime())
         })
         .collect()
-}
-
-fn update_parse_cache_if_enabled(
-    config: &ResolvedConfig,
-    cache: &mut Option<fallow_extract::cache::CacheStore>,
-    write: &ParseCacheWrite<'_>,
-) -> f64 {
-    let start = Instant::now();
-    write_parse_cache(config, cache, write);
-    start.elapsed().as_secs_f64() * 1000.0
-}
-
-/// Modules to store in the persisted parse cache, with the fingerprint that
-/// each file gets in the cache.
-struct ParseCacheWrite<'a> {
-    modules: &'a [ModuleInfo],
-    files: &'a [DiscoveredFile],
-    need_complexity: bool,
-    fingerprint_of: &'a dyn Fn(&DiscoveredFile) -> SourceFingerprint,
-}
-
-fn write_parse_cache(
-    config: &ResolvedConfig,
-    cache: &mut Option<fallow_extract::cache::CacheStore>,
-    write: &ParseCacheWrite<'_>,
-) {
-    if config.no_cache {
-        return;
-    }
-
-    let cache_max_size_bytes = crate::project_config::resolve_cache_max_size_bytes(config);
-    let store = cache.get_or_insert_with(|| fallow_extract::cache::CacheStore::new(&config.root));
-    if update_parse_cache(store, write, config.reads_call_facts())
-        && let Err(error) = store.save(
-            config.cache_target(),
-            config.cache_config_hash,
-            cache_max_size_bytes,
-        )
-    {
-        tracing::warn!("Failed to save cache: {error}");
-    }
-}
-
-/// Mirror of `fallow_core`'s `update_cache` for session-owned parsing. See
-/// [`fallow_extract::cache::CacheStore::record_module`] for the rules that keep
-/// the complexity and the call facts of an earlier run.
-fn update_parse_cache(
-    store: &mut fallow_extract::cache::CacheStore,
-    write: &ParseCacheWrite<'_>,
-    need_call_facts: bool,
-) -> bool {
-    let ParseCacheWrite {
-        modules,
-        files,
-        need_complexity,
-        fingerprint_of,
-    } = *write;
-    let mut dirty = false;
-    for module in modules {
-        if let Some(file) = files.get(module.file_id.0 as usize) {
-            dirty |= store.record_module(
-                &file.path,
-                module,
-                fingerprint_of(file),
-                need_complexity,
-                need_call_facts,
-            );
-        }
-    }
-    store.retain_paths(files) || dirty
-}
-
-fn source_fingerprint(path: &Path) -> SourceFingerprint {
-    std::fs::metadata(path).map_or_else(
-        |_| SourceFingerprint::new(0, 0),
-        |metadata| SourceFingerprint::from_metadata(&metadata),
-    )
 }
 
 struct EngineDeadCodePipelineInput<'a> {
