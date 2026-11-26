@@ -24,6 +24,8 @@ use rmcp::model::CallToolResponse;
 use tokio::process::Command;
 use tokio::sync::{Mutex, Semaphore};
 
+use super::call_counts;
+
 /// Code Mode runs its host calls on a blocking thread outside the call scope,
 /// and each CLI host call already records its own event. A server event for
 /// the snippet would count those calls twice.
@@ -151,13 +153,51 @@ where
     };
     let binary = binary.to_owned();
     let elapsed = started.elapsed();
+    let text = if failed {
+        None
+    } else {
+        text_for_count(tool, &result)
+    };
     tokio::spawn(async move {
         let wanted = telemetry_wanted(&binary).await;
         if wanted != Wanted::No {
-            run_record(&binary, tool, elapsed, failed, wanted).await;
+            let count = text.and_then(|text| call_counts::result_count(tool, &text));
+            run_record(&binary, tool, elapsed, Outcome { failed, count }, wanted).await;
         }
     });
     result
+}
+
+/// A copy of the result text when the tool has a finding count and the
+/// cached state says that telemetry is on. The copy happens before the
+/// answer, but the parse runs on the detached task. A server with telemetry
+/// off, or with no state read yet, copies nothing.
+fn text_for_count(tool: &str, result: &Result<CallToolResponse, McpError>) -> Option<String> {
+    if !call_counts::has_count(tool) {
+        return None;
+    }
+    let cached = STATE
+        .try_lock()
+        .ok()
+        .and_then(|state| fresh(*state, Instant::now()));
+    if !matches!(cached, Some(Wanted::Spool | Wanted::Print)) {
+        return None;
+    }
+    let Ok(CallToolResponse::Complete(result)) = result else {
+        return None;
+    };
+    result
+        .content
+        .first()
+        .and_then(|block| block.as_text())
+        .map(|text| text.text.clone())
+}
+
+/// The outcome of one call: whether it failed, and its finding count.
+#[derive(Debug, Clone, Copy)]
+struct Outcome {
+    failed: bool,
+    count: Option<usize>,
 }
 
 /// The manifest name of `tool` when the server records it. An unknown name,
@@ -243,7 +283,7 @@ fn wanted_from_status(stdout: &[u8]) -> Option<Wanted> {
 
 /// Run `fallow telemetry record` for one call, in a bounded slot and under
 /// [`RECORD_TIMEOUT`]. Its result never reaches the client.
-async fn run_record(binary: &str, tool: &str, elapsed: Duration, failed: bool, wanted: Wanted) {
+async fn run_record(binary: &str, tool: &str, elapsed: Duration, outcome: Outcome, wanted: Wanted) {
     let Ok(_slot) = RECORDS.acquire().await else {
         return;
     };
@@ -262,8 +302,11 @@ async fn run_record(binary: &str, tool: &str, elapsed: Duration, failed: bool, w
             Stdio::null()
         })
         .kill_on_drop(true);
-    if failed {
+    if outcome.failed {
         command.arg("--failed");
+    }
+    if let Some(count) = outcome.count {
+        command.arg("--result-count").arg(count.to_string());
     }
     let Ok(mut child) = command.spawn() else {
         return;

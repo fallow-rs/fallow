@@ -827,7 +827,13 @@ marks each call that starts a CLI child, in a task-local value like the
 cancellation token. A completed call without that mark gets one event from
 the hidden `fallow telemetry record` command, with the same two tags. A call
 that runs as an MCP task is recorded the same way when the task settles. The
-CLI applies the consent rules, builds the event and spools it.
+CLI applies the consent rules, builds the event and spools it. For the
+analysis tools, `crates/mcp/src/tools/call_counts.rs` reads one finding
+count from the result and passes it as `--result-count`, so the event of the
+in-process route has the same `findings_present` and `result_count_bucket`
+as the event of the CLI route. The server copies the result text only when
+the cached telemetry state is on, and it parses the text on the detached
+task.
 
 The server does this work on a detached task after the answer. It reads
 `fallow telemetry status` at most once per ten minutes (one minute after a
