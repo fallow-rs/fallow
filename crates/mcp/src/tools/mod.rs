@@ -40,7 +40,7 @@ mod similar_code;
 mod suppressions;
 mod trace;
 
-pub use analyze::{analyze_requests_type_aware, build_analyze_args, run_analyze};
+pub use analyze::{analyze_runs_type_aware, build_analyze_args, run_analyze};
 pub use architecture::{build_architecture_args, run_architecture};
 pub use audit::{build_audit_args, run_audit};
 pub use call_telemetry::track_call;

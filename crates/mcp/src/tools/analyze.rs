@@ -127,8 +127,30 @@ pub fn build_analyze_args(params: &AnalyzeParams) -> Result<Vec<String>, String>
     Ok(args)
 }
 
+/// Whether the call runs type-aware analysis: its parameters ask for it, or
+/// `FALLOW_TYPE_AWARE` or the project config turns it on while the
+/// parameters leave the choice open. The typed route refuses the second case,
+/// so the call then runs the type-aware CLI. The check can read the project
+/// config file, so call it on a blocking thread.
+///
+/// The check never fetches a remote `extends`, so the decision stays fast and
+/// offline. A config that needs one does not load here, and the call stays
+/// synchronous.
+pub fn analyze_runs_type_aware(params: &AnalyzeParams) -> bool {
+    analyze_requests_type_aware(params)
+        || dead_code_options_from_params(params, None, EnvSnapshot::capture()).is_ok_and(
+            |options| {
+                let analysis = AnalysisOptions {
+                    allow_remote_extends: false,
+                    ..options.analysis
+                };
+                fallow_api::layers_turn_on_type_aware(&analysis)
+            },
+        )
+}
+
 /// Whether the call asks for type-aware analysis through its parameters.
-pub fn analyze_requests_type_aware(params: &AnalyzeParams) -> bool {
+fn analyze_requests_type_aware(params: &AnalyzeParams) -> bool {
     type_aware_requested(
         params.type_aware,
         params.type_aware_projects.as_deref(),

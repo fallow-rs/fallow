@@ -742,7 +742,7 @@ impl ServerHandler for FallowMcp {
         context: RequestContext<RoleServer>,
     ) -> Result<CallToolResponse, McpError> {
         if crate::tasks::request_declares_tasks(&context)
-            && let Some(pace) = crate::tasks::task_pace(&request)
+            && let Some(pace) = crate::tasks::task_pace(&request).await
         {
             return Ok(self.start_task(pace, request, context));
         }
