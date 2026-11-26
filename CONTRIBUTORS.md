@@ -94,6 +94,7 @@ This list includes commit contributors and authors of open and closed issues and
 - [Huyvux12](https://github.com/Huyvux12)
 - [iarmankhan](https://github.com/iarmankhan)
 - [imwyvern](https://github.com/imwyvern)
+- [ismoiliy98](https://github.com/ismoiliy98)
 - [issacfriedman](https://github.com/issacfriedman)
 - [ivan-palatov](https://github.com/ivan-palatov)
 - [ivayloc](https://github.com/ivayloc)
