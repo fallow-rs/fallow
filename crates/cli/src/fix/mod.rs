@@ -249,8 +249,10 @@ fn run_fix_impl(opts: &FixOptions<'_>, fix_count: &mut usize) -> ExitCode {
         Err(code) => return code,
     };
 
-    // The report hides these findings, so `fix` offers no fix for them.
-    fallow_engine::dead_code::hide_cascade_findings(&mut results, &config);
+    // `fix` changes only what the report shows: the rule pass removes each
+    // finding whose rule an `overrides` entry turns `off` for its file, and
+    // hides the findings of unused files.
+    fallow_engine::dead_code::apply_rule_severities(&mut results, &config);
     if let Some(scope) = opts.scope.as_ref() {
         fallow_engine::dead_code::filter_to_workspaces(&mut results, &vec![scope.clone()].into());
     }

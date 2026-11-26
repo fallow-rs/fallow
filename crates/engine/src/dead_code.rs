@@ -694,7 +694,7 @@ pub fn apply_rule_severities(results: &mut AnalysisResults, config: &ResolvedCon
 /// The baseline runs after this pass, so a baseline entry for the unused file
 /// does not make its findings visible again. `showCascade` keeps every
 /// finding.
-pub fn hide_cascade_findings(results: &mut AnalysisResults, config: &ResolvedConfig) {
+fn hide_cascade_findings(results: &mut AnalysisResults, config: &ResolvedConfig) {
     if config.show_cascade {
         return;
     }

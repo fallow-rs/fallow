@@ -1885,3 +1885,88 @@ fn fix_edits_a_config_link_inside_the_scope_base() {
     let written = std::fs::read_to_string(repo.join("shared/fallow.json")).unwrap();
     assert!(written.contains("ignoreExports"), "{written}");
 }
+
+fn write_rule_off_project(root: &std::path::Path, config: &str) {
+    std::fs::create_dir_all(root.join("src/jobs")).unwrap();
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"rule-off","private":true,"main":"src/main.ts"}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("src/main.ts"),
+        "import './jobs/cleanup.job';\nimport { used } from './util';\nused();\n",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("src/util.ts"),
+        "export const used = () => 1;\nexport const deadUtil = () => 2;\n",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("src/jobs/cleanup.job.ts"),
+        "export const cleanupJob = { name: 'cleanup' };\n",
+    )
+    .unwrap();
+    std::fs::write(root.join(".fallowrc.json"), config).unwrap();
+}
+
+fn planned_export_removals(root: &std::path::Path) -> Vec<String> {
+    let output = run_fallow_in_root("fix", root, &["--dry-run", "--format", "json", "--quiet"]);
+    assert_eq!(output.code, 0, "{}", output.stderr);
+    parse_json(&output)["fixes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|f| f["type"] == "remove_export")
+        .filter_map(|f| f["name"].as_str().map(str::to_owned))
+        .collect()
+}
+
+#[test]
+fn fix_skips_an_export_whose_override_turns_the_rule_off() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    write_rule_off_project(
+        root,
+        r#"{"overrides":[{"files":["src/jobs/**"],"rules":{"unused-exports":"off"}}]}"#,
+    );
+
+    let report = run_fallow_in_root("dead-code", root, &["--format", "json", "--quiet"]);
+    let reported: Vec<String> = parse_json(&report)["unused_exports"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|f| f["export_name"].as_str().map(str::to_owned))
+        .collect();
+    assert_eq!(reported, ["deadUtil"], "{}", report.stdout);
+    assert_eq!(planned_export_removals(root), ["deadUtil"]);
+
+    let applied = run_fallow_in_root("fix", root, &["--yes", "--format", "json", "--quiet"]);
+    assert_eq!(applied.code, 0, "{}", applied.stderr);
+    assert_eq!(
+        std::fs::read_to_string(root.join("src/jobs/cleanup.job.ts")).unwrap(),
+        "export const cleanupJob = { name: 'cleanup' };\n"
+    );
+}
+
+#[test]
+fn fix_skips_every_export_when_the_base_rule_is_off() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    write_rule_off_project(root, r#"{"rules":{"unused-exports":"off"}}"#);
+
+    assert!(planned_export_removals(root).is_empty());
+}
+
+#[test]
+fn fix_keeps_an_export_whose_override_sets_the_rule_to_warn() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    write_rule_off_project(
+        root,
+        r#"{"overrides":[{"files":["src/jobs/**"],"rules":{"unused-exports":"warn"}}]}"#,
+    );
+
+    assert_eq!(planned_export_removals(root), ["cleanupJob", "deadUtil"]);
+}
