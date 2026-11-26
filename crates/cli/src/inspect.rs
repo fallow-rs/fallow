@@ -343,6 +343,7 @@ fn collect_semantic_evidence(
             config_override: None,
             projects: opts.type_aware_projects,
             require: opts.type_aware_require,
+            issue_filters_active: false,
         },
         &mut config,
     )

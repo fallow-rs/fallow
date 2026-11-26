@@ -1307,6 +1307,27 @@ impl ResolvedConfig {
             })
     }
 
+    /// Default the opt-in `private-type-leaks` rule to `warn` when
+    /// `type_aware.enabled` is set, because semantic confirmation makes the
+    /// findings trustworthy. An explicit rule in the config always wins, so
+    /// `"private-type-leaks": "off"` stays off (issue #2170).
+    ///
+    /// Every surface that runs a type-aware dead-code analysis calls this
+    /// after it decides `type_aware.enabled`. A surface that skips it reports
+    /// no leaks, so its count differs from the other surfaces (#5321).
+    /// `issue_filters_active` is true when the run reports only a selection of
+    /// issue types that does not hold the leaks: the rule stays off and the
+    /// companion does no API-surface work.
+    pub fn apply_type_aware_rule_defaults(&mut self, issue_filters_active: bool) {
+        if self.type_aware.enabled
+            && !issue_filters_active
+            && self.rules.private_type_leaks == Severity::Off
+            && !self.rules.private_type_leaks_configured
+        {
+            self.rules.private_type_leaks = Severity::Warn;
+        }
+    }
+
     /// Request optional shared-state facts with a distinct cache identity.
     pub fn request_shared_state(&mut self) {
         if self.extraction_mode == fallow_types::shared_state::ExtractionMode::Standard {

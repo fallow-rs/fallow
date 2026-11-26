@@ -74,19 +74,58 @@ export class AnalysisFailureBackoff {
 export const buildAnalysisBackoffKey = (root: string, args: ReadonlyArray<string>): string =>
   JSON.stringify([root, ...args]);
 
+/**
+ * Variables that the CLI run of the sidebar reads and the language server
+ * does not (`crates/engine/src/resolved_run/env_policy.rs`). In the editor the
+ * `fallow.production` and `fallow.typeAware` settings decide, so the sidebar
+ * run drops these variables of the extension host. Without that, a shell with
+ * `FALLOW_PRODUCTION=1` gave the sidebar and the status bar different counts.
+ * A Rust test in `env_policy.rs` checks this list.
+ */
+export const EDITOR_IGNORED_ENV_VARS = [
+  "FALLOW_PRODUCTION",
+  "FALLOW_PRODUCTION_DEAD_CODE",
+  "FALLOW_PRODUCTION_HEALTH",
+  "FALLOW_PRODUCTION_DUPES",
+  "FALLOW_DIFF_FILE",
+  "FALLOW_TYPE_AWARE",
+  "FALLOW_TYPE_AWARE_PROJECTS",
+  "FALLOW_TYPE_AWARE_REQUIRE",
+] as const;
+
+/**
+ * The environment overrides of a Fallow child process that the editor starts.
+ * `undefined` removes a variable: Node skips an `undefined` value of `env`.
+ */
+export type ChildEnvOverrides = Readonly<Record<string, string | undefined>>;
+
+/**
+ * The type-aware timeout override of a Fallow child process, for the CLI
+ * runs and the language server alike. Unset leaves the default and any
+ * OS-level variable untouched.
+ */
+export const typeAwareTimeoutEnv = (typeAwareTimeoutSeconds: number): ChildEnvOverrides =>
+  Number.isInteger(typeAwareTimeoutSeconds) && typeAwareTimeoutSeconds > 0
+    ? { FALLOW_TYPE_AWARE_TIMEOUT_SECS: String(typeAwareTimeoutSeconds) }
+    : {};
+
 export const buildAnalysisProcessEnv = (
   env: NodeJS.ProcessEnv = process.env,
   typeAwareTimeoutSeconds = 0,
-): Readonly<Record<string, string>> => {
+): ChildEnvOverrides => {
   const configured = env.FALLOW_MAX_FILE_SIZE?.trim();
-  const overrides: Record<string, string> = {
+  const overrides: Record<string, string | undefined> = {
     FALLOW_MAX_FILE_SIZE:
       configured && configured.length > 0 ? configured : ANALYSIS_DEFAULT_MAX_FILE_SIZE_MB,
+    ...typeAwareTimeoutEnv(typeAwareTimeoutSeconds),
   };
-  // Unset leaves the CLI default and any OS-level variable untouched, so an
-  // unconfigured workspace behaves exactly as before.
-  if (Number.isInteger(typeAwareTimeoutSeconds) && typeAwareTimeoutSeconds > 0) {
-    overrides.FALLOW_TYPE_AWARE_TIMEOUT_SECS = String(typeAwareTimeoutSeconds);
+  // Windows keeps the casing of a name in a copy of `process.env`, so a
+  // `Fallow_Production` key must go too.
+  const ignored = new Set<string>(EDITOR_IGNORED_ENV_VARS);
+  for (const name of Object.keys(env)) {
+    if (ignored.has(name.toUpperCase())) {
+      overrides[name] = undefined;
+    }
   }
   return overrides;
 };

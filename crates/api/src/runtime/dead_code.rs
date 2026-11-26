@@ -917,13 +917,7 @@ fn apply_explicit_type_aware_choice(
         return;
     };
     config.type_aware.enabled = enabled;
-    if enabled
-        && !options.filters.any_active()
-        && config.rules.private_type_leaks == fallow_config::Severity::Off
-        && !config.rules.private_type_leaks_configured
-    {
-        config.rules.private_type_leaks = fallow_config::Severity::Warn;
-    }
+    config.apply_type_aware_rule_defaults(options.filters.any_active());
 }
 
 fn activate_explicit_dead_code_opt_ins(

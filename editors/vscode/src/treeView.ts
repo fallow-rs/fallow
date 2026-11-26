@@ -106,15 +106,32 @@ const staleSuppressionLabel = (
 
 type DeadCodeItem = CategoryItem | IssueItem | CycleItem;
 
+/**
+ * Advisory component health categories. The sidebar lists them, but the total
+ * of the notification and the status bar does not count them
+ * (`COUNTED_FINDING_KEYS`), so their row says so.
+ */
+const ADVISORY_CATEGORIES: ReadonlySet<IssueCategory> = new Set([
+  "prop-drilling",
+  "thin-wrapper",
+  "duplicate-prop-shape",
+]);
+
 class CategoryItem extends vscode.TreeItem {
   readonly issues: ReadonlyArray<IssueItem | CycleItem>;
 
+  /**
+   * `findings` is the count of the label. It is less than the row count when
+   * one finding has a row for each site, so the labels sum to the count of
+   * the "found N issues" notification and the status bar.
+   */
   constructor(
     readonly category: IssueCategory,
     issues: ReadonlyArray<IssueItem | CycleItem>,
+    findings: number = issues.length,
   ) {
     super(
-      `${ISSUE_CATEGORY_LABELS[category]} (${issues.length})`,
+      `${ISSUE_CATEGORY_LABELS[category]} (${findings})`,
       vscode.TreeItemCollapsibleState.Collapsed,
     );
     // A stable id keeps the expansion state when a refresh changes the count in the label.
@@ -122,6 +139,10 @@ class CategoryItem extends vscode.TreeItem {
     this.issues = issues;
     this.contextValue = "category";
     this.iconPath = new vscode.ThemeIcon(CATEGORY_ICONS[category] ?? "warning");
+    if (ADVISORY_CATEGORIES.has(category)) {
+      this.description = "advisory";
+      this.tooltip = "Advisory findings. The issue total does not count them.";
+    }
   }
 }
 
@@ -227,9 +248,10 @@ export class DeadCodeTreeProvider implements vscode.TreeDataProvider<DeadCodeIte
     const addCategory = (
       category: IssueCategory,
       items: ReadonlyArray<IssueItem | CycleItem>,
+      findings?: number,
     ): void => {
       if (items.length > 0) {
-        categories.push(new CategoryItem(category, items));
+        categories.push(new CategoryItem(category, items, findings));
       }
     };
 
@@ -639,6 +661,7 @@ export class DeadCodeTreeProvider implements vscode.TreeDataProvider<DeadCodeIte
             new IssueItem(d.package_name, site.path, site.line, site.col, "unlisted-dependencies"),
         ),
       ),
+      this.result.unlisted_dependencies.length,
     );
 
     addCategory(
@@ -649,6 +672,7 @@ export class DeadCodeTreeProvider implements vscode.TreeDataProvider<DeadCodeIte
             new IssueItem(b.binary_name, site.path, site.line, site.col, "unlisted-binaries"),
         ),
       ),
+      this.result.unlisted_binaries?.length,
     );
 
     addCategory(
@@ -658,6 +682,7 @@ export class DeadCodeTreeProvider implements vscode.TreeDataProvider<DeadCodeIte
           (loc) => new IssueItem(d.export_name, loc.path, loc.line, loc.col, "duplicate-exports"),
         ),
       ),
+      this.result.duplicate_exports.length,
     );
 
     if (this.result.duplicate_export_aliases) {

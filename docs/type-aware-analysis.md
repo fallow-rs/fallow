@@ -662,7 +662,9 @@ the normal semver review described in
 
 Type-aware runs default the opt-in `private-type-leaks` rule to `warn` when the
 config leaves it unset, because semantic confirmation makes the findings
-trustworthy. An explicit `"private-type-leaks": "off"` in `rules` always wins
+trustworthy. Every surface applies this default through
+`ResolvedConfig::apply_type_aware_rule_defaults`: the CLI commands, the API
+and the language server. An explicit `"private-type-leaks": "off"` in `rules` always wins
 and disables the findings entirely, type-aware or not. When the rule is off,
 hosts also skip the API-surface semantic capability request, so the sidecar
 performs no API-surface work for a rule whose findings would be discarded.

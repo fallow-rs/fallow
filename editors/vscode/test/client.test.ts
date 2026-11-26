@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 let mockIssueTypes = {};
+let mockTypeAwareTimeoutSeconds = 0;
 let mockChangedSince = "";
 let mockPackageBaselines = true;
 let mockConfigPath = "";
@@ -44,6 +45,7 @@ const mockLanguageClient = vi.hoisted(() => ({
   // can exercise startClient's catch path.
   startError: null as Error | null,
   instances: [] as Array<{
+    serverOptions: unknown;
     start: ReturnType<typeof vi.fn>;
     stop: ReturnType<typeof vi.fn>;
     setTrace: ReturnType<typeof vi.fn>;
@@ -100,7 +102,10 @@ vi.mock("vscode-languageclient/node", () => ({
       }
     }
 
-    constructor() {
+    readonly serverOptions: unknown;
+
+    constructor(_id: string, _name: string, serverOptions: unknown) {
+      this.serverOptions = serverOptions;
       mockLanguageClient.instances.push(this);
     }
   },
@@ -141,6 +146,7 @@ vi.mock("../src/config.js", () => ({
   getAllowRemoteExtends: () => mockAllowRemoteExtends,
   getProductionOverride: () => mockProductionOverride,
   getTypeAwareSettings: () => mockTypeAwareSettings,
+  getTypeAwareTimeoutSeconds: () => mockTypeAwareTimeoutSeconds,
   getDuplicationModeOverride: () => mockDuplicationMode,
   getDuplicationNearOverride: () => undefined,
   getDuplicationThresholdOverride: () => mockDuplicationThreshold,
@@ -197,6 +203,7 @@ beforeEach(() => {
   mockDuplicationIgnoreSymlinks = true;
   mockHealthInlineComplexity = false;
   mockTypeAwareSettings = { enabled: false, projects: [], require: "best-effort" };
+  mockTypeAwareTimeoutSeconds = 0;
   mockMutedDiagnosticCategories = new Set();
   mockIssueTypesResponse = [];
   mockBinaryResolution.localBinary = "/mock/fallow-lsp";
@@ -405,6 +412,20 @@ describe("stopClient", () => {
     await expect(stopped).resolves.toBeUndefined();
     expect(instance!.onDidChangeState).toHaveBeenCalledOnce();
     expect(instance!.stop).toHaveBeenCalledOnce();
+  });
+});
+
+describe("startClient - server environment", () => {
+  it("gives the server the type-aware timeout that the CLI run gets", async () => {
+    // Without it the server stopped a long semantic pass at the default while
+    // the sidebar run finished, so the two counts differed.
+    mockTypeAwareTimeoutSeconds = 600;
+    await startClient({} as never, outputChannel() as never);
+    const options = mockLanguageClient.instances[0]?.serverOptions as {
+      options: { env: Record<string, string | undefined> };
+    };
+    expect(options.options.env.FALLOW_TYPE_AWARE_TIMEOUT_SECS).toBe("600");
+    await stopClient();
   });
 });
 

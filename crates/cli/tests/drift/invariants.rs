@@ -727,3 +727,31 @@ fn render_identified(a: &[IdentifiedFinding], b: &[IdentifiedFinding]) -> String
     }
     only.join("\n")
 }
+
+/// I15: the language server counts each category as the bare CLI run of the
+/// VS Code extension does. `cli` holds the CLI count of each notification
+/// field, or the arrays of the CLI that the notification does not send.
+pub fn i15_lsp_counts_agree(
+    context: &str,
+    lsp: &BTreeMap<String, u64>,
+    cli: Result<BTreeMap<String, u64>, String>,
+) -> Verdict {
+    let cli = cli.map_err(|err| format!("{context}: {err}"))?;
+    let differing: Vec<String> = lsp
+        .iter()
+        .filter(|(field, count)| cli.get(*field) != Some(count))
+        .map(|(field, count)| {
+            format!(
+                "  {field}: LSP {count}, CLI {}",
+                cli.get(field).copied().unwrap_or_default()
+            )
+        })
+        .collect();
+    if differing.is_empty() {
+        return Ok(());
+    }
+    Err(format!(
+        "{context}: the LSP and the CLI count categories differently\n{}",
+        differing.join("\n")
+    ))
+}

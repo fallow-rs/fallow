@@ -72,6 +72,7 @@ pub struct SessionKey {
     pub allow_remote_extends: Option<bool>,
     pub production: Option<bool>,
     pub package_baselines: Option<bool>,
+    pub type_aware: fallow_config::TypeAwareInputs,
 }
 
 impl SessionKey {
@@ -87,6 +88,7 @@ impl SessionKey {
                 .map(|given| given.value),
             production: inputs.production.as_ref().map(|given| given.value),
             package_baselines: inputs.package_baselines.as_ref().map(|given| given.value),
+            type_aware: inputs.type_aware.clone(),
         }
     }
 }

@@ -41,24 +41,7 @@ pub(super) fn prepare_check_config(opts: &CheckOptions<'_>) -> Result<ResolvedCo
     }
     apply_type_aware_overrides(opts, &mut config)?;
     opts.filters.activate_explicit_opt_ins(&mut config.rules);
-    apply_type_aware_private_leak_default(&mut config, opts.filters.any_active());
     Ok(config)
-}
-
-/// Default the opt-in `private-type-leaks` rule to `warn` for type-aware runs,
-/// where semantic confirmation makes it trustworthy. An explicit user setting
-/// always wins: `"private-type-leaks": "off"` stays off (issue #2170).
-pub(super) fn apply_type_aware_private_leak_default(
-    config: &mut ResolvedConfig,
-    filters_active: bool,
-) {
-    if config.type_aware.enabled
-        && !filters_active
-        && config.rules.private_type_leaks == Severity::Off
-        && !config.rules.private_type_leaks_configured
-    {
-        config.rules.private_type_leaks = Severity::Warn;
-    }
 }
 
 fn apply_type_aware_overrides(
@@ -75,6 +58,7 @@ fn apply_type_aware_overrides(
             config_override: opts.type_aware_config_override,
             projects: opts.type_aware_projects,
             require: opts.type_aware_require,
+            issue_filters_active: opts.filters.any_active(),
         },
         config,
     )
@@ -93,6 +77,9 @@ pub struct TypeAwareRequest<'a> {
     pub projects: &'a [PathBuf],
     /// `--type-aware-require`.
     pub require: Option<fallow_config::TypeAwareRequire>,
+    /// Whether `--<issue-type>` filter flags select the reported issue
+    /// types. See [`ResolvedConfig::apply_type_aware_rule_defaults`].
+    pub issue_filters_active: bool,
 }
 
 /// The type-aware settings of one command.
@@ -194,8 +181,9 @@ const fn given<T>(value: T, flag: &'static str) -> fallow_types::sourced::Given<
     }
 }
 
-/// Write the type-aware settings of a command into `config`. An input error
-/// prints with the output format and gives exit code 2.
+/// Write the type-aware settings of a command into `config`, with the rule
+/// defaults of a type-aware run. An input error prints with the output format
+/// and gives exit code 2.
 ///
 /// # Errors
 ///
@@ -216,5 +204,6 @@ pub fn apply_type_aware_overrides_from(
         .map(|path| path.to_string_lossy().into_owned())
         .collect();
     config.type_aware.require = values.require;
+    config.apply_type_aware_rule_defaults(request.issue_filters_active);
     Ok(())
 }

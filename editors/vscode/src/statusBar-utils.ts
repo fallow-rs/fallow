@@ -1,4 +1,9 @@
-import { COUNTED_FINDING_KEYS, countCheckIssues, ISSUE_TYPE_FILTERS } from "./analysis-utils.js";
+import {
+  COUNTED_FINDING_KEYS,
+  countCheckIssues,
+  countFindings,
+  ISSUE_TYPE_FILTERS,
+} from "./analysis-utils.js";
 import type { PackageBaselineStatus } from "./generated/output-contract.js";
 import { escapeMarkdownText, normalizeInlineText } from "./markdown-utils.js";
 import type {
@@ -47,6 +52,35 @@ export interface AnalysisCompleteParams {
   unresolvedCatalogReferences: number;
   unusedDependencyOverrides: number;
   misconfiguredDependencyOverrides: number;
+  // The fields below came after the first status bar release. An older LSP
+  // does not send them.
+  unusedNamespaceMembers?: number;
+  unusedProtectedClassMembers?: number;
+  namespaceEscapes?: number;
+  testOnlyExports?: number;
+  unusedStoreMembers?: number;
+  unusedServerActions?: number;
+  unusedLoadDataKeys?: number;
+  unusedComponentProps?: number;
+  absentComponentProps?: number;
+  constantParameters?: number;
+  unusedComponentEmits?: number;
+  unusedComponentInputs?: number;
+  unusedComponentOutputs?: number;
+  unusedSvelteEvents?: number;
+  unusedEffectLayers?: number;
+  unusedTaggedErrors?: number;
+  unproducedCatchTags?: number;
+  unrenderedComponents?: number;
+  unprovidedInjects?: number;
+  invalidClientExports?: number;
+  mixedClientServerBarrels?: number;
+  misplacedDirectives?: number;
+  routeCollisions?: number;
+  dynamicSegmentNameConflicts?: number;
+  duplicateExportAliases?: number;
+  policyViolations?: number;
+  emptyCatalogGroups?: number;
   duplicationPercentage: number;
   cloneGroups: number;
   changedSinceScope?: ChangedSinceScopeStatus;
@@ -66,6 +100,16 @@ const changedSinceScopeFromCli = (
     : undefined;
 };
 
+const toParamsField = (key: string): string =>
+  key.replace(/_([a-z])/g, (_match: string, letter: string) => letter.toUpperCase());
+
+/** The CLI arrays that the LSP counts in its one `boundaryViolations` field. */
+const BOUNDARY_ARRAYS: ReadonlySet<string> = new Set([
+  "boundary_violations",
+  "boundary_coverage_violations",
+  "boundary_call_violations",
+]);
+
 /**
  * Convert CLI analysis results into the same shape the LSP notification
  * delivers, so the status bar text and tooltip can be built from a single
@@ -75,44 +119,23 @@ export const buildParamsFromCli = (
   check: FallowCheckResult | null,
   dupes: FallowDupesResult | null,
   scope: FallowAnalysisScope | null,
-): AnalysisCompleteParams => ({
-  totalIssues: countCheckIssues(check),
-  unusedFiles: check?.unused_files.length ?? 0,
-  unusedExports: check?.unused_exports.length ?? 0,
-  unusedTypes: check?.unused_types.length ?? 0,
-  privateTypeLeaks: check?.private_type_leaks?.length ?? 0,
-  unusedDependencies: check?.unused_dependencies.length ?? 0,
-  unusedDevDependencies: check?.unused_dev_dependencies.length ?? 0,
-  unusedOptionalDependencies: check?.unused_optional_dependencies?.length ?? 0,
-  unusedEnumMembers: check?.unused_enum_members.length ?? 0,
-  unusedClassMembers: check?.unused_class_members.length ?? 0,
-  unresolvedImports: check?.unresolved_imports.length ?? 0,
-  unlistedDependencies: check?.unlisted_dependencies.length ?? 0,
-  unlistedBinaries: check?.unlisted_binaries?.length ?? 0,
-  duplicateExports: check?.duplicate_exports.length ?? 0,
-  typeOnlyDependencies: check?.type_only_dependencies?.length ?? 0,
-  testOnlyDependencies: check?.test_only_dependencies?.length ?? 0,
-  devDependenciesInProduction: check?.dev_dependencies_in_production?.length ?? 0,
-  circularDependencies: check?.circular_dependencies?.length ?? 0,
-  reExportCycles: check?.re_export_cycles?.length ?? 0,
-  packageCycles: check?.package_cycles?.length ?? 0,
-  boundaryViolations:
-    (check?.boundary_violations?.length ?? 0) +
-    (check?.boundary_coverage_violations?.length ?? 0) +
-    (check?.boundary_call_violations?.length ?? 0),
-  staleSuppressions: check?.stale_suppressions?.length ?? 0,
-  unusedCatalogEntries: check?.unused_catalog_entries?.length ?? 0,
-  unresolvedCatalogReferences: check?.unresolved_catalog_references?.length ?? 0,
-  unusedDependencyOverrides: check?.unused_dependency_overrides?.length ?? 0,
-  misconfiguredDependencyOverrides: check?.misconfigured_dependency_overrides?.length ?? 0,
-  duplicationPercentage: dupes?.stats.duplication_percentage ?? 0,
-  cloneGroups: dupes?.stats.clone_groups ?? 0,
-  changedSinceScope: changedSinceScopeFromCli(scope),
-  packageBaselines: scope?.package_baselines,
-});
-
-const toParamsField = (key: string): string =>
-  key.replace(/_([a-z])/g, (_match: string, letter: string) => letter.toUpperCase());
+): AnalysisCompleteParams => {
+  // One field for each counted array, named as the LSP names it, so the hover
+  // breakdown of a CLI run covers each category of its total.
+  const counts: Record<string, number> = {};
+  for (const key of COUNTED_FINDING_KEYS) {
+    const field = BOUNDARY_ARRAYS.has(key) ? "boundaryViolations" : toParamsField(key);
+    counts[field] = (counts[field] ?? 0) + (check ? countFindings(check, [key]) : 0);
+  }
+  return {
+    ...(counts as unknown as AnalysisCompleteParams),
+    totalIssues: countCheckIssues(check),
+    duplicationPercentage: dupes?.stats.duplication_percentage ?? 0,
+    cloneGroups: dupes?.stats.clone_groups ?? 0,
+    changedSinceScope: changedSinceScopeFromCli(scope),
+    packageBaselines: scope?.package_baselines,
+  };
+};
 
 /**
  * Align LSP params with the count of the sidebar and of the "found N issues"
@@ -142,9 +165,13 @@ export const alignWithSidebarCount = (
       counts[field] = 0;
     }
   }
-  const counted = [...new Set(COUNTED_FINDING_KEYS.map(toParamsField))].filter(
-    (field) => field !== "boundaryCoverageViolations" && field !== "boundaryCallViolations",
-  );
+  const counted = [
+    ...new Set(
+      COUNTED_FINDING_KEYS.map((key) =>
+        BOUNDARY_ARRAYS.has(key) ? "boundaryViolations" : toParamsField(key),
+      ),
+    ),
+  ];
   const values = counted.map((field) => counts[field]);
   const totalIssues = values.every((value) => typeof value === "number")
     ? values.reduce<number>((sum, value) => sum + (value as number), 0)
@@ -272,6 +299,41 @@ const BREAKDOWN_LINES: ReadonlyArray<BreakdownLine> = [
     icon: "$(error)",
     label: "misconfigured dependency overrides",
   },
+  { count: "unusedNamespaceMembers", icon: "$(info)", label: "unused namespace members" },
+  {
+    count: "unusedProtectedClassMembers",
+    icon: "$(info)",
+    label: "unused protected class members",
+  },
+  { count: "namespaceEscapes", icon: "$(warning)", label: "namespace escapes" },
+  { count: "testOnlyExports", icon: "$(warning)", label: "test-only exports" },
+  { count: "unusedStoreMembers", icon: "$(info)", label: "unused store members" },
+  { count: "unusedServerActions", icon: "$(warning)", label: "unused server actions" },
+  { count: "unusedLoadDataKeys", icon: "$(info)", label: "unused load data keys" },
+  { count: "unusedComponentProps", icon: "$(info)", label: "unused component props" },
+  { count: "absentComponentProps", icon: "$(info)", label: "absent component props" },
+  { count: "constantParameters", icon: "$(info)", label: "constant parameters" },
+  { count: "unusedComponentEmits", icon: "$(info)", label: "unused component emits" },
+  { count: "unusedComponentInputs", icon: "$(info)", label: "unused component inputs" },
+  { count: "unusedComponentOutputs", icon: "$(info)", label: "unused component outputs" },
+  { count: "unusedSvelteEvents", icon: "$(info)", label: "unused Svelte events" },
+  { count: "unusedEffectLayers", icon: "$(info)", label: "unused Effect layers" },
+  { count: "unusedTaggedErrors", icon: "$(info)", label: "unused tagged errors" },
+  { count: "unproducedCatchTags", icon: "$(info)", label: "unproduced catch tags" },
+  { count: "unrenderedComponents", icon: "$(warning)", label: "unrendered components" },
+  { count: "unprovidedInjects", icon: "$(warning)", label: "unprovided injects" },
+  { count: "invalidClientExports", icon: "$(warning)", label: "invalid client exports" },
+  { count: "mixedClientServerBarrels", icon: "$(warning)", label: "mixed client/server barrels" },
+  { count: "misplacedDirectives", icon: "$(warning)", label: "misplaced directives" },
+  { count: "routeCollisions", icon: "$(error)", label: "route collisions" },
+  {
+    count: "dynamicSegmentNameConflicts",
+    icon: "$(error)",
+    label: "dynamic segment name conflicts",
+  },
+  { count: "duplicateExportAliases", icon: "$(warning)", label: "duplicate export aliases" },
+  { count: "policyViolations", icon: "$(warning)", label: "policy violations" },
+  { count: "emptyCatalogGroups", icon: "$(warning)", label: "empty catalog groups" },
 ];
 
 export const getDuplicationPercentage = (duplicationPercentage: number): number =>

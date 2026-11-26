@@ -434,6 +434,54 @@ describe("DeadCodeTreeProvider", () => {
     ]);
   });
 
+  it("counts findings, not import sites, in a category label", () => {
+    // The label counted one per site, so the labels summed to more than the
+    // "found N issues" count and the status bar.
+    const provider = new DeadCodeTreeProvider();
+    const site = (path: string): { path: string; line: number; col: number } => ({
+      path,
+      line: 1,
+      col: 0,
+    });
+    provider.update({
+      ...emptyCheck(),
+      unlisted_dependencies: [
+        {
+          package_name: "left-pad",
+          imported_from: [site("src/a.ts"), site("src/b.ts"), site("src/c.ts")],
+          actions: [],
+        },
+      ],
+      duplicate_exports: [
+        {
+          export_name: "Button",
+          locations: [site("src/a.ts"), site("src/b.ts")],
+          actions: [],
+        },
+      ] as never,
+    });
+
+    const categories = provider.getChildren() as TestTreeItem[];
+    const unlisted = findCategory(categories, "Unlisted Dependencies (1)");
+    expect(provider.getChildren(unlisted as never)).toHaveLength(3);
+    findCategory(categories, "Duplicate Exports (1)");
+  });
+
+  it("marks the advisory categories that the total does not count", () => {
+    const provider = new DeadCodeTreeProvider();
+    provider.update({
+      ...emptyCheck(),
+      unused_files: [{ path: "a.ts", actions: [] }],
+      thin_wrappers: [
+        { component: "Wrapper", child_component: "Button", file: "src/w.tsx", line: 1 },
+      ],
+    } as never);
+    const categories = provider.getChildren() as TestTreeItem[];
+    expect(findCategory(categories, "Unused Files (1)").description).toBeUndefined();
+    const advisory = categories.find((item) => String(item.label).startsWith("Thin"));
+    expect(advisory?.description).toBe("advisory");
+  });
+
   it("keeps a stable category id when the issue count changes", () => {
     const provider = new DeadCodeTreeProvider();
     provider.update({ ...emptyCheck(), unused_files: [{ path: "a.ts", actions: [] }] });

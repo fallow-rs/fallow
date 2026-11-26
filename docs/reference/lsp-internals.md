@@ -73,14 +73,27 @@ lifecycle behavior.
   CRAP (or through `complexity-crap` while the other two rules are `off`) has
   a health finding but no lens.
 - `run_inputs.rs` is the one translator of the initialization options to
-  `RunInputs`: `configPath`, `allowRemoteExtends`, `production` and
-  `packageBaselines: false`, with `Surface::Lsp`, `CommandKind::Editor` and
-  the environment snapshot of the server process. The snapshot has the
-  project root as its current directory, so a relative `configPath`
-  resolves from the root. For each project root, `load_project_session`
-  calls `fallow_api::run::resolve_run` once and opens the session with
-  `EditorAnalysisSession::open`. The duplication options, `changedSince`
-  and the type-aware options apply per run and are not run inputs.
+  `RunInputs`: `configPath`, `allowRemoteExtends`, `production`,
+  `packageBaselines: false` and `typeAware` with `enabled: true`, with
+  `Surface::Lsp`, `CommandKind::Editor` and the environment snapshot of the
+  server process. The snapshot has the project root as its current
+  directory, so a relative `configPath` resolves from the root. For each
+  project root, `load_project_session` calls `fallow_api::run::resolve_run`
+  once and opens the session with `EditorAnalysisSession::open`. The
+  duplication options and `changedSince` apply per run and are not run
+  inputs.
+- The resolved run decides type-aware analysis as for the CLI run of the
+  extension: the `typeAware` option, then `typeAware.enabled` of the config.
+  The editor session reads no `FALLOW_TYPE_AWARE*` variable.
+  `EditorAnalysisSession::open` writes the decision into the session config
+  and calls `ResolvedConfig::apply_type_aware_rule_defaults`, the function
+  that the CLI commands and the API also call. A type-aware session thus
+  reports `private-type-leaks` at `warn` unless the config sets the rule.
+  `EditorAnalysisSession::type_aware_options` gives the refinement options,
+  and a session without type-aware analysis runs no refinement. The server
+  once read only the `typeAware` option and never applied the rule default,
+  so the VS Code status bar counted fewer findings than the sidebar (#5321).
+  Drift invariant I15 compares the counts of the server with the CLI.
 - The run plans dead code and duplication, never health. Duplication
   follows `duplicates.enabled`: when the plan skips it, the session does no
   duplication work. Inline complexity reads the config of the dead-code

@@ -46,6 +46,7 @@ import {
   AnalysisFailureBackoff,
   buildAnalysisBackoffKey,
   buildAnalysisProcessEnv,
+  type ChildEnvOverrides,
 } from "./analysisBackoff.js";
 import { buildAuditArgs, parseAuditOutput } from "./audit-utils.js";
 import { showBinarySkewToastOnce } from "./binary-skew.js";
@@ -163,7 +164,7 @@ export class FallowExecError extends Error {
 }
 
 interface ExecFallowOptions {
-  readonly env?: Readonly<Record<string, string>>;
+  readonly env?: ChildEnvOverrides;
 }
 
 /**
@@ -435,6 +436,12 @@ const execInspectWithManagedFallback = async (
 export interface RunAnalysisOptions {
   readonly force?: boolean;
   readonly backoff?: AnalysisFailureBackoff;
+  /**
+   * A background run that the user did not start: a failure shows no
+   * message. The failure still counts for the backoff and goes to the output
+   * channel.
+   */
+  readonly silent?: boolean;
 }
 
 export interface InspectArgsOptions {
@@ -730,7 +737,9 @@ export const runAnalysis = async (
 }> => {
   const root = getWorkspaceRoot();
   if (!root) {
-    void vscode.window.showWarningMessage("Fallow: no workspace folder open.");
+    if (options.silent !== true) {
+      void vscode.window.showWarningMessage("Fallow: no workspace folder open.");
+    }
     return { check: null, dupes: null, scope: null };
   }
 
@@ -775,7 +784,7 @@ export const runAnalysis = async (
     backoffKey = buildAnalysisBackoffKey(root, analysisArgs);
     const blocked = backoff.blockedNotice(backoffKey, options.force === true);
     if (blocked) {
-      if (blocked.shouldNotify) {
+      if (blocked.shouldNotify && options.silent !== true) {
         showAnalysisPausedMessage(blocked.failures, null);
       }
       throw new AnalysisBackoffBlockedError(blocked.failures);
@@ -819,7 +828,9 @@ export const runAnalysis = async (
           : String(err);
     const paused =
       backoffKey !== null && options.force !== true ? backoff.recordFailure(backoffKey) : null;
-    if (paused) {
+    if (options.silent === true) {
+      outputChannel?.appendLine(`Fallow analysis failed: ${message}`);
+    } else if (paused) {
       if (paused.shouldNotify) {
         showAnalysisPausedMessage(paused.failures, message);
       }

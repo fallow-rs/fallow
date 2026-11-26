@@ -1022,6 +1022,36 @@ describe("runAnalysis retry backoff", () => {
     }
   });
 
+  it("shows no message for a failed silent run", async () => {
+    // A sidebar refresh after each save runs silent. A toast for each failed
+    // refresh, or a paused message, would interrupt the user on every save.
+    const dir = await mkdtemp(join(tmpdir(), "fallow-vscode-analysis-silent-"));
+    const script = join(dir, "fallow-cli.js");
+    const backoff = new AnalysisFailureBackoff();
+    try {
+      await writeFile(
+        script,
+        ["#!/usr/bin/env node", 'process.stderr.write("boom\\n");', "process.exit(2);"].join(
+          "\n",
+        ),
+        "utf8",
+      );
+      await chmod(script, 0o755);
+      mockPathBinary = script;
+      setWorkspaceRoot(dir);
+
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        await expect(
+          runAnalysis(workspaceContext, undefined, { backoff, silent: true }),
+        ).rejects.toThrow();
+      }
+      expect(mockWindow.showErrorMessage).not.toHaveBeenCalled();
+    } finally {
+      setWorkspaceRoot(null);
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("stops automatic reruns after repeated analysis failures", async () => {
     const dir = await mkdtemp(join(tmpdir(), "fallow-vscode-analysis-backoff-"));
     const script = join(dir, "fallow-cli.js");

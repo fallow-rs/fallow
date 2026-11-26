@@ -75,7 +75,6 @@ impl SavePublishLab {
             run_options: crate::initialization::LspInitializationOptions::default(),
             duplication_options: None,
             inline_complexity_enabled: false,
-            type_aware_options: None,
             type_aware_sessions: Arc::default(),
             type_aware_changes: fallow_api::TypeAwareFileChanges::default(),
             root: self.root.clone(),
