@@ -19,6 +19,10 @@ use sha2::{Digest, Sha256};
 use crate::api::{api_url, try_api_agent_with_timeout};
 use crate::{exit_codes, json_style::JsonStyle};
 
+#[path = "telemetry_mcp_record.rs"]
+mod mcp_record;
+pub use mcp_record::McpCall;
+
 const CONFIG_SCHEMA_VERSION: u8 = 2;
 const TELEMETRY_SCHEMA_VERSION: u8 = 2;
 const CONNECT_TIMEOUT_SECS: u64 = 1;
@@ -55,8 +59,6 @@ const SPOOL_FILE_NAME: &str = "telemetry-spool.jsonl";
 /// Advisory `flock` sidecar serialising drains/trims across concurrent processes.
 const SPOOL_LOCK_NAME: &str = "telemetry-spool.lock";
 
-const DO_NOT_TRACK: &str = "DO_NOT_TRACK";
-const DISABLED_ENV: &str = "FALLOW_TELEMETRY_DISABLED";
 const MODE_ENV: &str = "FALLOW_TELEMETRY";
 const DEBUG_ENV: &str = "FALLOW_TELEMETRY_DEBUG";
 const AGENT_SOURCE_ENV: &str = "FALLOW_AGENT_SOURCE";
@@ -613,6 +615,7 @@ pub enum TelemetryCommand {
     Enable,
     Disable,
     Inspect { example: bool },
+    Record(McpCall),
 }
 
 #[expect(
@@ -771,10 +774,6 @@ pub enum ConfigShape {
     Unknown,
 }
 
-#[expect(
-    dead_code,
-    reason = "telemetry schema reserves v1 destination values before every sink is wired"
-)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum OutputDestination {
@@ -1020,6 +1019,7 @@ pub fn run(command: TelemetryCommand, output: OutputFormat, json_style: JsonStyl
         TelemetryCommand::Enable => set_enabled(true, output, json_style),
         TelemetryCommand::Disable => set_enabled(false, output, json_style),
         TelemetryCommand::Inspect { example } => inspect(example, output, json_style),
+        TelemetryCommand::Record(call) => mcp_record::record_mcp_call(call),
     }
 }
 
@@ -1339,8 +1339,8 @@ fn inspect(example: bool, output: OutputFormat, json_style: JsonStyle) -> ExitCo
 }
 
 /// Point-in-time copy of every per-run accumulator `build_workflow_event`
-/// consumes. Production snapshots the process globals once per event; tests
-/// pass the test-only `RunAccumulatorSnapshot::UNSET` so the assertion is deterministic
+/// consumes. Production snapshots the process globals once per event; tests and
+/// the MCP record command pass `RunAccumulatorSnapshot::UNSET` so it is deterministic
 /// even while a PARALLEL test drives a real command path (e.g.
 /// `load_config_for_analysis` -> `note_config_shape`) that mutates the
 /// globals mid-test. A reset-before-read guard cannot close that race.
@@ -1358,7 +1358,6 @@ struct RunAccumulatorSnapshot {
 }
 
 impl RunAccumulatorSnapshot {
-    #[cfg(test)]
     const UNSET: Self = Self {
         failure_reason: None,
         config_shape: None,
@@ -1786,7 +1785,7 @@ fn parse_env_mode(value: &str) -> Option<EffectiveMode> {
 }
 
 fn admin_disabled() -> bool {
-    env_truthy(DO_NOT_TRACK) || env_truthy(DISABLED_ENV)
+    fallow_types::telemetry_opt_out::telemetry_opted_out()
 }
 
 fn debug_enabled() -> bool {
@@ -1794,7 +1793,6 @@ fn debug_enabled() -> bool {
 }
 
 /// True when env var `name` holds a truthy value (`1`, `true`, `yes`, `on`).
-/// Shared with the update check and the cache notice opt-out gate.
 pub fn env_truthy(name: &str) -> bool {
     std::env::var(name).is_ok_and(|value| {
         matches!(

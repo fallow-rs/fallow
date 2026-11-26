@@ -348,7 +348,7 @@ pub(super) const ENVIRONMENT_VARIABLES: &[EnvironmentVariable] = &[
         "FALLOW_TELEMETRY_DISABLED",
         TELEMETRY,
         None,
-        "Admin/fleet kill switch: truthy values hard-disable telemetry and refuse fallow telemetry enable.",
+        "Admin/fleet kill switch: any value except empty, 0, false, no or off hard-disables telemetry and refuses fallow telemetry enable.",
     ),
     var(
         "FALLOW_TELEMETRY_DEBUG",
@@ -366,7 +366,7 @@ pub(super) const ENVIRONMENT_VARIABLES: &[EnvironmentVariable] = &[
         "DO_NOT_TRACK",
         TELEMETRY,
         None,
-        "Honored as a top-precedence telemetry kill switch (consoledonottrack.com convention).",
+        "Top-precedence telemetry kill switch (consoledonottrack.com convention): any value except empty, 0, false, no or off disables telemetry.",
     ),
     var(
         "FALLOW_BIN",

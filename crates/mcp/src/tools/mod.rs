@@ -4,6 +4,7 @@ mod architecture;
 mod audit;
 #[cfg(test)]
 mod base_root_fixture;
+mod call_telemetry;
 mod cancellation;
 mod check_changed;
 mod check_runtime_coverage;
@@ -42,6 +43,7 @@ mod trace;
 pub use analyze::{analyze_requests_type_aware, build_analyze_args, run_analyze};
 pub use architecture::{build_architecture_args, run_architecture};
 pub use audit::{build_audit_args, run_audit};
+pub use call_telemetry::track_call;
 pub use cancellation::request_cancellation;
 pub use cancellation::with_request_cancellation;
 pub use check_changed::{build_check_changed_args, run_check_changed};
@@ -489,6 +491,7 @@ async fn spawn_fallow(
         .env("FALLOW_INTEGRATION_SURFACE", "mcp")
         .env("FALLOW_MCP_TOOL", tool);
     configure_tokio_command(&mut command);
+    call_telemetry::note_cli_started();
 
     let mut child = spawn_tokio_retrying_busy_executable(&mut command)
         .await

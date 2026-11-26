@@ -769,9 +769,21 @@ before.
 
 CLI dispatch in `tools/mod.rs` tags the child with
 `FALLOW_INTEGRATION_SURFACE=mcp` and `FALLOW_MCP_TOOL`. The CLI owns any
-consented telemetry event. Typed routes do not spawn that child or emit a
-replacement event from the MCP server. Keep tool names synchronized with the
-manifest used to validate those tags.
+consented telemetry event. Keep tool names synchronized with the manifest
+used to validate those tags.
+
+A typed route starts no CLI child, so `call_tool` records it instead
+(`crates/mcp/src/tools/call_telemetry.rs`). A call that runs as an MCP task
+is recorded the same way when the task settles. The dispatch in `tools/mod.rs`
+marks each call that starts a CLI child, in a task-local value like the
+cancellation token. A completed call without that mark runs the hidden
+`fallow telemetry record` command with the same two tags, after the answer.
+The CLI applies the consent rules, builds the event and spools it, so each
+call gives exactly one event. The server runs that command only while
+`fallow telemetry status` reports `on` or `inspect`; it reads the state at
+most once per ten minutes and never when a kill switch is set. `code_execute`
+is not recorded: its CLI host calls run outside the call scope and record
+their own events.
 
 ## Verification
 

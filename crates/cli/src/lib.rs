@@ -118,7 +118,7 @@ mod write_scope;
 
 use cli_args::{AuditCacheCli, Cli, Command, CoverageCli, RulePackCli};
 pub use cli_args::{AuditGateArg, BaselineModeArg, EffortFilter, EmailModeArg, HealthSeverityCli};
-use dispatch::{ResolvedHealthCoverageInputs, dispatch_subcommand, map_telemetry_subcommand};
+use dispatch::{ResolvedHealthCoverageInputs, dispatch_subcommand};
 /// Structured error output for CLI and JSON formats.
 pub(crate) mod error;
 use cli_format::FormatConfig;
@@ -847,11 +847,7 @@ fn run_telemetry_command_if_requested(
     if matches!(cli.command, Some(Command::Telemetry { .. }))
         && let Some(Command::Telemetry { subcommand }) = cli.command.take()
     {
-        return Some(telemetry::run(
-            map_telemetry_subcommand(subcommand),
-            output,
-            json_style,
-        ));
+        return Some(telemetry::run(subcommand.into(), output, json_style));
     }
     None
 }

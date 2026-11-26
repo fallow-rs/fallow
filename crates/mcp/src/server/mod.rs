@@ -35,7 +35,7 @@ use crate::tools::{
     run_project_info, run_recommend, run_rust_call, run_security_candidates, run_symbol_impact,
     run_symbol_trace, run_trace_clone_tool, run_trace_dependency_tool, run_trace_error_tool,
     run_trace_export_tool, run_trace_file_tool, run_trace_import_path_tool, rust_manifest,
-    unsupported_tool_body, with_mixed_root_warning, with_request_cancellation,
+    track_call, unsupported_tool_body, with_mixed_root_warning, with_request_cancellation,
 };
 
 #[cfg(test)]
@@ -113,6 +113,7 @@ impl FallowMcp {
                 let call = ToolCallContext::new(&server, request, context);
                 let work =
                     with_request_cancellation(cancellation.clone(), server.tool_router.call(call));
+                let work = track_call(&server.binary, &tool, work);
                 crate::tasks::drive_task(task, &tool, cancellation, work).await
             })
         });
@@ -724,7 +725,8 @@ impl ServerHandler for FallowMcp {
             .with_instructions(server_instructions())
     }
 
-    /// Dispatch one tool call inside the cancellation scope of its request.
+    /// Dispatch one tool call inside the cancellation scope of its request,
+    /// and record it when it ran in this process and telemetry is on.
     ///
     /// A long call runs as an MCP task when the request declares the tasks
     /// extension: the response is the task handle, and the work gets its own
@@ -745,8 +747,10 @@ impl ServerHandler for FallowMcp {
             return Ok(self.start_task(pace, request, context));
         }
         let cancellation = context.ct.clone();
+        let tool = request.name.clone();
         let call = ToolCallContext::new(self, request, context);
-        with_request_cancellation(cancellation, self.tool_router.call(call)).await
+        let work = with_request_cancellation(cancellation, self.tool_router.call(call));
+        track_call(&self.binary, &tool, work).await
     }
 
     async fn list_resources(

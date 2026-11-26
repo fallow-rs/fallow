@@ -219,6 +219,7 @@ mod stable_ci_fingerprint_tests;
 mod stdout_pipe_tests;
 mod summary_mark_tests;
 mod suppressions_tests;
+mod telemetry_record_tests;
 mod telemetry_tests;
 mod test_only_export_tests;
 mod trace_chain_tests;

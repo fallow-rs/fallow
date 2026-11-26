@@ -136,6 +136,8 @@ pub mod suppress;
 /// `init --agents` template, the agent hook block, root `--help`, and the
 /// `fallow://task-matrix` MCP resource. Data only; the CLI owns rendering.
 pub mod task_matrix;
+/// The telemetry kill switches, shared by the CLI and the MCP server.
+pub mod telemetry_opt_out;
 /// Trace output contracts shared by core, engine, CLI, API, and MCP.
 pub mod trace;
 /// Symbol-level trace-chain output contracts.

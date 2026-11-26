@@ -1764,6 +1764,21 @@ pub enum TelemetryCli {
         #[arg(long)]
         example: bool,
     },
+    /// Record one in-process MCP tool call. The MCP server runs this.
+    #[command(hide = true)]
+    Record(crate::telemetry::McpCall),
+}
+
+impl From<TelemetryCli> for crate::telemetry::TelemetryCommand {
+    fn from(sub: TelemetryCli) -> Self {
+        match sub {
+            TelemetryCli::Status => Self::Status,
+            TelemetryCli::Enable => Self::Enable,
+            TelemetryCli::Disable => Self::Disable,
+            TelemetryCli::Inspect { example } => Self::Inspect { example },
+            TelemetryCli::Record(call) => Self::Record(call),
+        }
+    }
 }
 
 #[derive(clap::Subcommand)]

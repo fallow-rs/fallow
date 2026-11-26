@@ -4,7 +4,7 @@ Fallow's product telemetry is opt-in and off by default. It collects coarse usag
 
 Fallow does not collect repository names, file paths, package names, dependency names, workspace names, source code, config values, environment variable names or values, raw command lines, raw errors, or stack traces.
 
-To keep telemetry off everywhere, set `FALLOW_TELEMETRY_DISABLED=1` or `DO_NOT_TRACK=1`.
+To keep telemetry off everywhere, set `FALLOW_TELEMETRY_DISABLED=1` or `DO_NOT_TRACK=1`. Both switches accept any value except empty, `0`, `false`, `no` or `off`, so `DO_NOT_TRACK=yes` also works.
 
 ## Commands
 
@@ -137,9 +137,16 @@ Field purposes:
 
 ## Integration surfaces
 
-The MCP server runs cleanly-mapped analysis tools in-process through `fallow-api` and falls back to invoking the CLI for CLI-only surfaces. Fallback subprocesses are tagged via the `FALLOW_INTEGRATION_SURFACE` and `FALLOW_MCP_TOOL` environment variables so their single CLI telemetry event is attributed to the `mcp` surface and the specific tool, instead of looking like any other `cli_json` run. Code Mode snippets can make several read-only host calls; spawned CLI events are attributed to `code_execute`, not to free-form code text or nested helper names. No second event is emitted for CLI fallbacks, and API-backed MCP analysis emits no telemetry today. `FALLOW_MCP_TOOL` is validated CLI-side against a fixed allowlist of tool names; any other value is dropped.
+The MCP server runs most analysis tools in its own process through `fallow-api`, and runs the CLI for the other tools. Each tool call gives one event, with `integration_surface: mcp` and the tool name in `mcp_tool`:
 
-The LSP server, VS Code extension, N-API bindings, MCP API-backed tools, and programmatic embedding run analysis in-process rather than by spawning the CLI, so the environment-variable tagging does not reach them and they emit no telemetry today. Their `integration_surface` values are reserved for when a future shared telemetry layer lets them emit directly.
+- A call that runs the CLI gets its event from that CLI run. The server tags the CLI process with the `FALLOW_INTEGRATION_SURFACE` and `FALLOW_MCP_TOOL` environment variables.
+- A call that runs in the server process gets its event from the hidden `fallow telemetry record` command. The server runs that command after it answers the call, with the same two tags. The command applies the same consent rules as every other run and builds the event in the CLI. The event has the workflow of the tool, the duration bucket, and the outcome `success` or `failed`. It has no finding or scale fields, because the server does not read the result for telemetry.
+
+The server runs `fallow telemetry record` only while `fallow telemetry status` reports `on` or `inspect`. It reads that state at most once every ten minutes, and never when `DO_NOT_TRACK` or `FALLOW_TELEMETRY_DISABLED` is set. With telemetry off, a tool call starts no telemetry process.
+
+Code Mode snippets can make several read-only host calls. The CLI host calls give events with `mcp_tool: code_execute`, not free-form code text or nested helper names. The in-process host calls of a snippet give no event. `FALLOW_MCP_TOOL` is validated CLI-side against a fixed allowlist of tool names; any other value is dropped.
+
+The LSP server, VS Code extension, N-API bindings, and programmatic embedding run analysis in-process rather than by spawning the CLI, so they emit no telemetry today. Their `integration_surface` values are reserved for when they emit directly.
 
 ## Agent Source
 
