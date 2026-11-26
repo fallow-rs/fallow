@@ -1958,3 +1958,15 @@ fn fix_skips_every_export_when_the_base_rule_is_off() {
 
     assert!(planned_export_removals(root).is_empty());
 }
+
+#[test]
+fn fix_keeps_an_export_whose_override_sets_the_rule_to_warn() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    write_rule_off_project(
+        root,
+        r#"{"overrides":[{"files":["src/jobs/**"],"rules":{"unused-exports":"warn"}}]}"#,
+    );
+
+    assert_eq!(planned_export_removals(root), ["cleanupJob", "deadUtil"]);
+}
