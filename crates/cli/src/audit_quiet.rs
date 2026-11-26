@@ -122,6 +122,7 @@ fn retain_actionable_health(report: &mut HealthReport, attributed: bool) {
     report.hotspot_summary = None;
     report.change_coupling = None;
     report.large_functions.clear();
+    report.large_functions_omitted = None;
     report.targets.clear();
     report.target_thresholds = None;
     report.health_trend = None;

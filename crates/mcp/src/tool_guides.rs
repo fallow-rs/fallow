@@ -47,6 +47,11 @@ const OUTPUT_LIMIT_SECTION: ToolGuideSection = ToolGuideSection {
 
 const CHECK_HEALTH_SECTIONS: &[ToolGuideSection] = &[
     ToolGuideSection {
+        topic: "top",
+        summary: "Which lists `top` cuts, and how large a bounded result is.",
+        detail: r"`top` keeps the first N rows of `findings`, `file_scores`, `hotspots`, `large_functions` and `targets`, in the project report and in each group. With runtime coverage, it also cuts `runtime_coverage.findings`, `hot_paths`, `blast_radius` and `importance`. `large_functions_omitted` counts the large functions that the cut removed. The opt-in sections `coverage_gaps`, `prop_drilling_chains` and the CSS styling findings have no cut. Without `top`, the runtime-coverage tools return the full report, which is millions of characters on a mid-size project and over the server cap. On excalidraw, `check_runtime_coverage` with `top: 20` returns about 140,000 characters.",
+    },
+    ToolGuideSection {
         topic: "group_by",
         summary: "What each group recomputes.",
         detail: r#"Each group gets its own `vital_signs`, `health_score`, `findings`, `file_scores`, `hotspots`, `large_functions`, and `targets`, recomputed against the files of the group. The top-level metrics stay project-wide. Use it to answer per-team or per-package quality questions, such as "which workspace has the worst maintainability?", without one fallow run per package."#,

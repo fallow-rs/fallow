@@ -1400,8 +1400,8 @@ pub struct CheckRuntimeCoverageParams {
     /// inputs, making this flag especially useful on this tool.
     pub max_crap: Option<f64>,
 
-    /// Show only the top N runtime findings, hot paths, file scores, and
-    /// refactoring targets. Passed through to the CLI's `--top` flag.
+    /// Show only the top N runtime findings, hot paths, file scores, large
+    /// functions, and refactoring targets. Passed through to the CLI's `--top` flag.
     pub top: Option<usize>,
 
     /// Group health findings by CODEOWNERS ownership, directory, workspace

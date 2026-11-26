@@ -1213,6 +1213,38 @@ fn large_functions_docs_footer_fits_eighty_columns() {
 }
 
 #[test]
+fn large_functions_header_counts_the_rows_that_top_cut() {
+    let root = PathBuf::from("/project");
+    let mut report = empty_report();
+    report.large_functions = vec![fallow_output::LargeFunctionEntry {
+        path: root.join("src/a.ts"),
+        name: "render".to_string(),
+        line: 3,
+        line_count: 120,
+    }];
+    report.large_functions_omitted = Some(4);
+    let text = plain(&build_health_human_lines(&report, &root));
+    assert!(
+        text.contains("Large functions (1 shown, 5 total)"),
+        "header must show the full total:\n{text}"
+    );
+    assert!(text.contains("run without --top to see all"), "{text}");
+    assert!(!text.contains("use --top 5"), "{text}");
+}
+
+#[test]
+fn large_functions_section_stays_when_top_cut_every_row() {
+    let root = PathBuf::from("/project");
+    let mut report = empty_report();
+    report.large_functions_omitted = Some(3);
+    let text = plain(&build_health_human_lines(&report, &root));
+    assert!(
+        text.contains("Large functions (0 shown, 3 total)"),
+        "a cut to zero rows keeps the count:\n{text}"
+    );
+}
+
+#[test]
 fn fmt_trend_val_percentage() {
     assert_eq!(fmt_trend_val(15.5, "%"), "15.5%");
     assert_eq!(fmt_trend_val(0.0, "%"), "0.0%");

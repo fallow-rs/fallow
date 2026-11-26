@@ -9230,6 +9230,12 @@ coverage_intelligence?: (CoverageIntelligenceReport | null)
  */
 large_functions?: LargeFunctionEntry[]
 /**
+ * Number of large functions that `--top` cut from `large_functions`.
+ * Omitted when no row was cut. The full count is
+ * `large_functions.length + large_functions_omitted`.
+ */
+large_functions_omitted?: (number | null)
+/**
  * Ranked refactoring recommendations. Only present when --targets is used.
  * Sorted by efficiency (priority/effort) descending. Each entry wraps
  * its inner `RefactoringTarget` payload (flattened on the wire) with
@@ -16109,6 +16115,12 @@ coverage_intelligence?: (CoverageIntelligenceReport | null)
  */
 large_functions?: LargeFunctionEntry[]
 /**
+ * Number of large functions that `--top` cut from `large_functions`.
+ * Omitted when no row was cut. The full count is
+ * `large_functions.length + large_functions_omitted`.
+ */
+large_functions_omitted?: (number | null)
+/**
  * Ranked refactoring recommendations. Only present when --targets is used.
  * Sorted by efficiency (priority/effort) descending. Each entry wraps
  * its inner `RefactoringTarget` payload (flattened on the wire) with
@@ -16340,6 +16352,11 @@ hotspots?: HotspotFinding[]
  * Large functions in files belonging to this group.
  */
 large_functions?: LargeFunctionEntry[]
+/**
+ * Number of group large functions that `--top` cut. Omitted when no row
+ * was cut.
+ */
+large_functions_omitted?: (number | null)
 /**
  * Refactoring targets in files belonging to this group. Each entry is
  * the typed [`RefactoringTargetFinding`] wrapper around a

@@ -273,6 +273,8 @@ fn build_health_report_struct(
     parts: HealthReportStructParts,
 ) -> HealthReport {
     let sections = Some(produced_sections(opts, &parts));
+    let (large_functions, large_functions_omitted) =
+        build_report_large_functions(opts, parts.large_functions);
     let mut report = HealthReport {
         summary: parts.summary,
         sections,
@@ -313,11 +315,8 @@ fn build_health_report_struct(
         runtime_coverage: parts.runtime_coverage,
         mutation: None,
         coverage_intelligence: None,
-        large_functions: if opts.score_only_output {
-            Vec::new()
-        } else {
-            parts.large_functions
-        },
+        large_functions,
+        large_functions_omitted,
         targets: build_report_targets(opts, parts.targets),
         target_thresholds: if opts.score_only_output {
             None
@@ -588,6 +587,27 @@ fn build_report_threshold_overrides<T>(
     } else {
         threshold_overrides
     }
+}
+
+/// Cut the large functions to `--top` and return the number of cut rows.
+fn build_report_large_functions(
+    opts: &HealthOptions<'_>,
+    mut functions: Vec<fallow_output::LargeFunctionEntry>,
+) -> (Vec<fallow_output::LargeFunctionEntry>, Option<usize>) {
+    if opts.score_only_output {
+        return (Vec::new(), None);
+    }
+    let omitted = truncate_to_top(&mut functions, opts.top);
+    (functions, omitted)
+}
+
+/// Keep the first `top` rows. Return the number of cut rows, or `None` when
+/// no row was cut.
+pub(super) fn truncate_to_top<T>(rows: &mut Vec<T>, top: Option<usize>) -> Option<usize> {
+    let top = top?;
+    let omitted = rows.len().checked_sub(top).filter(|cut| *cut > 0)?;
+    rows.truncate(top);
+    Some(omitted)
 }
 
 fn build_report_file_scores(

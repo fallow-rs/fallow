@@ -116,14 +116,20 @@ fn cap_table(body: &mut Map<String, Value>, table: &str, cap: usize) {
     }
     let omitted = rows.len() - cap;
     rows.truncate(cap);
+    let omitted_key = format!("{table}_omitted");
+    // `--top` can have cut rows before this pass; the count covers both cuts.
+    let earlier = body
+        .shift_remove(&omitted_key)
+        .and_then(|value| value.as_u64())
+        .map_or(0, |count| usize::try_from(count).unwrap_or(usize::MAX));
     let position = body
         .keys()
         .position(|key| key == table)
         .unwrap_or(body.len());
     body.shift_insert(
         position + 1,
-        format!("{table}_omitted"),
-        Value::from(omitted),
+        omitted_key,
+        Value::from(omitted.saturating_add(earlier)),
     );
 }
 
@@ -490,6 +496,31 @@ mod tests {
             scores.map(|index| index + 1),
             "the omitted count follows its table"
         );
+    }
+
+    #[test]
+    fn lean_cap_adds_to_the_rows_that_top_cut() {
+        let rows = |count: usize| -> Value {
+            Value::Array((0..count).map(|index| json!({ "row": index })).collect())
+        };
+        let document = lean(
+            json!({
+                "kind": "health",
+                "schema_version": 12,
+                "large_functions": rows(5),
+                "large_functions_omitted": 7,
+                "targets": []
+            }),
+            Some(3),
+        );
+        assert_eq!(document["large_functions"], rows(3));
+        assert_eq!(document["large_functions_omitted"], 9);
+        let keys: Vec<&String> = document.as_object().expect("object").keys().collect();
+        let table = keys.iter().position(|key| *key == "large_functions");
+        let omitted = keys
+            .iter()
+            .position(|key| *key == "large_functions_omitted");
+        assert_eq!(omitted, table.map(|index| index + 1));
     }
 
     #[test]
