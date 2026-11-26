@@ -21,6 +21,7 @@ use srcmap_sourcemap::{GeneratedLocation, GeneratedOffsetLookup, SourceMap};
 use tempfile::TempDir;
 
 use super::coverage_inputs;
+use super::coverage_sidecar::signature_path;
 use crate::error::emit_error;
 use crate::exit_codes::{
     ErrorExitCode, INVALID_INPUT, RESOURCE_UNAVAILABLE, RUNTIME_COVERAGE_INPUT,
@@ -314,12 +315,6 @@ pub(super) fn discover_sidecar_in(
     find_on_path().or(unsigned_wrapper)
 }
 
-fn signature_path(binary: &Path) -> PathBuf {
-    let mut path = binary.as_os_str().to_os_string();
-    path.push(".sig");
-    PathBuf::from(path)
-}
-
 pub(super) fn path_binary_candidates(binary: &str) -> Vec<String> {
     let mut candidates = vec![binary.to_owned()];
     if cfg!(windows) {
@@ -380,7 +375,10 @@ fn find_platform_package_sidecar(root: &Path) -> Option<PathBuf> {
     None
 }
 
-fn find_scoped_platform_sidecar(fallow_cli_dir: &Path, binary_name: &str) -> Option<PathBuf> {
+pub(super) fn find_scoped_platform_sidecar(
+    fallow_cli_dir: &Path,
+    binary_name: &str,
+) -> Option<PathBuf> {
     let entries = fs::read_dir(fallow_cli_dir).ok()?;
     for entry in entries.flatten() {
         let name = entry.file_name();
@@ -452,7 +450,7 @@ fn parse_sidecar_version_key(version: &str) -> Vec<u64> {
         .collect()
 }
 
-const fn sidecar_binary_name() -> &'static str {
+pub(super) const fn sidecar_binary_name() -> &'static str {
     if cfg!(windows) {
         "fallow-cov.exe"
     } else {
@@ -1373,7 +1371,7 @@ fn verify_sidecar_signature(binary: &Path) -> Result<(), String> {
 
     let sig_bytes = fs::read(&sig_path).map_err(|err| {
         format!(
-            "The runtime coverage add-on at {} is missing its signature file {}: {err}. Fallow does not run an unsigned add-on. Reinstall @fallow-cli/fallow-cov.",
+            "The runtime coverage add-on at {} is missing its signature file {}: {err}. Fallow does not run an unsigned add-on. The signed binary is in the @fallow-cli/fallow-cov-<platform> package, next to its fallow-cov.sig file. Set FALLOW_COV_BIN to that binary. If the package is missing, reinstall @fallow-cli/fallow-cov.",
             binary.display(),
             sig_path.display()
         )
@@ -2165,8 +2163,8 @@ mod tests {
             "error message missing expected guidance: {err}"
         );
         assert!(
-            err.contains("Reinstall @fallow-cli/fallow-cov"),
-            "error message missing reinstall hint: {err}"
+            err.contains("Set FALLOW_COV_BIN to that binary"),
+            "error message missing the FALLOW_COV_BIN remedy: {err}"
         );
 
         let _ = std::fs::remove_dir_all(&root);
