@@ -1,0 +1,4 @@
+### Fixed
+
+- **`unused-enum-member` does not report the members of an enum that a public package entry re-exports.** A package that is not private can publish an enum from its entry file through `export *`, `export { E } from` or `export * as ns`. The re-export can also go through more barrels. A consumer of the package can read each member of that enum, so fallow does not report these members. The public entries are the same as for class members: the entries of the root package when it is not private, and the entries of the workspaces that `publicPackages` lists. A workspace package outside `publicPackages` is internal, so fallow still reports its unused enum members. To publish such a package, add it to `publicPackages`. Under `includeEntryExports`, fallow checks these members as before.
+  (Closes [#5261](https://github.com/fallow-rs/fallow/issues/5261))

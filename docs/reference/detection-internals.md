@@ -242,7 +242,16 @@ error by suppressing a downstream detector.
   namespace that is reported itself are never reported. The member scan of an
   entry point reads only store members, so its enum, class and namespace
   members are not reported either, unless `includeEntryExports` covers the
-  file (issue #4990).
+  file (issue #4990). The members of an enum that a public package entry
+  re-exports (`export *`, `export { E } from`, `export * as ns`, also through
+  more barrels) are not reported either (issue #5261). The public package
+  entries are the entries of a root package that is not private, the entries
+  of the workspaces that `publicPackages` selects, and the source-index
+  fallback of such a package. Class members use the same set. For enum
+  members, the set does not include an entry that is consumer-checked or that
+  `includeEntryExports` covers. A workspace entry outside `publicPackages` is
+  internal, so fallow reports the unused members of the enums that it
+  re-exports.
 - A Pinia state key read through the `$state` object of a known store is a
   read of that store member: `store.$state.key`, `store.$state['key']` and
   `const { key } = store.$state`. Any other use of a store `$state` value (a
