@@ -50,6 +50,20 @@ impl ModuleInfoExtractor {
         });
     }
 
+    /// Record `name` as a top-level value name, and return it. A named
+    /// `export default class` or `function` declares a value name that a
+    /// local `export { X as Y }` can export again.
+    pub(super) fn record_module_value_name(&mut self, name: &str) -> String {
+        self.module_value_names.insert(name.to_string());
+        name.to_string()
+    }
+
+    /// Whether a top-level `interface` or `type` alias declares `name`, and
+    /// no top-level value declaration does.
+    fn is_module_type_only_name(&self, name: &str) -> bool {
+        self.module_type_names.contains(name) && !self.module_value_names.contains(name)
+    }
+
     pub(crate) fn resolve_pending_local_export_specifiers(&mut self) {
         self.resolve_pending_binding_forwards();
         let pending = std::mem::take(&mut self.pending_local_export_specifiers);
@@ -57,10 +71,12 @@ impl ModuleInfoExtractor {
             if let Some(import) = self.forwardable_import(&spec.local_name) {
                 self.push_import_forward(import, spec.exported_name, spec.is_type_only, spec.span);
             } else {
+                let is_type_only =
+                    spec.is_type_only || self.is_module_type_only_name(&spec.local_name);
                 self.exports.push(ExportInfo {
                     name: ExportName::Named(spec.exported_name),
                     local_name: Some(spec.local_name),
-                    is_type_only: spec.is_type_only,
+                    is_type_only,
                     visibility: VisibilityTag::None,
                     expected_unused_reason: None,
                     span: spec.span,

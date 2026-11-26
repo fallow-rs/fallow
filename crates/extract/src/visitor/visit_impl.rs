@@ -806,12 +806,14 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                 (vec![], None, vec![], vec![])
             };
         let local_name = match &decl.declaration {
-            ExportDefaultDeclarationKind::ClassDeclaration(class) => {
-                class.id.as_ref().map(|id| id.name.to_string())
-            }
-            ExportDefaultDeclarationKind::FunctionDeclaration(function) => {
-                function.id.as_ref().map(|id| id.name.to_string())
-            }
+            ExportDefaultDeclarationKind::ClassDeclaration(class) => class
+                .id
+                .as_ref()
+                .map(|id| self.record_module_value_name(&id.name)),
+            ExportDefaultDeclarationKind::FunctionDeclaration(function) => function
+                .id
+                .as_ref()
+                .map(|id| self.record_module_value_name(&id.name)),
             ExportDefaultDeclarationKind::Identifier(identifier) => {
                 self.pending_binding_forwards
                     .push(PendingBindingForward::ExportDefault {
@@ -849,10 +851,14 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                 ..Default::default()
             });
         }
+        let is_type_only = matches!(
+            decl.declaration,
+            ExportDefaultDeclarationKind::TSInterfaceDeclaration(_)
+        );
         self.exports.push(ExportInfo {
             name: ExportName::Default,
             local_name,
-            is_type_only: false,
+            is_type_only,
             is_side_effect_used: false,
             visibility: VisibilityTag::None,
             expected_unused_reason: None,

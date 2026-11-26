@@ -5,6 +5,7 @@ use super::*;
 
 impl ModuleInfoExtractor {
     pub(super) fn record_top_level_declaration(&mut self, decl: &Declaration<'_>) {
+        self.record_top_level_declaration_space(decl);
         match decl {
             Declaration::VariableDeclaration(var) => {
                 for declarator in &var.declarations {
@@ -31,6 +32,45 @@ impl ModuleInfoExtractor {
             Declaration::TSNamespaceDeclaration(namespace) => {
                 self.record_local_declaration_name(&namespace.id.name);
                 self.record_local_type_declaration(&namespace.id.name, namespace.id.span);
+            }
+            _ => {}
+        }
+    }
+
+    /// Record whether `decl` declares a type or a value name. An `import =`
+    /// and a `declare module` declare neither, so a local export of such a
+    /// name keeps its value meaning.
+    fn record_top_level_declaration_space(&mut self, decl: &Declaration<'_>) {
+        match decl {
+            Declaration::TSTypeAliasDeclaration(alias) => {
+                self.module_type_names.insert(alias.id.name.to_string());
+            }
+            Declaration::TSInterfaceDeclaration(iface) => {
+                self.module_type_names.insert(iface.id.name.to_string());
+            }
+            Declaration::VariableDeclaration(var) => {
+                for declarator in &var.declarations {
+                    for id in declarator.id.get_binding_identifiers() {
+                        self.module_value_names.insert(id.name.to_string());
+                    }
+                }
+            }
+            Declaration::FunctionDeclaration(function) => {
+                if let Some(id) = function.id.as_ref() {
+                    self.module_value_names.insert(id.name.to_string());
+                }
+            }
+            Declaration::ClassDeclaration(class) => {
+                if let Some(id) = class.id.as_ref() {
+                    self.module_value_names.insert(id.name.to_string());
+                }
+            }
+            Declaration::TSEnumDeclaration(enumd) => {
+                self.module_value_names.insert(enumd.id.name.to_string());
+            }
+            Declaration::TSNamespaceDeclaration(namespace) => {
+                self.module_value_names
+                    .insert(namespace.id.name.to_string());
             }
             _ => {}
         }

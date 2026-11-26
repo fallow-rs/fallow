@@ -66,3 +66,58 @@ export function foo(x: string | number): string | number {
         "Overloaded function should produce a single export entry"
     );
 }
+
+fn is_type_only_export(info: &fallow_types::extract::ModuleInfo, name: &ExportName) -> bool {
+    info.exports
+        .iter()
+        .find(|export| &export.name == name)
+        .unwrap_or_else(|| panic!("no export {name:?}"))
+        .is_type_only
+}
+
+#[test]
+fn local_export_of_a_type_is_type_only() {
+    let info = parse_source(
+        "type Shape = { w: number };\ninterface Box { h: number }\nexport { Shape, Box as Container };",
+    );
+    assert!(is_type_only_export(
+        &info,
+        &ExportName::Named("Shape".to_string())
+    ));
+    assert!(is_type_only_export(
+        &info,
+        &ExportName::Named("Container".to_string())
+    ));
+}
+
+#[test]
+fn local_export_of_a_value_or_merged_name_keeps_its_value() {
+    let info = parse_source(
+        "interface Token { id: string }\nconst Token = {};\nclass Engine {}\nenum Mode { A }\nexport { Token, Engine, Mode };",
+    );
+    for name in ["Token", "Engine", "Mode"] {
+        assert!(
+            !is_type_only_export(&info, &ExportName::Named(name.to_string())),
+            "{name} has a value meaning"
+        );
+    }
+}
+
+#[test]
+fn local_export_of_a_default_class_name_keeps_its_value() {
+    let info = parse_source(
+        "interface Foo { a: number }\nexport default class Foo {}\nexport { Foo as Bar };",
+    );
+    assert!(!is_type_only_export(
+        &info,
+        &ExportName::Named("Bar".to_string())
+    ));
+}
+
+#[test]
+fn default_export_of_an_interface_is_type_only() {
+    let info = parse_source("export default interface Options { enabled: boolean }");
+    assert!(is_type_only_export(&info, &ExportName::Default));
+    let class = parse_source("export default class Options {}");
+    assert!(!is_type_only_export(&class, &ExportName::Default));
+}

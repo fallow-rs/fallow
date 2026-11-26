@@ -196,6 +196,7 @@ fn collect_import_edge(
         import,
         file_id,
         ImportLoadKind::Static,
+        &[],
         edges_by_target,
         acc,
     );
@@ -203,11 +204,13 @@ fn collect_import_edge(
 
 /// Collect one resolved import whose target loads as `load_kind`. Internal
 /// module imports create an `ImportedSymbol` entry grouped by target, and npm
-/// package imports are recorded in the package usage maps.
+/// package imports are recorded in the package usage maps. `value_reads` is
+/// the sorted list of import bindings that the importer reads as a value.
 fn collect_import_edge_with_kind(
     import: &ResolvedImport,
     file_id: FileId,
     load_kind: ImportLoadKind,
+    value_reads: &[String],
     edges_by_target: &mut FxHashMap<FileId, Vec<ImportedSymbol>>,
     acc: &mut EdgeAccumulator<'_>,
 ) {
@@ -257,6 +260,8 @@ fn collect_import_edge_with_kind(
                     ModuleLoadMechanism::EsModule
                 },
                 load_kind: loader.load_kind,
+                value_read: !loader.through_loader
+                    && value_reads.binary_search(&import.info.local_name).is_ok(),
             });
     }
 }
@@ -354,13 +359,14 @@ fn collect_edges_for_module(
 ) -> Vec<(FileId, Vec<ImportedSymbol>)> {
     let mut edges_by_target: FxHashMap<FileId, Vec<ImportedSymbol>> = FxHashMap::default();
     let load_kind_overrides = import_load_kind_overrides(resolved);
+    let reads = &resolved.value_referenced_import_bindings;
 
     for import in &resolved.resolved_imports {
         let load_kind = load_kind_overrides
             .get(&import.info.span.start)
             .copied()
             .unwrap_or(ImportLoadKind::Static);
-        collect_import_edge_with_kind(import, file_id, load_kind, &mut edges_by_target, acc);
+        collect_import_edge_with_kind(import, file_id, load_kind, reads, &mut edges_by_target, acc);
     }
 
     for re_export in &resolved.re_exports {
@@ -400,6 +406,7 @@ fn collect_edges_for_module(
                     is_type_only_star: false,
                     mechanism: ModuleLoadMechanism::EsModule,
                     load_kind: loader.load_kind,
+                    value_read: false,
                 });
         }
     }
@@ -409,7 +416,7 @@ fn collect_edges_for_module(
             .get(&import.info.span.start)
             .copied()
             .unwrap_or(ImportLoadKind::Dynamic);
-        collect_import_edge_with_kind(import, file_id, load_kind, &mut edges_by_target, acc);
+        collect_import_edge_with_kind(import, file_id, load_kind, reads, &mut edges_by_target, acc);
     }
 
     // Patterns from `import()`, `import.meta.glob`, and `require.context` each
@@ -460,6 +467,7 @@ fn collect_edges_for_module(
                     is_type_only_star: false,
                     mechanism: pattern.mechanism,
                     load_kind,
+                    value_read: false,
                 });
         }
     }
@@ -1190,55 +1198,23 @@ mod tests {
     }
 
     #[test]
-    fn css_module_path_css() {
-        assert!(is_css_module_path(std::path::Path::new(
-            "Button.module.css"
-        )));
-    }
-
-    #[test]
-    fn css_module_path_scss() {
-        assert!(is_css_module_path(std::path::Path::new(
-            "Button.module.scss"
-        )));
-    }
-
-    #[test]
-    fn css_module_path_plain_css() {
-        assert!(!is_css_module_path(std::path::Path::new("Button.css")));
-    }
-
-    #[test]
-    fn css_module_path_ts() {
-        assert!(!is_css_module_path(std::path::Path::new(
-            "Button.module.ts"
-        )));
-    }
-
-    #[test]
-    fn css_module_path_less_is_matched() {
-        assert!(is_css_module_path(std::path::Path::new(
-            "Button.module.less"
-        )));
-    }
-
-    #[test]
-    fn css_module_path_nested_directory() {
-        assert!(is_css_module_path(std::path::Path::new(
-            "/project/src/components/Button.module.css"
-        )));
-    }
-
-    #[test]
-    fn css_module_path_no_extension() {
-        assert!(!is_css_module_path(std::path::Path::new("Button.module")));
-    }
-
-    #[test]
-    fn css_module_path_double_module() {
-        assert!(is_css_module_path(std::path::Path::new(
-            "Button.module.module.css"
-        )));
+    fn css_module_path_matches_module_stylesheets_only() {
+        for (path, expected) in [
+            ("Button.module.css", true),
+            ("Button.module.scss", true),
+            ("Button.css", false),
+            ("Button.module.ts", false),
+            ("Button.module.less", true),
+            ("/project/src/components/Button.module.css", true),
+            ("Button.module", false),
+            ("Button.module.module.css", true),
+        ] {
+            assert_eq!(
+                is_css_module_path(std::path::Path::new(path)),
+                expected,
+                "{path}"
+            );
+        }
     }
 
     #[test]

@@ -14,6 +14,7 @@ mod entry_load;
 mod entry_marks;
 mod fan_io;
 mod impact_closure;
+mod import_elision;
 mod namespace_aliases;
 mod namespace_escapes;
 mod namespace_indexes;
@@ -317,6 +318,10 @@ pub struct ImportedSymbol {
     pub(crate) is_type_only_star: bool,
     /// Runtime module mechanism that created this symbol edge.
     mechanism: ModuleLoadMechanism,
+    /// Whether the importer reads the local binding in a value position.
+    /// TypeScript then keeps the import, also when the name has no value
+    /// declaration in the target (an ambient namespace, issue #5262).
+    value_read: bool,
     /// When the target loads relative to the importer, and whether it runs
     /// at all. Fits in the padding after the flags, so the 64-byte size
     /// assertion holds.

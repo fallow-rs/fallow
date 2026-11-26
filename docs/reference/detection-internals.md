@@ -613,6 +613,22 @@ error by suppressing a downstream detector.
   path reference, because the consumer of the path can run the file, and
   stops at an asset reference. A new consumer that walks edges must pick one
   of these predicates instead of reading the variants.
+- Cycle detection does not count an import that TypeScript removes from its
+  output (issue #5262). That is a static ES import of a named or default
+  binding, in a `.ts`, `.tsx`, `.mts` or `.cts` file, whose name resolves in
+  the type namespace of the target and not in its value namespace
+  (`ModuleGraph::is_elided_type_import`). The import stays a runtime edge
+  when the tsconfig of the importer keeps imports: `verbatimModuleSyntax`,
+  `preserveValueImports`, or `importsNotUsedAsValues` with `preserve` or
+  `error`. The nearest `tsconfig.json` and its `tsconfig.*.json` siblings
+  decide, and a Deno config or a config that does not parse also keeps
+  imports. Namespace, side-effect and re-export edges always stay. An import
+  whose binding the importer reads in a value position also stays
+  (`ImportedSymbol::value_read`): TypeScript keeps it, and the name can have
+  a value meaning that the graph does not record, such as an ambient
+  namespace. An import of a class that the importer uses only as a type
+  stays too (issue #5309), because `emitDecoratorMetadata` can turn a type
+  annotation into a value reference.
 - `new URL("./x.ts", import.meta.url)` names a module that a path loader can
   run, so the edge credits the `default` export of the target and no other
   export. The edge credits only the file in three cases: a direct argument of

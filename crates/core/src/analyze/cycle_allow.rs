@@ -7,7 +7,11 @@ use crate::discover::FileId;
 use fallow_config::ResolvedConfig;
 use rustc_hash::FxHashMap;
 
+#[path = "cycle_import_elision.rs"]
+mod import_elision;
+
 use crate::graph::{CycleOptions, MAX_CYCLE_LENGTH, ModuleGraph};
+use import_elision::ImportKeepingConfigs;
 
 /// The cycles of `graph` that no `circularDependencies.allow` entry accepts.
 /// Records which entries had an effect, for the unmatched-entry diagnostic.
@@ -25,10 +29,14 @@ pub(super) fn find_unaccepted_cycles(
         ignore_lazy_imports: config.circular_dependencies.ignore_lazy_imports,
     };
     let mut allow_list = CycleAllowList::new(config);
+    let mut configs = ImportKeepingConfigs::new(&config.root);
+    let mut keeps_imports = |file: &Path| configs.keeps_imports(file);
     let search = if allow_list.entries.is_empty() {
-        graph.find_cycles_accepting(options, &mut |_| false)
+        graph.find_cycles_accepting(options, &mut keeps_imports, &mut |_| false)
     } else {
-        graph.find_cycles_accepting(options, &mut |cycle| allow_list.accepts(graph, cycle))
+        graph.find_cycles_accepting(options, &mut keeps_imports, &mut |cycle| {
+            allow_list.accepts(graph, cycle)
+        })
     };
     allow_list.mark_unprovable(graph, &search.capped_sccs);
     allow_list.record();
