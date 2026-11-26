@@ -1053,6 +1053,59 @@ fn i15_control_type_aware_private_type_leaks_agree() {
     }
 }
 
+/// The files of `tests/fixtures/<name>`, as repository paths.
+fn fixture_files(name: &str) -> BTreeMap<String, String> {
+    let manifest_dir = std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets it");
+    let root = PathBuf::from(manifest_dir)
+        .join("../../tests/fixtures")
+        .join(name);
+    let mut files = BTreeMap::new();
+    let mut stack = vec![root.clone()];
+    while let Some(dir) = stack.pop() {
+        for entry in std::fs::read_dir(&dir).expect("read fixture dir").flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+                continue;
+            }
+            let relative = path
+                .strip_prefix(&root)
+                .expect("fixture file under the fixture root")
+                .to_string_lossy()
+                .replace('\\', "/");
+            files.insert(
+                relative,
+                std::fs::read_to_string(&path).expect("read fixture file"),
+            );
+        }
+    }
+    files
+}
+
+/// The CLI total counts a thin wrapper only at `error` severity. The status
+/// bar must count the same findings, or `"thin-wrapper": "error"` gives the
+/// editor and the CLI different totals.
+#[test]
+#[ignore = "needs the fallow-lsp binary; run with: cargo build -p fallow-mcp -p fallow-lsp && cargo test -p fallow-cli --test drift -- --include-ignored"]
+fn i15_control_enforced_component_health_agrees() {
+    for (severity, enforced) in [("error", 1), ("warn", 0)] {
+        let mut files = fixture_files("thin-wrapper");
+        files.insert(
+            ".fallowrc.json".to_string(),
+            format!(r#"{{ "rules": {{ "thin-wrapper": "{severity}" }} }}"#),
+        );
+        let project = Project::from_files(Materialized {
+            base: files.clone(),
+            head: files,
+            renames: Vec::new(),
+        });
+        let context = format!("thin-wrapper at {severity}");
+        let counts =
+            lsp_counts_agree(&context, &project, false, &[]).unwrap_or_else(|err| panic!("{err}"));
+        assert_eq!(counts["enforcedThinWrappers"], enforced, "{context}");
+    }
+}
+
 /// With type-aware analysis on, `fallow dead-code --trace` adds semantic
 /// evidence, or fails when no companion is installed. The MCP `trace_export`
 /// tool must give the same answer: the typed trace refuses, and the tool runs

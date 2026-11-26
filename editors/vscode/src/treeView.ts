@@ -4,7 +4,7 @@ import * as path from "node:path";
 // VS Code injects this module into the extension host at runtime.
 // fallow-ignore-next-line unlisted-dependency
 import * as vscode from "vscode";
-import { countDiagnosticErrorIssues } from "./analysis-utils.js";
+import { countDiagnosticErrorIssues, countEnforcedFindings } from "./analysis-utils.js";
 import { middleElidePath, sortCloneGroupsBySize } from "./treeView-utils.js";
 import { resolveWorkspaceFilePath } from "./workspaceRoot.js";
 import { openFileCommand } from "./openFileCommand.js";
@@ -106,29 +106,22 @@ const staleSuppressionLabel = (
 
 type DeadCodeItem = CategoryItem | IssueItem | CycleItem;
 
-/**
- * Advisory component health categories. The sidebar lists them, but the total
- * of the notification and the status bar does not count them
- * (`COUNTED_FINDING_KEYS`), so their row says so.
- */
-const ADVISORY_CATEGORIES: ReadonlySet<IssueCategory> = new Set([
-  "prop-drilling",
-  "thin-wrapper",
-  "duplicate-prop-shape",
-]);
-
 class CategoryItem extends vscode.TreeItem {
   readonly issues: ReadonlyArray<IssueItem | CycleItem>;
 
   /**
    * `findings` is the count of the label. It is less than the row count when
-   * one finding has a row for each site, so the labels sum to the count of
-   * the "found N issues" notification and the status bar.
+   * one finding has a row for each site. `counted` is the
+   * part of `findings` that the total counts: a component health finding
+   * counts only at `error` severity. The counted parts of the labels sum to
+   * the count of the "found N issues" notification and the status bar, and
+   * the row says when the total leaves findings out.
    */
   constructor(
     readonly category: IssueCategory,
     issues: ReadonlyArray<IssueItem | CycleItem>,
     findings: number = issues.length,
+    counted: number = findings,
   ) {
     super(
       `${ISSUE_CATEGORY_LABELS[category]} (${findings})`,
@@ -139,9 +132,13 @@ class CategoryItem extends vscode.TreeItem {
     this.issues = issues;
     this.contextValue = "category";
     this.iconPath = new vscode.ThemeIcon(CATEGORY_ICONS[category] ?? "warning");
-    if (ADVISORY_CATEGORIES.has(category)) {
+    if (counted === 0) {
       this.description = "advisory";
       this.tooltip = "Advisory findings. The issue total does not count them.";
+    } else if (counted < findings) {
+      this.description = `${counted} counted`;
+      this.tooltip =
+        "The issue total counts only the findings at error severity. The others are advisory.";
     }
   }
 }
@@ -249,9 +246,10 @@ export class DeadCodeTreeProvider implements vscode.TreeDataProvider<DeadCodeIte
       category: IssueCategory,
       items: ReadonlyArray<IssueItem | CycleItem>,
       findings?: number,
+      counted?: number,
     ): void => {
       if (items.length > 0) {
-        categories.push(new CategoryItem(category, items, findings));
+        categories.push(new CategoryItem(category, items, findings, counted));
       }
     };
 
@@ -904,7 +902,12 @@ export class DeadCodeTreeProvider implements vscode.TreeDataProvider<DeadCodeIte
    * wrapper, or the component with the shared prop shape.
    */
   private addComponentHealthCategories(
-    addCategory: (category: IssueCategory, items: ReadonlyArray<IssueItem>) => void,
+    addCategory: (
+      category: IssueCategory,
+      items: ReadonlyArray<IssueItem>,
+      findings?: number,
+      counted?: number,
+    ) => void,
   ): void {
     if (!this.result) {
       return;
@@ -922,6 +925,8 @@ export class DeadCodeTreeProvider implements vscode.TreeDataProvider<DeadCodeIte
             new IssueItem(`${chain.prop}: ${trail}`, source.file, source.line, 0, "prop-drilling"),
           ];
         }),
+        this.result.prop_drilling_chains.length,
+        countEnforcedFindings(this.result, "prop_drilling_chains"),
       );
     }
     if (this.result.thin_wrappers) {
@@ -937,6 +942,8 @@ export class DeadCodeTreeProvider implements vscode.TreeDataProvider<DeadCodeIte
               "thin-wrapper",
             ),
         ),
+        this.result.thin_wrappers.length,
+        countEnforcedFindings(this.result, "thin_wrappers"),
       );
     }
     if (this.result.duplicate_prop_shapes) {
@@ -952,6 +959,8 @@ export class DeadCodeTreeProvider implements vscode.TreeDataProvider<DeadCodeIte
               "duplicate-prop-shape",
             ),
         ),
+        this.result.duplicate_prop_shapes.length,
+        countEnforcedFindings(this.result, "duplicate_prop_shapes"),
       );
     }
   }

@@ -341,9 +341,9 @@ const isCoreFindingKey = (key: CheckFindingKey): key is CoreFindingKey =>
   CORE_FINDING_KEY_SET.has(key);
 
 /**
- * Arrays that `countCheckIssues` adds to the total. Advisory arrays such as
- * `prop_drilling_chains`, `thin_wrappers` and `duplicate_prop_shapes` are not
- * in this list.
+ * Arrays that `countCheckIssues` adds to the total in full. The component
+ * health arrays count only their findings at `error` severity
+ * ({@link ENFORCED_ONLY_FINDING_KEYS}).
  */
 export const COUNTED_FINDING_KEYS: ReadonlyArray<CheckFindingKey> = [
   "unused_files",
@@ -480,8 +480,36 @@ export const ISSUE_TYPE_FILTERS: ReadonlyArray<readonly [CheckFindingKey, keyof 
     ["duplicate_prop_shapes", "duplicate-prop-shape"],
   ];
 
+/**
+ * Component health arrays whose findings count in the total only at `error`
+ * severity, as in the `total_issues` of the CLI. A warning stays advisory.
+ */
+export const ENFORCED_ONLY_FINDING_KEYS = [
+  "prop_drilling_chains",
+  "thin_wrappers",
+  "duplicate_prop_shapes",
+] as const satisfies ReadonlyArray<CheckFindingKey>;
+
+export type EnforcedOnlyFindingKey = (typeof ENFORCED_ONLY_FINDING_KEYS)[number];
+
+/** The findings of `key` at `error` severity. */
+export const countEnforcedFindings = (
+  result: FallowCheckResult,
+  key: EnforcedOnlyFindingKey,
+): number => {
+  const findings: ReadonlyArray<{ readonly effective_severity?: string | null }> =
+    result[key] ?? [];
+  return findings.filter((finding) => finding.effective_severity === "error").length;
+};
+
 export const countCheckIssues = (result: FallowCheckResult | null): number =>
-  result ? countFindings(result, COUNTED_FINDING_KEYS) : 0;
+  result
+    ? countFindings(result, COUNTED_FINDING_KEYS) +
+      ENFORCED_ONLY_FINDING_KEYS.reduce(
+        (total, key) => total + countEnforcedFindings(result, key),
+        0,
+      )
+    : 0;
 
 export const countDiagnosticErrorIssues = (result: FallowCheckResult | null): number => {
   if (!result) {

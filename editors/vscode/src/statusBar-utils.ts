@@ -1,7 +1,9 @@
 import {
   COUNTED_FINDING_KEYS,
   countCheckIssues,
+  countEnforcedFindings,
   countFindings,
+  ENFORCED_ONLY_FINDING_KEYS,
   ISSUE_TYPE_FILTERS,
 } from "./analysis-utils.js";
 import type { PackageBaselineStatus } from "./generated/output-contract.js";
@@ -81,6 +83,9 @@ export interface AnalysisCompleteParams {
   duplicateExportAliases?: number;
   policyViolations?: number;
   emptyCatalogGroups?: number;
+  enforcedPropDrillingChains?: number;
+  enforcedThinWrappers?: number;
+  enforcedDuplicatePropShapes?: number;
   duplicationPercentage: number;
   cloneGroups: number;
   changedSinceScope?: ChangedSinceScopeStatus;
@@ -110,6 +115,28 @@ const BOUNDARY_ARRAYS: ReadonlySet<string> = new Set([
   "boundary_call_violations",
 ]);
 
+const ENFORCED_ONLY_ARRAYS: ReadonlySet<string> = new Set(ENFORCED_ONLY_FINDING_KEYS);
+
+/**
+ * The params field that counts the CLI array `key`, as the LSP names it. A
+ * component health array has an `enforced` field: it counts only the
+ * findings at `error` severity.
+ */
+const paramsFieldOf = (key: string): string => {
+  if (BOUNDARY_ARRAYS.has(key)) {
+    return "boundaryViolations";
+  }
+  const field = toParamsField(key);
+  return ENFORCED_ONLY_ARRAYS.has(key)
+    ? `enforced${field.charAt(0).toUpperCase()}${field.slice(1)}`
+    : field;
+};
+
+/** The params fields whose sum is the total of the sidebar. */
+export const COUNTED_PARAMS_FIELDS: ReadonlyArray<string> = [
+  ...new Set([...COUNTED_FINDING_KEYS, ...ENFORCED_ONLY_FINDING_KEYS].map(paramsFieldOf)),
+];
+
 /**
  * Convert CLI analysis results into the same shape the LSP notification
  * delivers, so the status bar text and tooltip can be built from a single
@@ -124,8 +151,11 @@ export const buildParamsFromCli = (
   // breakdown of a CLI run covers each category of its total.
   const counts: Record<string, number> = {};
   for (const key of COUNTED_FINDING_KEYS) {
-    const field = BOUNDARY_ARRAYS.has(key) ? "boundaryViolations" : toParamsField(key);
+    const field = paramsFieldOf(key);
     counts[field] = (counts[field] ?? 0) + (check ? countFindings(check, [key]) : 0);
+  }
+  for (const key of ENFORCED_ONLY_FINDING_KEYS) {
+    counts[paramsFieldOf(key)] = check ? countEnforcedFindings(check, key) : 0;
   }
   return {
     ...(counts as unknown as AnalysisCompleteParams),
@@ -155,7 +185,7 @@ export const alignWithSidebarCount = (
 ): AnalysisCompleteParams => {
   const counts: Record<string, unknown> = { ...params };
   const disabled = new Set(
-    ISSUE_TYPE_FILTERS.filter(([, type]) => !issueTypes[type]).map(([key]) => toParamsField(key)),
+    ISSUE_TYPE_FILTERS.filter(([, type]) => !issueTypes[type]).map(([key]) => paramsFieldOf(key)),
   );
   let removed = 0;
   for (const field of disabled) {
@@ -165,14 +195,7 @@ export const alignWithSidebarCount = (
       counts[field] = 0;
     }
   }
-  const counted = [
-    ...new Set(
-      COUNTED_FINDING_KEYS.map((key) =>
-        BOUNDARY_ARRAYS.has(key) ? "boundaryViolations" : toParamsField(key),
-      ),
-    ),
-  ];
-  const values = counted.map((field) => counts[field]);
+  const values = COUNTED_PARAMS_FIELDS.map((field) => counts[field]);
   const totalIssues = values.every((value) => typeof value === "number")
     ? values.reduce<number>((sum, value) => sum + (value as number), 0)
     : Math.max(0, params.totalIssues - removed);
@@ -334,6 +357,21 @@ const BREAKDOWN_LINES: ReadonlyArray<BreakdownLine> = [
   { count: "duplicateExportAliases", icon: "$(warning)", label: "duplicate export aliases" },
   { count: "policyViolations", icon: "$(warning)", label: "policy violations" },
   { count: "emptyCatalogGroups", icon: "$(warning)", label: "empty catalog groups" },
+  {
+    count: "enforcedPropDrillingChains",
+    icon: "$(error)",
+    label: "prop drilling chains at error severity",
+  },
+  {
+    count: "enforcedThinWrappers",
+    icon: "$(error)",
+    label: "thin wrappers at error severity",
+  },
+  {
+    count: "enforcedDuplicatePropShapes",
+    icon: "$(error)",
+    label: "duplicate prop shapes at error severity",
+  },
 ];
 
 export const getDuplicationPercentage = (duplicationPercentage: number): number =>
@@ -407,6 +445,14 @@ const scopeLines = (params: AnalysisCompleteParams, changedSinceRef: string | nu
 };
 
 /**
+ * The Problems panel has a diagnostic for each location: each clone instance,
+ * each edge of a cycle and each import site. Its count can then differ from
+ * the finding total, and that looks like a second, wrong total.
+ */
+const PROBLEMS_PANEL_NOTE =
+  "$(info) The Problems panel lists each location of a finding, so its count can differ from this total.";
+
+/**
  * Hover lines for a completed analysis: the scope, then one line per issue
  * category with a non-zero count. The status bar hover adds the duplication
  * line and the other sections.
@@ -424,6 +470,8 @@ export const buildAnalysisSummaryLines = (
   }
   if (params.totalIssues === 0) {
     lines.push("$(check) No issues found");
+  } else {
+    lines.push(PROBLEMS_PANEL_NOTE);
   }
   return lines;
 };

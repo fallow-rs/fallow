@@ -5,6 +5,7 @@ import { COUNTED_FINDING_KEYS } from "../src/analysis-utils.js";
 import {
   alignWithSidebarCount,
   buildAnalysisSummaryLines,
+  COUNTED_PARAMS_FIELDS,
   buildParamsFromCli,
   formatChangedSinceRefForStatusBar,
   getDuplicationPercentage,
@@ -518,17 +519,9 @@ describe("buildParamsFromCli", () => {
   });
 });
 
-const toField = (key: string): string =>
-  key.replace(/_([a-z])/g, (_match: string, letter: string) => letter.toUpperCase());
-
 /** Params with a field for each counted category, as the current LSP sends. */
 const lspParams = (counts: Record<string, number>): AnalysisCompleteParams => {
-  const fields: Record<string, number> = {};
-  for (const key of COUNTED_FINDING_KEYS) {
-    fields[toField(key)] = 0;
-  }
-  delete fields["boundaryCoverageViolations"];
-  delete fields["boundaryCallViolations"];
+  const fields = Object.fromEntries(COUNTED_PARAMS_FIELDS.map((field) => [field, 0]));
   return { ...baseParams(), ...fields, ...counts } as AnalysisCompleteParams;
 };
 
@@ -591,21 +584,15 @@ describe("alignWithSidebarCount", () => {
         (match) => match[1],
       ),
     );
-    const sharedBoundaryCount = new Set([
-      "boundary_coverage_violations",
-      "boundary_call_violations",
-    ]);
-    const missing = COUNTED_FINDING_KEYS.filter(
-      (key) => !fields.has(key) && !sharedBoundaryCount.has(key),
-    );
+    const toSnake = (field: string): string =>
+      field.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`);
+    const missing = COUNTED_PARAMS_FIELDS.map(toSnake).filter((field) => !fields.has(field));
     expect(missing).toEqual([]);
   });
 });
 
 describe("category coverage of the status bar", () => {
-  const countedFields = [...new Set(COUNTED_FINDING_KEYS.map(toField))].filter(
-    (field) => field !== "boundaryCoverageViolations" && field !== "boundaryCallViolations",
-  );
+  const countedFields = COUNTED_PARAMS_FIELDS;
 
   it("gives each category of the total a line in the hover breakdown", () => {
     // A category without a line made the hover lines sum to less than the total.
@@ -617,7 +604,7 @@ describe("category coverage of the status bar", () => {
       (field) => !lines.some((line) => line.includes(` ${counts[field]} `)),
     );
     expect(missing).toEqual([]);
-    expect(lines).toHaveLength(countedFields.length);
+    expect(lines).toHaveLength(countedFields.length + 1);
   });
 
   it("gives each category of the CLI total a params field", () => {
@@ -628,9 +615,52 @@ describe("category coverage of the status bar", () => {
     ) as unknown as FallowCheckResult;
     const params = buildParamsFromCli(check, null, null) as unknown as Record<string, number>;
     for (const field of countedFields) {
-      const expected = field === "boundaryViolations" ? 3 : 1;
+      const expected = field === "boundaryViolations" ? 3 : field.startsWith("enforced") ? 0 : 1;
       expect({ field, count: params[field] }).toEqual({ field, count: expected });
     }
     expect(params.totalIssues).toBe(COUNTED_FINDING_KEYS.length);
+  });
+});
+
+describe("enforced component health findings", () => {
+  const wrapper = (severity: "error" | "warn"): Record<string, unknown> => ({
+    component: "Wrapper",
+    child_component: "Button",
+    file: "src/w.tsx",
+    line: 1,
+    effective_severity: severity,
+  });
+
+  it("counts component health findings at error severity, as the CLI total does", () => {
+    // `prop-drilling: "error"` gates the CLI run. A total without these
+    // findings differed from the CLI total.
+    const check = Object.fromEntries(COUNTED_FINDING_KEYS.map((key) => [key, []])) as Record<
+      string,
+      unknown
+    >;
+    check.thin_wrappers = [wrapper("error"), wrapper("warn")];
+    const params = buildParamsFromCli(check as unknown as FallowCheckResult, null, null);
+    expect(params.totalIssues).toBe(1);
+    expect(params.enforcedThinWrappers).toBe(1);
+  });
+
+  it("lists enforced component findings in the hover and keeps them in the aligned total", () => {
+    const params = lspParams({
+      totalIssues: 2,
+      unusedExports: 1,
+      enforcedThinWrappers: 1,
+    } as Partial<AnalysisCompleteParams> as Record<string, number>);
+    expect(alignWithSidebarCount(params, ISSUE_TYPE_DEFAULTS).totalIssues).toBe(2);
+    expect(
+      alignWithSidebarCount(params, { ...ISSUE_TYPE_DEFAULTS, "thin-wrapper": false }).totalIssues,
+    ).toBe(1);
+    expect(buildAnalysisSummaryLines(params).some((line) => line.includes("thin wrapper"))).toBe(
+      true,
+    );
+  });
+
+  it("says that the Problems panel lists each location", () => {
+    const lines = buildAnalysisSummaryLines(lspParams({ totalIssues: 1, unusedExports: 1 }));
+    expect(lines.some((line) => line.includes("Problems panel"))).toBe(true);
   });
 });
