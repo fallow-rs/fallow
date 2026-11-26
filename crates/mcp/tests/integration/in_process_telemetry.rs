@@ -57,27 +57,21 @@ fn an_in_process_call_and_a_cli_call_each_give_one_event() {
 fn every_counted_tool_reports_a_count_from_its_real_output() {
     let project = tempfile::tempdir().expect("project");
     write_project(project.path());
-    let git = |args: &[&str]| {
-        let status = Command::new("git")
-            .args([
-                "-c",
-                "user.name=t",
-                "-c",
-                "user.email=t@t",
-                "-c",
-                "commit.gpgsign=false",
-            ])
-            .args(args)
-            .current_dir(project.path())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .expect("run git");
-        assert!(status.success(), "git {args:?}");
-    };
+    let git = |args: &[&str]| fallow_api::git_fixture::fixture_git(project.path(), args);
     git(&["init", "-q"]);
-    git(&["add", "-A"]);
-    git(&["commit", "-q", "-m", "base"]);
+    git(&["add", "."]);
+    git(&[
+        "-c",
+        "user.email=test@example.com",
+        "-c",
+        "user.name=Test",
+        "-c",
+        "commit.gpgsign=false",
+        "commit",
+        "-q",
+        "-m",
+        "base",
+    ]);
     std::fs::write(
         project.path().join("src/orphan.ts"),
         "export const lost = 2;\n",
