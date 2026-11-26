@@ -98,7 +98,7 @@ pub fn resolve_or_build_dead_code_graph(
 ) {
     let rejection =
         match core_backend::try_load_dead_code_graph_cache(prelude, entry_points, modules) {
-            Ok((resolved, graph)) => return (resolved, graph, None),
+            Ok(reused) => return reused,
             Err(rejection) => rejection,
         };
 

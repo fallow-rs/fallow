@@ -1375,6 +1375,7 @@ dependencies = [
  "syn 3.0.10",
  "tempfile",
  "tracing",
+ "xxhash-rust",
 ]
 
 [[package]]

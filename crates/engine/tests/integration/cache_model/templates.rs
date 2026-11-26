@@ -19,6 +19,10 @@ pub enum Step {
     /// same length. With `keep_mtime`, the modification time stays the same,
     /// so only the content shows the change.
     SwapUtilUse { keep_mtime: bool },
+    /// Turn the call of the imported function in the entry file into a
+    /// string literal, or back. The import statements stay the same, so
+    /// only the body of the file changes.
+    SwapBodyUse,
     /// Give a source file a new modification time, with the same content.
     TouchSource,
     /// Break or restore the clone in `src/dupe-b.ts`, with the same length.
@@ -94,7 +98,7 @@ pub enum Step {
     ToggleBuildOutput,
 }
 
-const SOURCE_STEPS: [Step; 7] = [
+const SOURCE_STEPS: [Step; 8] = [
     Step::SwapUtilUse { keep_mtime: false },
     Step::SwapUtilUse { keep_mtime: true },
     Step::TouchSource,
@@ -102,6 +106,7 @@ const SOURCE_STEPS: [Step; 7] = [
     Step::EditClone { keep_mtime: true },
     Step::ToggleExtraFile,
     Step::RenameOrphan,
+    Step::SwapBodyUse,
 ];
 
 const CLONE_A: &str = "export const sumA = (items: number[]): number => {\n  let total = 0;\n  for (const item of items) {\n    total += item * 2;\n    total -= 1;\n  }\n  return total;\n};\n";
@@ -177,6 +182,7 @@ pub const NODE: Template = Template {
         SOURCE_STEPS[4],
         SOURCE_STEPS[5],
         SOURCE_STEPS[6],
+        SOURCE_STEPS[7],
         Step::EditLockfile,
         Step::ToggleNpmInstall,
         Step::NodeModulesNoise,
@@ -221,6 +227,7 @@ pub const BUN: Template = Template {
         SOURCE_STEPS[4],
         SOURCE_STEPS[5],
         SOURCE_STEPS[6],
+        SOURCE_STEPS[7],
         Step::ToggleBunInstall,
         Step::SwapBunHoistedVersion,
         Step::NodeModulesNoise,
@@ -259,6 +266,7 @@ pub const DENO: Template = Template {
         SOURCE_STEPS[4],
         SOURCE_STEPS[5],
         SOURCE_STEPS[6],
+        SOURCE_STEPS[7],
         Step::SwapDenoImportMap,
         Step::ToggleDenoInstall,
         Step::ToggleProduction,
@@ -319,6 +327,7 @@ pub const VITE: Template = Template {
         SOURCE_STEPS[4],
         SOURCE_STEPS[5],
         SOURCE_STEPS[6],
+        SOURCE_STEPS[7],
         Step::SwapViteAlias { keep_mtime: false },
         Step::SwapViteAlias { keep_mtime: true },
         Step::SwapVitestSetup,
@@ -364,6 +373,7 @@ pub const ANGULAR: Template = Template {
         SOURCE_STEPS[4],
         SOURCE_STEPS[5],
         SOURCE_STEPS[6],
+        SOURCE_STEPS[7],
         Step::SwapAngularIncludePath,
         Step::SwapAngularMain,
         Step::ToggleProduction,
@@ -406,6 +416,26 @@ fn swap_in_file(project: &mut Project, file: &str, from: &str, to: &str, keep_mt
     } else {
         project.write(file, &next);
     }
+}
+
+/// Turn the call of the imported function in the entry file into a string
+/// literal, or back. The import statements keep their text and their place.
+fn swap_body_use(project: &mut Project) {
+    let entry = entry_file(project);
+    let content = project.read(entry).expect("entry file exists");
+    let next = ["alpha", "bravo"]
+        .iter()
+        .fold(content.clone(), |text, name| {
+            let call = format!("{name}()");
+            let quoted = format!("'{call}'");
+            if text.contains(&quoted) {
+                text.replace(&quoted, &call)
+            } else {
+                text.replace(&call, &quoted)
+            }
+        });
+    assert_ne!(next, content, "{entry}: the body edit must change the file");
+    project.write(entry, &next);
 }
 
 fn toggle_file(project: &mut Project, file: &str, content: &str) {
@@ -472,6 +502,7 @@ pub fn apply(project: &mut Project, step: Step) {
             let entry = entry_file(project);
             swap_in_file(project, entry, "alpha", "bravo", keep_mtime);
         }
+        Step::SwapBodyUse => swap_body_use(project),
         Step::TouchSource => project.touch("src/util.ts"),
         Step::EditClone { keep_mtime } => {
             assert_eq!(CLONE_B.len(), CLONE_B_BROKEN.len());
@@ -483,16 +514,11 @@ pub fn apply(project: &mut Project, step: Step) {
                 keep_mtime,
             );
         }
-        Step::ToggleExtraFile => {
-            if project.exists("src/extra.ts") {
-                project.remove("src/extra.ts");
-            } else {
-                project.write(
-                    "src/extra.ts",
-                    "import { bravo } from './util';\nexport const extra = bravo();\n",
-                );
-            }
-        }
+        Step::ToggleExtraFile => toggle_file(
+            project,
+            "src/extra.ts",
+            "import { bravo } from './util';\nexport const extra = bravo();\n",
+        ),
         Step::RenameOrphan => {
             if project.exists("src/orphan.ts") {
                 project.rename("src/orphan.ts", "src/moved/orphan.ts");

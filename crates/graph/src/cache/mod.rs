@@ -19,10 +19,12 @@ use crate::resolve::{
     ResolvedReExport, ResolvedReplacedModuleTarget,
 };
 
+mod resolve_hash;
 #[cfg(test)]
 mod source_pin;
 mod store;
 
+use resolve_hash::{NO_MODULE_RESOLVE_HASH, resolve_inputs_hash};
 pub use store::{GRAPH_CACHE_FILE, GraphCacheStore};
 
 /// Persisted graph cache schema version.
@@ -46,7 +48,7 @@ pub use store::{GRAPH_CACHE_FILE, GraphCacheStore};
 /// Never reuse a version number that a published build wrote, even from a
 /// development commit. Git history and the CHANGELOG record the reason for
 /// each bump.
-pub const GRAPH_CACHE_VERSION: u32 = 131;
+pub const GRAPH_CACHE_VERSION: u32 = 132;
 
 /// Cached form of a resolved target.
 ///
@@ -423,6 +425,11 @@ pub struct CachedResolvedProject {
     external_targets: Vec<String>,
     /// The versions of the hoisted Bun packages that the resolution read.
     installed_versions: crate::installed_versions::InstalledVersions,
+    /// The package manifests that the resolution read (see
+    /// [`ResolvedProject::package_manifests`]). A run that restores this
+    /// payload and writes the cache again reads the installed versions from
+    /// this list, as the run that resolved the imports did.
+    package_manifests: Vec<String>,
 }
 
 impl CachedResolvedProject {
@@ -507,6 +514,7 @@ pub fn cache_resolved_project(
             root,
             &resolved.package_manifests,
         ),
+        package_manifests: resolved.package_manifests.clone(),
     })
 }
 
@@ -551,7 +559,7 @@ pub fn restore_resolved_project(
         replaced_module_targets,
         work: crate::resolve::ResolveWork::default(),
         missed_probes: cached.missed_probes.clone(),
-        package_manifests: Vec::new(),
+        package_manifests: cached.package_manifests.clone(),
     })
 }
 
@@ -852,17 +860,75 @@ pub struct GraphCacheFile {
     ///
     /// `0` when the run produced no module for the file (an unreadable source).
     pub content_hash: u64,
+    /// Hash of the facts of the file that import resolution reads (see
+    /// `resolve_hash.rs`). An edit that keeps this hash for every file
+    /// keeps every resolved import, so the resolver payload stays valid while
+    /// the graph is built again from the new modules.
+    ///
+    /// `0` when the run produced no module for the file. Equal to `content_hash` for a project with auto-import rules,
+    /// where resolution also reads facts that the hash does not cover.
+    pub resolve_hash: u64,
+}
+
+/// The two hashes of one file in a graph-cache manifest.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GraphCacheFileHashes {
+    /// See [`GraphCacheFile::content_hash`].
+    pub content_hash: u64,
+    /// See [`GraphCacheFile::resolve_hash`].
+    pub resolve_hash: u64,
+}
+
+impl GraphCacheFileHashes {
+    /// The hashes of a file that has no parsed module.
+    pub const NO_MODULE: Self = Self {
+        content_hash: 0,
+        resolve_hash: NO_MODULE_RESOLVE_HASH,
+    };
+
+    /// The hashes of a parsed module in a project without auto-import rules.
+    #[must_use]
+    pub fn of_module(module: &fallow_types::extract::ModuleInfo) -> Self {
+        Self {
+            content_hash: module.content_hash,
+            resolve_hash: resolve_inputs_hash(module),
+        }
+    }
+
+    /// Hashes that make each content change a resolution change. For a
+    /// project with auto-import rules, whose resolution reads facts that
+    /// the resolve hash does not cover.
+    #[must_use]
+    pub const fn content_only(content_hash: u64) -> Self {
+        Self {
+            content_hash,
+            resolve_hash: content_hash,
+        }
+    }
 }
 
 impl GraphCacheFile {
     /// Build a graph-cache file row from a discovered file and content hash.
     #[must_use]
-    fn from_discovered_file(root: &Path, file: &DiscoveredFile, content_hash: u64) -> Self {
+    fn from_discovered_file(
+        root: &Path,
+        file: &DiscoveredFile,
+        hashes: GraphCacheFileHashes,
+    ) -> Self {
         Self {
             key: StableFileKey::from_root_relative(root, &file.path),
             file_id: file.id,
-            content_hash,
+            content_hash: hashes.content_hash,
+            resolve_hash: hashes.resolve_hash,
         }
+    }
+
+    /// True when the cached resolution of this file is not valid for
+    /// `current`: a resolver input changed, or the file gained or lost its
+    /// module.
+    fn resolution_inputs_differ(&self, current: &Self) -> bool {
+        self.resolve_hash != current.resolve_hash
+            || (self.content_hash == 0) != (current.content_hash == 0)
     }
 }
 
@@ -892,18 +958,17 @@ impl GraphCacheManifest {
         }
     }
 
-    /// Build a manifest from discovered files plus a content-hash provider.
+    /// Build a manifest from discovered files plus a provider of the hashes
+    /// of each file.
     pub fn from_discovered_files(
         root: &Path,
         files: &[DiscoveredFile],
         mode: GraphCacheMode,
-        mut content_hash_for_file: impl FnMut(&DiscoveredFile) -> u64,
+        mut hashes_for_file: impl FnMut(&DiscoveredFile) -> GraphCacheFileHashes,
     ) -> Self {
         let rows = files
             .iter()
-            .map(|file| {
-                GraphCacheFile::from_discovered_file(root, file, content_hash_for_file(file))
-            })
+            .map(|file| GraphCacheFile::from_discovered_file(root, file, hashes_for_file(file)))
             .collect();
         Self::new(root, mode, rows)
     }
@@ -918,8 +983,22 @@ impl GraphCacheManifest {
             && self.files == current.files
     }
 
+    /// True when a file of the current run has another content hash than
+    /// the same file of this manifest. Compare only manifests with the same
+    /// file set.
+    #[must_use]
+    pub fn content_differs(&self, current: &Self) -> bool {
+        self.files
+            .iter()
+            .zip(current.files.iter())
+            .any(|(cached, current)| cached.content_hash != current.content_hash)
+    }
+
     /// Name the first input dimension that differs from the current run, for
     /// a manifest whose resolution inputs may differ from the current run.
+    ///
+    /// A changed content hash alone is not a difference: resolution reads
+    /// only the facts under [`GraphCacheFile::resolve_hash`].
     ///
     /// The caller decides graph reuse after a successful, fully paid load, so
     /// this is the most expensive refusal in the pipeline, and it must not be
@@ -948,7 +1027,7 @@ impl GraphCacheManifest {
         self.files
             .iter()
             .zip(current.files.iter())
-            .any(|(cached, current)| cached.content_hash != current.content_hash)
+            .any(|(cached, current)| cached.resolution_inputs_differ(current))
             .then_some(CacheRejection::FingerprintChanged)
     }
 }
@@ -992,7 +1071,7 @@ mod tests {
         map: &FxHashMap<PathBuf, u64>,
     ) -> GraphCacheManifest {
         GraphCacheManifest::from_discovered_files(Path::new("/project"), files, mode, |file| {
-            *map.get(&file.path).unwrap()
+            GraphCacheFileHashes::content_only(*map.get(&file.path).unwrap())
         })
     }
 

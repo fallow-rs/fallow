@@ -36,6 +36,39 @@ const REGRESSIONS: &[Regression] = &[
         steps: &[Step::SwapUtilUse { keep_mtime: true }],
     },
     Regression {
+        name: "body edit that keeps the import statements",
+        template: &NODE,
+        steps: &[Step::SwapBodyUse, Step::SwapBodyUse],
+    },
+    Regression {
+        name: "import edit, then a body edit",
+        template: &NODE,
+        steps: &[Step::SwapUtilUse { keep_mtime: false }, Step::SwapBodyUse],
+    },
+    Regression {
+        name: "body edit, then a file at a missed candidate path",
+        template: &NODE,
+        steps: &[
+            Step::SwapBodyUse,
+            Step::ToggleExtensionlessUtil,
+            Step::ToggleExtensionlessUtil,
+        ],
+    },
+    Regression {
+        name: "body edit, then npm install into node_modules",
+        template: &NODE,
+        steps: &[Step::SwapBodyUse, Step::ToggleNpmInstall],
+    },
+    Regression {
+        name: "body edit, then a bun hoisted version with the same lockfile",
+        template: &BUN,
+        steps: &[
+            Step::SwapBodyUse,
+            Step::SwapBunHoistedVersion,
+            Step::SwapBunHoistedVersion,
+        ],
+    },
+    Regression {
         name: "file add and delete",
         template: &NODE,
         steps: &[Step::ToggleExtraFile, Step::ToggleExtraFile],

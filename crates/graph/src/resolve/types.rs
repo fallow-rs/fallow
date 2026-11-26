@@ -137,8 +137,8 @@ pub struct ResolvedProject {
     /// The package manifests below `node_modules` that the resolution read,
     /// sorted. A path above the root has `../` steps. The graph cache keys
     /// the versions of the Bun installs among them (see
-    /// [`crate::installed_versions`]). Empty for a project restored from the
-    /// graph cache.
+    /// [`crate::installed_versions`]). A project restored from the graph
+    /// cache holds the list of the run that resolved the imports.
     pub package_manifests: Vec<String>,
 }
 

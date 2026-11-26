@@ -287,11 +287,21 @@ pub fn discover_dead_code_entry_points(
 ///
 /// `Err(Some(reason))` is the refusal the perf table reports; `Err(None)` means
 /// the run disabled caching, so there was nothing to refuse.
+///
+/// The third `Ok` element names why the persisted graph was not reused, for a
+/// run that restored the resolver payload and built the graph again.
 pub fn try_load_dead_code_graph_cache(
     prelude: &DeadCodeBackendPrelude<'_>,
     entry_points: &DeadCodeEntryPoints,
     modules: &[ModuleInfo],
-) -> Result<(DeadCodeResolvedModules, DeadCodeGraphRun), Option<CacheRejection>> {
+) -> Result<
+    (
+        DeadCodeResolvedModules,
+        DeadCodeGraphRun,
+        Option<CacheRejection>,
+    ),
+    Option<CacheRejection>,
+> {
     fallow_core::try_load_dead_code_graph_cache(&prelude.inner, &entry_points.inner, modules).map(
         |(resolved, graph)| {
             (
@@ -303,6 +313,7 @@ pub fn try_load_dead_code_graph_cache(
                     graph: RetainedModuleGraph::from(graph.graph),
                     elapsed_ms: graph.elapsed_ms,
                 },
+                graph.graph_rejection,
             )
         },
     )

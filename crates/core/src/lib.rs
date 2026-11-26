@@ -28,7 +28,9 @@ pub mod extract;
 mod graph_build;
 mod graph_cache_key;
 mod graph_cache_load;
+mod graph_cache_manifest;
 use graph_cache_load::try_load_analysis_graph_cache;
+use graph_cache_manifest::{GraphCacheManifestInput, build_graph_cache_manifest};
 mod package_assets;
 mod package_credits;
 pub mod plugins;
@@ -538,19 +540,22 @@ impl<'a> AnalysisSession<'a> {
         };
 
         let entry_points = discover_analysis_entry_points(&shared);
-        let mut graph_cache_rejection = None;
+        let graph_cache_rejection;
         let (resolved, graph) =
             match try_load_analysis_graph_cache(&shared, &entry_points, &modules) {
-                Ok(hit) => (
-                    TimedResolvedModules {
-                        project: hit.project,
-                        elapsed_ms: 0.0,
-                    },
-                    TimedGraph {
-                        graph: hit.graph,
-                        elapsed_ms: hit.elapsed_ms,
-                    },
-                ),
+                Ok(hit) => {
+                    graph_cache_rejection = hit.graph_rejection;
+                    (
+                        TimedResolvedModules {
+                            project: hit.project,
+                            elapsed_ms: 0.0,
+                        },
+                        TimedGraph {
+                            graph: hit.graph,
+                            elapsed_ms: hit.elapsed_ms,
+                        },
+                    )
+                }
                 Err(rejection) => {
                     graph_cache_rejection = rejection;
                     let mut resolved = resolve_analysis_imports_timed(&shared, &modules);
@@ -822,6 +827,9 @@ pub struct DeadCodeResolvedModules {
 pub struct DeadCodeGraphRun {
     pub graph: graph::ModuleGraph,
     pub elapsed_ms: f64,
+    /// Why the persisted graph was not reused, when the run restored the
+    /// resolver payload from the graph cache and built the graph again.
+    pub graph_rejection: Option<CacheRejection>,
 }
 
 /// Detector result for an engine-owned dead-code pipeline.
@@ -900,6 +908,7 @@ pub fn try_load_dead_code_graph_cache(
             DeadCodeGraphRun {
                 graph: hit.graph,
                 elapsed_ms: hit.elapsed_ms,
+                graph_rejection: hit.graph_rejection,
             },
         )
     })
@@ -932,6 +941,7 @@ pub fn build_dead_code_graph(
     DeadCodeGraphRun {
         graph: graph.graph,
         elapsed_ms: graph.elapsed_ms,
+        graph_rejection: None,
     }
 }
 
@@ -1052,6 +1062,10 @@ struct GraphCacheHit {
     graph: graph::ModuleGraph,
     project: resolve::ResolvedProject,
     elapsed_ms: f64,
+    /// Why the persisted graph was not reused, for a hit that reused only
+    /// the resolver payload and built the graph again. `None` for a hit that
+    /// reused the graph.
+    graph_rejection: Option<CacheRejection>,
 }
 
 #[derive(Clone, Copy)]
@@ -1675,60 +1689,6 @@ fn build_analysis_graph(input: &mut BuildAnalysisGraphInput<'_>) -> graph::Modul
     }
 
     graph
-}
-
-/// The run state that keys the persisted graph cache.
-struct GraphCacheManifestInput<'a> {
-    config: &'a ResolvedConfig,
-    plugin_result: &'a plugins::AggregatedPluginResult,
-    entry_points: &'a discover::CategorizedEntryPoints,
-    files: &'a [discover::DiscoveredFile],
-    workspaces: &'a [fallow_config::WorkspaceInfo],
-    modules: &'a [extract::ModuleInfo],
-    unseeded_declaration_files: &'a FxHashSet<discover::FileId>,
-}
-
-/// Build the current `GraphCacheManifest` from the run's discovered files and
-/// graph-affecting option hashes.
-fn build_graph_cache_manifest(
-    input: &GraphCacheManifestInput<'_>,
-) -> graph_cache::GraphCacheManifest {
-    let GraphCacheManifestInput {
-        config,
-        plugin_result,
-        entry_points,
-        files,
-        workspaces,
-        modules,
-        unseeded_declaration_files,
-    } = *input;
-    let mode = graph_cache::GraphCacheMode::new(
-        graph_cache_key::resolver_options_hash(config, workspaces, files),
-        graph_cache_key::entry_points_hash(
-            entry_points,
-            files,
-            unseeded_declaration_files,
-            &graph_build::consumer_checked_entries(config, entry_points, files, workspaces),
-            &config.root,
-        ),
-        graph_cache_key::plugin_config_hash(plugin_result, &config.root),
-    );
-    // The parse stage already hashed every file it read, so keying the manifest
-    // on content costs nothing and does not inherit mtime's blind spot for a
-    // same-size rewrite. A file with no module (unreadable) hashes to 0, which
-    // compares equal only against another run that also failed to read it.
-    let mut content_hashes = vec![0u64; files.len()];
-    for module in modules {
-        if let Some(slot) = content_hashes.get_mut(module.file_id.0 as usize) {
-            *slot = module.content_hash;
-        }
-    }
-    graph_cache::GraphCacheManifest::from_discovered_files(&config.root, files, mode, |file| {
-        content_hashes
-            .get(file.id.0 as usize)
-            .copied()
-            .unwrap_or_default()
-    })
 }
 
 fn collect_file_hashes(
@@ -3115,13 +3075,13 @@ mod tests {
             dir_a.path(),
             &files_a,
             mode,
-            |_| 7,
+            |_| crate::graph_cache::GraphCacheFileHashes::content_only(7),
         );
         let manifest_b = crate::graph_cache::GraphCacheManifest::from_discovered_files(
             dir_a.path(),
             &files_b,
             mode,
-            |_| 7,
+            |_| crate::graph_cache::GraphCacheFileHashes::content_only(7),
         );
 
         assert_eq!(

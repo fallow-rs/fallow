@@ -156,6 +156,21 @@ protocol and package parity.
   of each of these manifests (`crate::installed_versions`), and a warm run
   refuses the cache when one of the versions changed. A new kind of resolver
   input needs a step in the templates of these tests.
+- The graph cache has two levels of reuse. A run reuses the persisted graph
+  only when each file has the same content hash. When a content hash differs
+  and each file kept its resolve hash, the run reuses the resolver payload
+  and builds the graph again from the new modules. The resolve hash
+  (`resolve_inputs_hash` in `crates/graph/src/cache/resolve_hash.rs`) covers
+  the facts of a module that import resolution reads, and each field of the
+  import and re-export values that the resolver payload stores. A new
+  resolver input from a parsed module must join that hash. A project with
+  auto-import rules gets no second level: that pass reads the exports and
+  the body facts of every module, so the resolve hash of such a project is
+  the content hash. The `SwapBodyUse` step of the cache model tests makes an
+  edit of that kind, and
+  `body_edit_reuses_the_resolver_payload_and_matches_the_cache_free_run` in
+  `crates/core/tests/integration_test/graph_cache_transparency.rs` checks
+  that such a run resolves no specifier.
 - Runtime and cloud data must enter through explicit options or typed evidence
   fields. Static analyzers should not hide network or filesystem side effects.
 

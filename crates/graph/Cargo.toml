@@ -35,6 +35,7 @@ fixedbitset = { workspace = true }
 
 # Hashing
 rustc-hash = { workspace = true }
+xxhash-rust = { workspace = true }
 
 # Concurrent caches shared across rayon workers
 dashmap = { workspace = true }
