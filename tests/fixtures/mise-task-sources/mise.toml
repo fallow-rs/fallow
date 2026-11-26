@@ -1,0 +1,6 @@
+[tasks."sync-open-api"]
+run = "node ./dist/bin/sync-open-api.js"
+
+[tasks."email-dev"]
+env._.path = "./node_modules/.bin"
+run = "email dev -p 3050 --dir src/emails"

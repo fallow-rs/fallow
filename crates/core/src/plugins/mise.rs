@@ -99,18 +99,24 @@ impl Plugin for MisePlugin {
         ALWAYS_USED
     }
 
-    fn resolve_config(&self, config_path: &Path, source: &str, _root: &Path) -> PluginResult {
+    fn resolve_config(&self, config_path: &Path, source: &str, root: &Path) -> PluginResult {
         let Ok(config) = fallow_config::toml_input::from_str::<toml::Table>(source) else {
             return PluginResult::default();
         };
         let credits = collect_task_credits(&config, config_path);
         let mut packages: Vec<String> = credits.packages.into_iter().collect();
         packages.sort_unstable();
-        PluginResult {
+        let mut result = PluginResult {
             referenced_dependencies: packages,
             setup_files: credits.files,
             ..PluginResult::default()
+        };
+        for pattern in credits.patterns {
+            if let Ok(relative) = pattern.strip_prefix(root) {
+                result.push_entry_pattern(relative.to_string_lossy().replace('\\', "/"));
+            }
         }
+        result
     }
 }
 
@@ -119,6 +125,9 @@ impl Plugin for MisePlugin {
 struct TaskCredits {
     packages: FxHashSet<String>,
     files: Vec<PathBuf>,
+    /// Absolute globs of the files that a task command reads, such as the
+    /// template folder of `email dev`.
+    patterns: Vec<PathBuf>,
 }
 
 fn collect_task_credits(config: &toml::Table, config_path: &Path) -> TaskCredits {
@@ -358,9 +367,7 @@ impl CommandCollector<'_> {
             };
             self.analyze(&rest);
         } else if command_name.starts_with("./") || command_name.starts_with("../") {
-            self.credits
-                .files
-                .push(lexical_normalize(&self.dir.join(command_name)));
+            self.push_file(command_name);
         } else if WRAPPERS.contains(&binary) {
             if local {
                 self.analyze(&words[index..=index]);
@@ -410,10 +417,25 @@ impl CommandCollector<'_> {
         let analysis = scripts::analyze_command(&command, self.dir, &FxHashMap::default());
         self.credits.packages.extend(analysis.used_packages);
         for file in analysis.config_files.iter().chain(&analysis.entry_files) {
-            self.credits
-                .files
-                .push(lexical_normalize(&self.dir.join(file)));
+            self.push_file(file);
         }
+    }
+
+    /// Credit a file that a task runs, relative to the task directory. A
+    /// glob becomes an entry pattern. A file in the build output of a
+    /// `tsconfig` `outDir` maps back to its source file, so
+    /// `node ./dist/bin/sync.js` credits `src/bin/sync.ts`.
+    fn push_file(&mut self, file: &str) {
+        let path = lexical_normalize(&self.dir.join(file));
+        if scripts::is_glob(file) {
+            self.credits.patterns.push(path);
+            return;
+        }
+        if let Some(source) = crate::discover::output_entry_source_file(self.dir, file) {
+            self.credits.files.push(source);
+            return;
+        }
+        self.credits.files.push(path);
     }
 }
 

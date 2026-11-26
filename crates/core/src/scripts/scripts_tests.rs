@@ -2978,3 +2978,22 @@ fn node_modules_bin_path_follows_the_link_relative_to_the_given_path() {
         result.used_packages
     );
 }
+
+#[test]
+fn react_email_scripts_record_the_template_folder() {
+    for (script, expected) in [
+        (
+            "email dev -p 3050 --dir src/emails",
+            vec!["src/emails/**/*.{js,jsx,tsx}"],
+        ),
+        ("npx email build", vec!["emails/**/*.{js,jsx,tsx}"]),
+        ("email export --dir=mail", vec!["mail/**/*.{js,jsx,tsx}"]),
+        (
+            "infisical run -- email dev --dir src/emails",
+            vec!["src/emails/**/*.{js,jsx,tsx}"],
+        ),
+    ] {
+        let result = analyze_command(script, Path::new("/nonexistent"), &FxHashMap::default());
+        assert_eq!(result.entry_files, expected, "`{script}`");
+    }
+}

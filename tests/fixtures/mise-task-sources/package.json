@@ -1,0 +1,9 @@
+{
+  "name": "mise-task-sources",
+  "version": "1.0.0",
+  "private": true,
+  "main": "src/index.ts",
+  "devDependencies": {
+    "react-email": "6.0.0"
+  }
+}

@@ -2117,3 +2117,62 @@ fn a_vitest_config_that_links_out_of_the_project_is_not_read() {
     .unwrap();
     assert!(is_shadowed_vite_config(&root.join("vite.config.ts"), &root));
 }
+
+#[test]
+fn global_setup_binding_credits_the_values_that_a_condition_pushes() {
+    let result = resolve_at(
+        "/project/vitest.config.ts",
+        r"import { defineConfig } from 'vitest/config';
+        const skip = process.env.SKIP === 'true';
+        const globalSetup: string[] = ['./src/always.ts'];
+        if (!skip) {
+          try {
+            await fetch('http://127.0.0.1:2285/ping');
+          } catch {
+            globalSetup.push('src/docker-compose.ts');
+          }
+        }
+        export default defineConfig({ test: { globalSetup } });",
+    );
+    for file in ["/project/src/always.ts", "/project/src/docker-compose.ts"] {
+        assert!(
+            result.setup_files.contains(&PathBuf::from(file)),
+            "{file} must be a setup file: {:?}",
+            result.setup_files
+        );
+    }
+}
+
+#[test]
+fn global_setup_push_inside_a_function_is_not_credited() {
+    let result = resolve_at(
+        "/project/vitest.config.ts",
+        r"const globalSetup = [];
+        function later() { globalSetup.push('./src/later.ts'); }
+        export default { test: { globalSetup } };",
+    );
+    assert!(
+        !result
+            .setup_files
+            .contains(&PathBuf::from("/project/src/later.ts")),
+        "{:?}",
+        result.setup_files
+    );
+}
+
+#[test]
+fn array_binding_that_names_itself_does_not_recurse() {
+    let result = resolve_at(
+        "/project/vitest.config.ts",
+        r"const globalSetup = ['./src/a.ts', { input: globalSetup }];
+        globalSetup.push('./src/b.ts');
+        export default { test: { globalSetup } };",
+    );
+    for file in ["/project/src/a.ts", "/project/src/b.ts"] {
+        assert!(
+            result.setup_files.contains(&PathBuf::from(file)),
+            "{file} must be a setup file: {:?}",
+            result.setup_files
+        );
+    }
+}

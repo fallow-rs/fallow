@@ -1771,6 +1771,7 @@ macro_rules! define_plugin {
 
 mod config_dependencies;
 pub mod config_parser;
+mod config_parser_array_pushes;
 mod config_value_credits;
 mod federation_source;
 use config_value_credits::{

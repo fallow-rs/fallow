@@ -490,7 +490,10 @@ way as a config that it finds by name.
 
 The run directory is not always the base of the globs. The Vitest root is
 `test.root`, else the Vite `root`, against the run directory. `setupFiles`,
-`globalSetup` and a reporter path are relative to the Vitest root. The include
+`globalSetup` and a reporter path are relative to the Vitest root. A value
+that names a top-level array binding gives the array values and the values
+that top-level `push`, `unshift` and `splice` calls add, also in an `if` or
+`try` statement, so a `globalSetup` file that a condition adds counts. The include
 globs are relative to `test.dir` below the Vitest root, else to the root. A
 config whose include directory is outside the plugin root adds no entries.
 An inline project in `test.projects` goes through `ProjectScope`: it merges
