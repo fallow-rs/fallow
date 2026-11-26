@@ -583,7 +583,10 @@ impl FallowMcp {
     }
 
     /// Merge runtime-coverage data into the health report. Focused entry point for the runtime-coverage pipeline: pass a V8 coverage directory (`NODE_V8_COVERAGE=<dir>`), a single V8 coverage JSON file, or an Istanbul `coverage-final.json` via the required `coverage` field. A single local capture is free and runs without a license; continuous or multi-capture runtime monitoring (multiple JSON files in a V8 directory) requires an active license JWT (start a 30-day trial with `fallow license activate --trial --email <addr>`; check state with `fallow license status`). Returns structured JSON with a `runtime_coverage` block containing surfaced `findings` verdicts (`safe_to_delete` / `review_required` / `low_traffic` / `coverage_unavailable`), stable content-hash IDs (`fallow:prod:<hash>`), evidence, percentile-ranked hot paths (each with `start_line` and `end_line` so consumers can match against a PR diff), and on protocol-0.3+ sidecars a `summary.capture_quality` block that flags short-window captures. The sidecar may still classify other functions as `active`, but the CLI omits those from `runtime_coverage.findings` to keep the surfaced list actionable. Tunable via `min_invocations_hot` (hot-path threshold, default 100), `min_observation_volume` (high-confidence verdict floor, default 5000), and `low_traffic_threshold` (active/low_traffic split, default 0.001). `group_by` partitions results by CODEOWNERS / directory / package / section. PR-context behavior: when `FALLOW_DIFF_FILE` (path to a unified diff) is set in the agent's process environment, the top-level `runtime_coverage.verdict` promotes `hot-path-touched` over `cold-code-detected` so reviewers see the diff-tied signal first, AND every hot path is narrowed to functions whose `[start_line, end_line]` overlaps an added hunk. `FALLOW_CHANGED_SINCE` (git ref) also scopes (file-level). Without a change scope the verdict stays cold-code-primary and all hot paths are returned. The full unprioritized list is always in `runtime_coverage.signals[]` (kebab-case strings, severity-descending). Runtime coverage can exceed the default 120s MCP subprocess timeout on multi-megabyte dumps; raise `FALLOW_TIMEOUT_SECS` accordingly. For general complexity / hotspot / CRAP analysis without a production dump, use `check_health` instead.
-    #[tool(annotations(read_only_hint = true, open_world_hint = true))]
+    #[tool(
+        meta = large_result_meta(),
+        annotations(read_only_hint = true, open_world_hint = true)
+    )]
     async fn check_runtime_coverage(
         &self,
         params: Parameters<CheckRuntimeCoverageParams>,
@@ -592,7 +595,10 @@ impl FallowMcp {
     }
 
     /// Return production hot paths from a local V8 or Istanbul runtime coverage dump. Pass `coverage` as a V8 coverage directory, single V8 JSON file, or Istanbul `coverage-final.json`. A single local capture is free and runs without a license; continuous or multi-capture runtime monitoring requires an active license. Returns the standard health JSON; agents should read `runtime_coverage.hot_paths`, which is sorted by percentile and invocation count. Each entry carries `start_line` and `end_line` so agents can match the function's full body against a PR diff. Use `top` to cap the returned hot paths. Each hot path with a static counterpart also carries `optimization_target`: `cost_score` (invocations multiplied by the per-call cost), `cost_basis` (`inner_iterations` from V8 block counts, else `cognitive`), `cognitive`, `cyclomatic`, `line_count`, and `inner_iterations_per_call`. To pick speed work, sort by `cost_basis` (`inner_iterations` first), then by `cost_score` descending: scores on different bases do not compare. The hot paths are selected and capped by invocations, so a function with fewer calls but more work per call can be absent. Use `get_importance` to judge the risk of a change. Environment-driven scoping: if `FALLOW_DIFF_FILE` (path to a unified diff) is set in the agent's process env, hot paths are narrowed to functions whose `[start_line, end_line]` overlaps an added hunk; a file the diff touched but with no added lines (deletion-only / pure-rename) drops its hot paths rather than falling through to changed-since file-level matching. `FALLOW_CHANGED_SINCE` (git ref) covers the fallback case (file-level match for files NOT in the diff at all). Unset both for project-wide hot paths.
-    #[tool(annotations(read_only_hint = true, open_world_hint = true))]
+    #[tool(
+        meta = large_result_meta(),
+        annotations(read_only_hint = true, open_world_hint = true)
+    )]
     async fn get_hot_paths(
         &self,
         params: Parameters<CheckRuntimeCoverageParams>,
@@ -601,7 +607,10 @@ impl FallowMcp {
     }
 
     /// Return first-class blast-radius context alongside local runtime coverage. Pass `coverage` as a V8 coverage directory, single V8 JSON file, or Istanbul `coverage-final.json`. A single local capture is free and runs without a license; continuous or multi-capture runtime monitoring requires an active license. Returns the standard health JSON; agents should read `runtime_coverage.blast_radius`, which contains stable `fallow:blast:<hash>` IDs, caller counts, traffic-weighted caller reach, and low/medium/high risk bands. This blast-radius signal augments context only: it scores the RISK of changing a function. It MUST NOT gate `safe_to_delete` or a confidence score (a function having callers does not make it 'keep'); only the three-state runtime tracking signal (called / never_called / untracked) can issue a deletion verdict.
-    #[tool(annotations(read_only_hint = true, open_world_hint = true))]
+    #[tool(
+        meta = large_result_meta(),
+        annotations(read_only_hint = true, open_world_hint = true)
+    )]
     async fn get_blast_radius(
         &self,
         params: Parameters<CheckRuntimeCoverageParams>,
@@ -610,7 +619,10 @@ impl FallowMcp {
     }
 
     /// Return first-class production-importance context from local runtime coverage plus static health signals. Pass `coverage` as a V8 coverage directory, single V8 JSON file, or Istanbul `coverage-final.json`. A single local capture is free and runs without a license; continuous or multi-capture runtime monitoring requires an active license. Returns the standard health JSON; agents should read `runtime_coverage.importance`, which contains stable `fallow:importance:<hash>` IDs, invocations, cyclomatic complexity, owner count, a 0-100 score, and a templated reason. This importance signal augments context only. It MUST NOT gate `safe_to_delete` or a confidence score (a high or low score never decides deletion); only the three-state runtime tracking signal (called / never_called / untracked) can issue a deletion verdict.
-    #[tool(annotations(read_only_hint = true, open_world_hint = true))]
+    #[tool(
+        meta = large_result_meta(),
+        annotations(read_only_hint = true, open_world_hint = true)
+    )]
     async fn get_importance(
         &self,
         params: Parameters<CheckRuntimeCoverageParams>,
@@ -619,7 +631,10 @@ impl FallowMcp {
     }
 
     /// Return cleanup candidates grounded in local runtime coverage. Pass `coverage` as a V8 coverage directory, single V8 JSON file, or Istanbul `coverage-final.json`. A single local capture is free and runs without a license; continuous or multi-capture runtime monitoring requires an active license. Returns the standard health JSON; agents should read `runtime_coverage.findings` for `safe_to_delete`, `review_required`, `low_traffic`, and `coverage_unavailable` verdicts.
-    #[tool(annotations(read_only_hint = true, open_world_hint = true))]
+    #[tool(
+        meta = large_result_meta(),
+        annotations(read_only_hint = true, open_world_hint = true)
+    )]
     async fn get_cleanup_candidates(
         &self,
         params: Parameters<CheckRuntimeCoverageParams>,
