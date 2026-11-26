@@ -1399,6 +1399,7 @@ dependencies = [
  "fallow-types",
  "futures",
  "ls-types",
+ "memchr",
  "mimalloc",
  "oxc_syntax",
  "proptest",

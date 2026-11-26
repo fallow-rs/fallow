@@ -111,19 +111,15 @@ struct LineIndex {
 
 impl LineIndex {
     fn new(content: String) -> Self {
-        // The filtered iterator gives no size hint, so a collect grows the
+        // A newline iterator gives no exact size hint, so a collect grows the
         // vector by doubling. A realloc can copy the buffer, which makes the
-        // cost of a large file unstable. A count pass allocates once.
-        let line_count = content.bytes().filter(|&byte| byte == b'\n').count() + 1;
+        // cost of a large file unstable. A count pass allocates once, and
+        // memchr keeps both passes cheaper than one byte-by-byte scan.
+        let bytes = content.as_bytes();
+        let line_count = memchr::memchr_iter(b'\n', bytes).count() + 1;
         let mut line_starts = Vec::with_capacity(line_count);
         line_starts.push(0);
-        line_starts.extend(
-            content
-                .bytes()
-                .enumerate()
-                .filter(|&(_, byte)| byte == b'\n')
-                .map(|(offset, _)| offset + 1),
-        );
+        line_starts.extend(memchr::memchr_iter(b'\n', bytes).map(|offset| offset + 1));
         Self {
             content,
             line_starts,
