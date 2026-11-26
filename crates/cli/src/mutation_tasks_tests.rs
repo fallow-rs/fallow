@@ -309,3 +309,99 @@ fn a_witness_with_a_verdict_of_a_later_version_reads_as_absent() {
         crate::mutation_inspect::parse_saved_report(json.as_bytes()).expect("the report reads");
     assert!(report.mutants[0].witness.is_none());
 }
+
+fn scoped_report(scope: Option<serde_json::Value>) -> SavedReport {
+    let plus = find(SOURCE, "+", "-");
+    let mut value = serde_json::json!({
+        "kind": "mutation",
+        "schema_version": "2",
+        "completion": { "status": "complete", "reasons": [] },
+        "mutants": [
+            entry(&plus, "add", "survived", &[]),
+            status_entry("src/b.ts", "b", "killed"),
+            status_entry("src/a.ts", "a", "timeout"),
+        ],
+        "files": [
+            { "path": "src/math.ts", "source_sha256": sha256_hex(SOURCE.as_bytes()) },
+            { "path": "src/b.ts", "source_sha256": "00" },
+            { "path": "src/a.ts", "source_sha256": "00" },
+        ],
+    });
+    if let Some(scope) = scope {
+        value["scope"] = scope;
+    }
+    serde_json::from_value(value).unwrap()
+}
+
+fn tasks_json(report: &SavedReport) -> serde_json::Value {
+    let dir = project(SOURCE);
+    let output = tasks(report, dir.path(), &|_, _| None).unwrap();
+    fallow_output::serialize_mutation_tasks_json_output(output).unwrap()
+}
+
+#[test]
+fn the_scope_lists_each_mutated_file_also_without_a_task() {
+    let json = tasks_json(&scoped_report(Some(serde_json::json!({ "kind": "paths" }))));
+    assert_eq!(
+        json["scope"],
+        serde_json::json!({
+            "kind": "paths",
+            "files": ["src/a.ts", "src/b.ts", "src/math.ts"],
+        })
+    );
+}
+
+#[test]
+fn a_changed_scope_keeps_its_base_ref() {
+    let json = tasks_json(&scoped_report(Some(
+        serde_json::json!({ "kind": "changed", "base_ref": "origin/main" }),
+    )));
+    assert_eq!(json["scope"]["kind"], "changed");
+    assert_eq!(json["scope"]["base_ref"], "origin/main");
+    let all = tasks_json(&scoped_report(Some(serde_json::json!({ "kind": "all" }))));
+    assert_eq!(all["scope"]["kind"], "all");
+    assert!(all["scope"].get("base_ref").is_none());
+}
+
+#[test]
+fn a_report_without_a_known_scope_gives_no_scope() {
+    let json = tasks_json(&scoped_report(None));
+    assert!(json.get("scope").is_none());
+    let unknown = tasks_json(&scoped_report(Some(serde_json::json!({ "kind": "later" }))));
+    assert!(unknown.get("scope").is_none());
+}
+
+fn status_entry(file: &str, id: &str, status: &str) -> serde_json::Value {
+    serde_json::json!({
+        "mutant_id": id, "file": file, "line": 1, "column": 1, "span": [0, 1],
+        "operator": "x", "status": status,
+    })
+}
+
+#[test]
+fn the_scope_lists_only_files_with_a_run_result() {
+    let report: SavedReport = serde_json::from_value(serde_json::json!({
+        "kind": "mutation",
+        "schema_version": "2",
+        "completion": { "status": "partial", "reasons": ["mutant-limit"] },
+        "scope": { "kind": "all" },
+        "mutants": [
+            status_entry("src/killed.ts", "a", "killed"),
+            status_entry("src/pruned.ts", "b", "pruned"),
+            status_entry("src/pending.ts", "c", "pending"),
+            status_entry("src/changed-during-run.ts", "d", "no_coverage"),
+        ],
+        "files": [
+            { "path": "src/killed.ts", "source_sha256": "00" },
+            { "path": "src/pruned.ts", "source_sha256": "00" },
+            { "path": "src/pending.ts", "source_sha256": "00" },
+        ],
+    }))
+    .unwrap();
+    let json = tasks_json(&report);
+    assert_eq!(
+        json["scope"]["files"],
+        serde_json::json!(["src/changed-during-run.ts", "src/killed.ts"])
+    );
+    assert_eq!(json["tasks"][0]["file"], "src/changed-during-run.ts");
+}

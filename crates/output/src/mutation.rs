@@ -12,8 +12,10 @@ use serde::{Deserialize, Serialize};
 use crate::audit_test_reach::TestReachClass;
 use crate::gate_outcomes::GateOutcomes;
 pub use crate::mutation_plan_runner::MutationPlanRunner;
-use crate::mutation_replay::{
-    MutantWitness, MutationRecordingOutput, MutationReplayOutput, MutationTaskWitness,
+use crate::mutation_replay::{MutantWitness, MutationRecordingOutput, MutationReplayOutput};
+pub use crate::mutation_tasks::{
+    MutationTask, MutationTasksOutput, MutationTasksSchemaVersion, MutationTasksScope,
+    MutationTasksSummary, serialize_mutation_tasks_json_output,
 };
 use crate::root_envelopes::serialize_named_json_output;
 
@@ -1561,94 +1563,6 @@ pub struct MutationInspectOutput {
     pub replay: Option<MutationReplayOutput>,
 }
 
-/// Version singleton for the open tasks of a mutation report.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub enum MutationTasksSchemaVersion {
-    /// The first version.
-    #[serde(rename = "1")]
-    V1,
-}
-
-/// One open task: a `survived` or `no_coverage` mutant of a saved report.
-/// A task holds no source text other than the source lines of the mutant.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct MutationTask {
-    /// The id of the mutant. `fallow mutation inspect` takes this id.
-    pub mutant_id: String,
-    /// The project-root-relative path of the mutated file.
-    pub file: String,
-    /// The 1-based line of the mutant.
-    pub line: u32,
-    /// The 1-based column of the mutant.
-    pub column: u32,
-    /// The operator, kebab-case.
-    pub operator: String,
-    /// The name of the enclosing function. Absent at the top level of a
-    /// module and for an anonymous function.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub function: Option<String>,
-    /// `survived` or `no_coverage`.
-    pub status: MutantStatus,
-    /// The source lines that contain the mutant, from the current file.
-    /// `null` when the task is stale.
-    pub original_lines: Option<String>,
-    /// The same lines with the mutation applied. `null` when the task is
-    /// stale.
-    pub mutated_lines: Option<String>,
-    /// An advisory hint that the mutant may be equivalent. The task stays
-    /// open: a person decides, and records an equivalent mutant in a verdict
-    /// file.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub equivalence_hint: Option<MutantEquivalenceHint>,
-    /// Why the current file no longer gives the mutant. Absent for a fresh
-    /// task.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub stale_reason: Option<MutationStaleReason>,
-    /// The test files of the tests that reached the mutant in the dry run,
-    /// sorted. Empty for `no_coverage`. `fallow mutation inspect` gives the
-    /// test ids and the static test files of one mutant.
-    pub covering_test_files: Vec<String>,
-    /// The witness of the task: a recorded input that shows a difference, with
-    /// the results of both sides. Present only after a `--record-args
-    /// values` run.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub witness: Option<MutationTaskWitness>,
-}
-
-/// The number of tasks for each status.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct MutationTasksSummary {
-    /// The number of tasks.
-    pub tasks: usize,
-    /// The tasks with the status `survived`.
-    pub survived: usize,
-    /// The tasks with the status `no_coverage`.
-    pub no_coverage: usize,
-    /// The tasks whose file changed after the report. They have no code.
-    pub stale: usize,
-}
-
-/// The envelope of `fallow mutation tasks`: the open tasks of one saved
-/// report, as one batch. It runs no user code.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct MutationTasksOutput {
-    /// Independent schema version.
-    pub schema_version: MutationTasksSchemaVersion,
-    /// The Fallow version.
-    pub version: ToolVersion,
-    /// The completion status of the report. A `partial` report can miss
-    /// tasks: a `pending` mutant is not a task.
-    pub report_completion: Option<MutationCompletionStatus>,
-    /// The counts of the tasks.
-    pub summary: MutationTasksSummary,
-    /// The tasks, sorted by file, line, column and mutant id.
-    pub tasks: Vec<MutationTask>,
-}
-
 /// Serialize a mutation report with its root discriminator.
 ///
 /// # Errors
@@ -1669,18 +1583,6 @@ pub fn serialize_mutation_plan_json_output(
     output: MutationPlanOutput,
 ) -> Result<serde_json::Value, serde_json::Error> {
     serialize_named_json_output(output, "mutation-plan")
-}
-
-/// Serialize the open tasks of a mutation report with their root
-/// discriminator.
-///
-/// # Errors
-///
-/// Returns a serde error when the envelope cannot be converted to JSON.
-pub fn serialize_mutation_tasks_json_output(
-    output: MutationTasksOutput,
-) -> Result<serde_json::Value, serde_json::Error> {
-    serialize_named_json_output(output, "mutation-tasks")
 }
 
 /// Serialize a mutation inspect packet with its root discriminator.

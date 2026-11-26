@@ -37589,6 +37589,17 @@
           ],
           "description": "The completion status of the report. A `partial` report can miss\ntasks: a `pending` mutant is not a task."
         },
+        "scope": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/MutationTasksScope"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The scope of the run of the report. Absent when the report has no\nscope of a kind that this version knows."
+        },
         "summary": {
           "description": "The counts of the tasks.",
           "$ref": "#/definitions/MutationTasksSummary"
@@ -40803,6 +40814,34 @@
         "actions"
       ],
       "description": "Wire-shape envelope for a [`TestOnlyExport`] finding under the\n`test_only_exports` key.\n\nBoth fix actions are manual. A removal of the export also breaks the\ntest-side files that import it, so `fallow fix` never applies one."
+    },
+    "MutationTasksScope": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "description": "The kind of scope of the run.",
+          "$ref": "#/definitions/MutationScopeKind"
+        },
+        "base_ref": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The base ref of a `changed` scope."
+        },
+        "files": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The project-root-relative paths of the files with a mutant result in\nthe report, sorted. A result is each status other than `pruned` and\n`pending`. The list also has the files without a task."
+        }
+      },
+      "required": [
+        "kind",
+        "files"
+      ],
+      "description": "The scope of the run of a tasks batch. A mutant of a file in `files`\nthat is not a task is gone from the open tasks: a test killed it, or the\nreport gives it another status that is not open. In a `partial` report\n(see `report_completion`) that status can be `pending`. A mutant of a file\noutside `files` has no result in the report."
     }
   }
 }
