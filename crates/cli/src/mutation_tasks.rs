@@ -12,8 +12,8 @@ use std::fmt::Write as _;
 use std::path::Path;
 
 use fallow_output::{
-    MutantStatus, MutationTask, MutationTaskWitness, MutationTasksOutput,
-    MutationTasksSchemaVersion, MutationTasksSummary,
+    MutantStatus, MutationScopeKind, MutationTask, MutationTaskWitness, MutationTasksOutput,
+    MutationTasksSchemaVersion, MutationTasksScope, MutationTasksSummary,
 };
 use fallow_types::envelope::ToolVersion;
 
@@ -78,9 +78,43 @@ pub fn tasks(
             .completion
             .as_ref()
             .map(|completion| completion.status),
+        scope: run_scope(report),
         summary: summary(&tasks),
         tasks,
     })
+}
+
+/// The scope of the run of `report`, with the paths of its mutated files: each
+/// file with a mutant that has a run result. A `pruned` or `pending` mutant
+/// has no run result, so a file with only such mutants is not listed. Each
+/// task file is listed. `None` for a report without a scope, or with a scope
+/// kind that this build does not know.
+fn run_scope(report: &SavedReport) -> Option<MutationTasksScope> {
+    let saved = report.scope.as_ref()?;
+    let kind = match saved.kind.as_str() {
+        "changed" => MutationScopeKind::Changed,
+        "all" => MutationScopeKind::All,
+        "paths" => MutationScopeKind::Paths,
+        _ => return None,
+    };
+    let files: std::collections::BTreeSet<&str> = report
+        .mutants
+        .iter()
+        .filter(|mutant| has_run_result(mutant))
+        .map(|mutant| mutant.file.as_str())
+        .collect();
+    Some(MutationTasksScope {
+        kind,
+        base_ref: saved.base_ref.clone(),
+        files: files.into_iter().map(str::to_owned).collect(),
+    })
+}
+
+fn has_run_result(mutant: &SavedMutant) -> bool {
+    !matches!(
+        mutant.status,
+        None | Some(MutantStatus::Pruned | MutantStatus::Pending)
+    )
 }
 
 /// The cached values of a witness: the arguments and the result of each side.

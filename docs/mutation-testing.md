@@ -2439,6 +2439,16 @@ person or a coding agent writes. `tasks` runs no code.
   the tasks, the `survived` and `no_coverage` tasks, and the stale tasks.
   `report_completion` is the completion status of the report: a `partial`
   report can miss tasks, because a `pending` mutant is not a task.
+- `scope` is the scope of the run of the report: `kind` (`changed`, `all` or
+  `paths`), the `base_ref` of a `changed` scope, and `files`. `files` lists
+  each file with a mutant result in the report, sorted, also a file without
+  a task. A result is each status other than `pruned` and `pending`. A mutant
+  of a listed file that is not a task left the open tasks: a test killed it,
+  or the report gives it another status that is not open. A mutant of a file
+  that is not listed has no result in the report. In a `partial` report a
+  listed file can still have a `pending` mutant. After a `--recheck`, the
+  report keeps the results of the earlier run, so their files stay listed.
+  `scope` is absent when the report has no scope.
 - The exit code is `0`, also when the batch has tasks. The gate of a run is
   `--min-score`. A task path outside the project root fails the command with
   code 2 and `FALLOW_MUTATION_REPORT_INVALID`, as for `inspect`.

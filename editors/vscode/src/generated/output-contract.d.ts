@@ -23758,6 +23758,11 @@ version: ToolVersion
  * tasks: a `pending` mutant is not a task.
  */
 report_completion?: (MutationCompletionStatus | null)
+/**
+ * The scope of the run of the report. Absent when the report has no
+ * scope of a kind that this version knows.
+ */
+scope?: (MutationTasksScope | null)
 summary: MutationTasksSummary
 /**
  * The tasks, sorted by file, line, column and mutant id.
@@ -23767,6 +23772,26 @@ tasks: MutationTask[]
  * Output discriminator. The root envelope always has the value `mutation-tasks`. An envelope nested in another envelope has no `kind`.
  */
 kind?: "mutation-tasks"
+}
+/**
+ * The scope of the run of a tasks batch. A mutant of a file in `files`
+ * that is not a task is gone from the open tasks: a test killed it, or the
+ * report gives it another status that is not open. In a `partial` report
+ * (see `report_completion`) that status can be `pending`. A mutant of a file
+ * outside `files` has no result in the report.
+ */
+export interface MutationTasksScope {
+kind: MutationScopeKind
+/**
+ * The base ref of a `changed` scope.
+ */
+base_ref?: (string | null)
+/**
+ * The project-root-relative paths of the files with a mutant result in
+ * the report, sorted. A result is each status other than `pruned` and
+ * `pending`. The list also has the files without a task.
+ */
+files: string[]
 }
 /**
  * The number of tasks for each status.

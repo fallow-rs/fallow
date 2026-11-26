@@ -9,6 +9,7 @@ pub const MUTATION_DEFINITION_NAMES: &[&str] = &[
     "MutationTasksSchemaVersion",
     "MutationTask",
     "MutationTasksSummary",
+    "MutationTasksScope",
     "MutationVerdictInput",
     "MutationSchemaVersion",
     "MutationPlanSchemaVersion",

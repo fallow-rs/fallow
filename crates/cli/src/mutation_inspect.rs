@@ -71,6 +71,9 @@ pub struct SavedSummary {
 pub struct SavedScope {
     /// The wire name of the scope kind, for example `changed`.
     pub kind: String,
+    /// The base ref of a `changed` scope.
+    #[serde(default)]
+    pub base_ref: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
