@@ -968,3 +968,124 @@ fn sibling_require_namespace_does_not_keep_credit_for_catch_shadow() {
         info.whole_object_uses
     );
 }
+
+/// Issue #5231: a dotted read on a local that shadows a namespace import is
+/// not a read of the import. Each source declares a local `e` in a scope form
+/// that a name-based scope stack misses, and reads `message` on it.
+#[test]
+fn shadowing_local_member_read_is_not_a_namespace_member_access() {
+    let cases = [
+        (
+            "catch parameter",
+            "export const run = () => { try { e.a(); } catch (e) { return e.message; } };",
+        ),
+        (
+            "catch parameter with a computed key",
+            "export const run = () => { try { e.a(); } catch (e) { return e['message']; } };",
+        ),
+        (
+            "catch parameter with a chain",
+            "export const run = () => { try { e.a(); } catch (e) { return e.message.length; } };",
+        ),
+        (
+            "static block",
+            "e.a(); export class C { static { const e = { message: 1 }; console.log(e.message); } }",
+        ),
+    ];
+    for (form, body) in cases {
+        let info = parse_source(&format!("import * as e from './errors';\n{body}"));
+        assert!(
+            !info
+                .member_accesses
+                .iter()
+                .any(|access| access.object == "e" && access.member == "message"),
+            "a {form} named `e` must not read `message` of the import, found: {:?}",
+            info.member_accesses
+        );
+        assert!(
+            info.member_accesses
+                .iter()
+                .any(|access| access.object == "e" && access.member == "a"),
+            "{form}: the read of the import itself must stay recorded"
+        );
+    }
+}
+
+/// Issue #5231: a dotted read through the import binding still counts when
+/// a shadowing local of the same name exists in another scope of the file.
+#[test]
+fn namespace_member_read_survives_shadowing_catch_parameter() {
+    let info = parse_source(
+        "import * as e from './errors';
+        export const run = () => {
+            try { return e.message; } catch (e) { return String(e); }
+        };",
+    );
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|access| access.object == "e" && access.member == "message"),
+        "the read of the import binding must stay recorded, found: {:?}",
+        info.member_accesses
+    );
+}
+
+/// Issue #5231: a deferred read on a namespace import keeps the walk-time
+/// scope facts. A nested class binding with the import name in another
+/// function must not credit the class with the module-scope read.
+#[test]
+fn deferred_namespace_read_does_not_credit_later_nested_class_binding() {
+    let info = parse_source(
+        "import * as NS from './x';
+        import { Foo } from './foo';
+        NS.bar;
+        export function f() { const NS = new Foo(); return NS; }",
+    );
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|access| access.object == "NS" && access.member == "bar"),
+        "the read of the import must stay recorded, found: {:?}",
+        info.member_accesses
+    );
+    assert!(
+        !info
+            .member_accesses
+            .iter()
+            .any(|access| access.object == "Foo" && access.member == "bar"),
+        "the module-scope read must not credit the nested class binding, found: {:?}",
+        info.member_accesses
+    );
+}
+
+/// Issue #5231: a call or index link after the root still finds the root
+/// identifier, so a shadowing local is not a read of the import.
+#[test]
+fn shadowing_local_with_call_or_index_link_is_not_a_namespace_member_access() {
+    for body in [
+        "export const run = () => { try { e.a(); } catch (e) { return e().message; } };",
+        "export const run = () => { try { e.a(); } catch (e) { return e[0].message; } };",
+    ] {
+        let info = parse_source(&format!("import * as e from './errors';\n{body}"));
+        assert!(
+            !info
+                .member_accesses
+                .iter()
+                .any(|access| access.object.starts_with('e') && access.member == "message"),
+            "`{body}` must not read `message` of the import, found: {:?}",
+            info.member_accesses
+        );
+        assert!(
+            !info.whole_object_uses.contains(&"e".to_string()),
+            "`{body}` must not use the whole import"
+        );
+    }
+}
+
+#[test]
+fn computed_read_with_unknown_key_uses_the_whole_namespace_import() {
+    let info = parse_source(
+        "import * as e from './errors';\nexport const run = (k: string) => { try { e.a(); } catch (x) { return e[k]; } };",
+    );
+    assert!(info.whole_object_uses.contains(&"e".to_string()));
+}

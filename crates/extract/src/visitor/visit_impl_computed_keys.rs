@@ -181,14 +181,20 @@ impl ModuleInfoExtractor {
         }
         match self.computed_key_members(&expr.expression) {
             Some(members) => {
+                let root_span = super::visit_chain_names::receiver_root_span(&expr.object);
                 for member in members {
-                    self.record_named_member_access(&object_name, &member);
+                    self.record_named_member_access_at(&object_name, &member, root_span);
                 }
                 if let Expression::Identifier(obj) = &expr.object {
                     self.mark_structured_namespace_reference(obj);
                 }
             }
-            None => self.record_whole_object_identifier_use(&object_name),
+            None => match &expr.object {
+                Expression::Identifier(obj) => {
+                    self.record_namespace_whole_object_use(obj.span, &object_name);
+                }
+                _ => self.record_whole_object_identifier_use(&object_name),
+            },
         }
     }
 

@@ -1421,7 +1421,12 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                 member: expr.property.name.to_string(),
             });
         } else if let Some(object_name) = call_receiver_name(&expr.object) {
-            self.record_named_member_access(&object_name, expr.property.name.as_str());
+            let root_span = visit_chain_names::receiver_root_span(&expr.object);
+            self.record_named_member_access_at(
+                &object_name,
+                expr.property.name.as_str(),
+                root_span,
+            );
         } else if let Expression::ComputedMemberExpression(receiver) = &expr.object
             && receiver.static_property_name().is_none()
             && let Some(object_name) = static_member_object_name(&receiver.object)

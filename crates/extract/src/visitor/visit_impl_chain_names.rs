@@ -42,6 +42,34 @@ pub(super) fn call_receiver_name(expr: &Expression<'_>) -> Option<String> {
     member_chain_name(expr, true)
 }
 
+/// The span of the root identifier of the receiver chain that
+/// [`call_receiver_name`] reads, through the same wrappers and links.
+pub(super) fn receiver_root_span(expr: &Expression<'_>) -> Option<oxc_span::Span> {
+    let mut current = expr;
+    loop {
+        crate::cost::walk_step();
+        current = match current {
+            Expression::Identifier(root) => return Some(root.span),
+            Expression::ParenthesizedExpression(wrapper) => &wrapper.expression,
+            Expression::TSAsExpression(wrapper) => &wrapper.expression,
+            Expression::TSTypeAssertion(wrapper) => &wrapper.expression,
+            Expression::TSSatisfiesExpression(wrapper) => &wrapper.expression,
+            Expression::TSNonNullExpression(wrapper) => &wrapper.expression,
+            Expression::StaticMemberExpression(member) => &member.object,
+            Expression::ComputedMemberExpression(member) => &member.object,
+            Expression::PrivateFieldExpression(member) => &member.object,
+            Expression::CallExpression(call) => &call.callee,
+            Expression::ChainExpression(chain) => match &chain.expression {
+                ChainElement::CallExpression(call) => &call.callee,
+                ChainElement::StaticMemberExpression(member) => &member.object,
+                ChainElement::ComputedMemberExpression(member) => &member.object,
+                _ => return None,
+            },
+            _ => return None,
+        };
+    }
+}
+
 /// `expr` is a method call on a member callee, plain (`p.rotate(1)`) or
 /// optional (`p?.rotate(1)`). `call_receiver_name` gives a `()` path for both.
 pub(super) fn is_member_call(expr: &Expression<'_>) -> bool {
