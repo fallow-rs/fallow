@@ -74,15 +74,32 @@ gate_skip_not_git_write() {
   exit 0
 }
 
-# The hook runs on every Bash tool call. The gate reads the hook input with
-# the read builtin and keeps it in a variable. A plain pattern on the raw hook
-# input then skips a command that cannot be a git commit or push, before the
-# gate starts any program. A git write puts `git` before `commit`, `push` or
-# an expansion in the command text. The match drops quote and backslash
+# Returns 0 when the raw hook input $1 can hold a git commit or push: it has a
+# `commit` or `push` word, or `git` before an expansion, a brace, a glob or a
+# backquote, in any letter case. A program name from an expansion or a glob
+# (`$G commit`, `g?t push`) still has the `commit` or `push` word. The match drops quote and backslash
 # characters first, as gate_loose_write does, so `g''it commit` still goes to
 # the exact parse. A JSON `\u` escape can hide a word, so such a hook input
-# always goes there too. A hook input over GATE_SMALL_INPUT_LIMIT characters
-# also goes to the exact parse.
+# always goes there too.
+gate_input_can_write() {
+  local hit=1
+  case "$1" in
+    *'\u'*) return 0 ;;
+  esac
+  gate_replace "$1" "[\\'\"\\\\]" ""
+  shopt -s nocasematch
+  case "$GATE_OUT" in
+    *commit* | *push* | *git*[\$\{\`\?\*\[]*) hit=0 ;;
+  esac
+  shopt -u nocasematch
+  return "$hit"
+}
+
+# The hook runs on every Bash tool call. The gate reads the hook input with
+# the read builtin and keeps it in a variable. gate_input_can_write on the raw
+# hook input then skips a command that cannot be a git commit or push, before
+# the gate starts any program. A hook input over GATE_SMALL_INPUT_LIMIT
+# characters always goes to the exact parse.
 # A hook runner can give a socket as stdin. On macOS, /dev/stdin opens a
 # socket, and `$(<file)` reads it in blocks without a program. On Linux,
 # /dev/stdin cannot open a socket, so the gate reads file descriptor 0 with
@@ -108,17 +125,8 @@ case "${OSTYPE:-}" in
     fi
     ;;
 esac
-if [ "${#INPUT}" -le "$GATE_SMALL_INPUT_LIMIT" ]; then
-  case "$INPUT" in
-    *'\u'*) ;;
-    *)
-      gate_replace "$INPUT" "[\\'\"\\\\]" ""
-      case "$GATE_OUT" in
-        *git*commit* | *git*push* | *git*'$'*) ;;
-        *) gate_skip_not_git_write ;;
-      esac
-      ;;
-  esac
+if [ "${#INPUT}" -le "$GATE_SMALL_INPUT_LIMIT" ] && ! gate_input_can_write "$INPUT"; then
+  gate_skip_not_git_write
 fi
 
 # PATH rules. The gate looks up every program, also cat, git and jq, only in
@@ -337,27 +345,63 @@ gate_block_target() {
 }
 
 # Blocks the command when the trees of the targets hold the fallow that the
-# install recorded, or a program in the arguments (fallow, git or jq) that the
-# gate finds on PATH without them. With a recorded fallow, the fallow on PATH
-# does not count. The audit cannot then run with
-# a program that the gate trusts.
+# install recorded, or a program in the arguments that the gate finds on PATH
+# without them. The arguments are fallow, git, jq and each helper in
+# GATE_RAN_TOOLS. With a recorded fallow, the fallow on PATH does not count.
+# The audit cannot then run with a program that the gate trusts, or a helper
+# already ran from a target tree.
 gate_check_targets() {
-  local tool before after
+  local tool before after wide
   local -a saved=(${GATE_TARGET_EXCLUDED[@]+"${GATE_TARGET_EXCLUDED[@]}"})
   if [ -n "$GATE_LOCAL_FALLOW" ] && gate_runner_excluded "$GATE_LOCAL_FALLOW"; then
     gate_block_target fallow "$GATE_LOCAL_FALLOW"
   fi
+  # PATH keeps the target exclusions during the lookups, so a readlink of
+  # the shim check never comes from a target tree.
+  GATE_TARGET_EXCLUDED=()
+  gate_filter_path
+  wide="$PATH"
+  GATE_TARGET_EXCLUDED=(${saved[@]+"${saved[@]}"})
+  gate_filter_path
   for tool in "$@"; do
     # The recorded fallow runs before the fallow on PATH.
     [ "$tool" != fallow ] || [ -z "$GATE_LOCAL_FALLOW" ] || continue
-    GATE_TARGET_EXCLUDED=()
-    gate_filter_path
-    before="$(gate_find_tool "$tool" || true)"
-    GATE_TARGET_EXCLUDED=(${saved[@]+"${saved[@]}"})
-    gate_filter_path
-    after="$(gate_find_tool "$tool" || true)"
-    [ -n "$before" ] && [ "$after" != "$before" ] || continue
-    gate_block_target "$tool" "$before"
+    before="$(gate_find_tool "$tool" "$wide" || true)"
+    after="$(gate_find_tool "$tool" "$PATH" || true)"
+    if [ -n "$before" ] && [ "$after" != "$before" ]; then
+      gate_block_target "$tool" "$before"
+    fi
+    # A PATH directory outside every target can hold a link into a target
+    # tree, so each hop of the link chain of a helper counts. The fallow
+    # lookup keeps its own rules: a developer build that a global link names
+    # stays usable.
+    [ "$tool" != fallow ] || continue
+    [ -z "$before" ] || ! gate_link_hop_excluded "$before" || gate_block_target "$tool" "$GATE_HOP"
+  done
+}
+
+# Returns 0 when a target tree holds the directory of file $1 or of a hop of
+# its link chain, as found or resolved, and sets GATE_HOP to that hop. A link
+# that readlink cannot read, or a chain of more than 40 links, counts as held.
+gate_link_hop_excluded() {
+  local file="$1" link hops=0
+  while :; do
+    GATE_HOP="$file"
+    gate_target_only "${file%/*}" && return 0
+    if gate_resolve_dir "${file%/*}"; then
+      gate_target_only "$RESOLVED" && return 0
+    fi
+    [ -L "$file" ] || return 1
+    # Without readlink the chain cannot be followed. The PATH filter still
+    # removes each target tree, so the check ends here.
+    command -v readlink >/dev/null 2>&1 || return 1
+    hops=$((hops + 1))
+    [ "$hops" -le 40 ] || return 0
+    link="$(readlink -- "$file" 2>/dev/null)" || return 0
+    case "$link" in
+      /* | [A-Za-z]:[\\/]*) file="$link" ;;
+      *) file="${file%/*}/$link" ;;
+    esac
   done
 }
 
@@ -423,29 +467,36 @@ gate_is_shim() {
   return "$hit"
 }
 
-# Prints the path of the first fallow on PATH that is not a version-manager
-# shim, or returns 1.
-gate_find_fallow() {
+# Prints the path of the first program $1 in the absolute entries of the
+# search list $2 (default PATH), or returns 1. With `fallow` as $3, the
+# function skips a version-manager shim.
+gate_find_in() {
   local entry
   local -a entries=()
-  IFS=: read -r -a entries <<<"$PATH"
+  IFS=: read -r -a entries <<<"${2:-$PATH}"
   for entry in ${entries[@]+"${entries[@]}"}; do
     case "$entry" in
       /* | [A-Za-z]:[\\/]*) ;;
       *) continue ;;
     esac
-    [ -f "$entry/fallow" ] && [ -x "$entry/fallow" ] || continue
-    gate_is_shim "$entry/fallow" && continue
-    printf '%s\n' "$entry/fallow"
+    [ -f "$entry/$1" ] && [ -x "$entry/$1" ] || continue
+    [ "${3:-}" != fallow ] || ! gate_is_shim "$entry/$1" || continue
+    printf '%s\n' "$entry/$1"
     return 0
   done
   return 1
 }
 
-# Prints the path of the program $1 that the gate runs: gate_find_fallow for
-# fallow, else the program on PATH.
+# Prints the path of the first fallow on PATH that is not a version-manager
+# shim, or returns 1.
+gate_find_fallow() {
+  gate_find_in fallow "$PATH" fallow
+}
+
+# Prints the path of the program $1 in the search list $2 that the gate runs.
+# For fallow, a version-manager shim does not count.
 gate_find_tool() {
-  if [ "$1" = fallow ]; then gate_find_fallow; else gate_which "$1"; fi
+  gate_find_in "$1" "$2" "$1"
 }
 
 # The install scope and the fallow of this gate. Fallow writes both values
@@ -461,6 +512,9 @@ GATE_FALLOW_BIN='@@FALLOW_GATE_BIN@@'
 
 GATE_INSTALL_ROOT=""
 GATE_LOCAL_FALLOW=""
+# The helper programs that the gate ran before it knew every target tree.
+# gate_check_targets blocks when a target tree holds one of them.
+GATE_RAN_TOOLS=()
 GATE_SCRIPT_DIR="${BASH_SOURCE[0]%/*}"
 [ "$GATE_SCRIPT_DIR" != "${BASH_SOURCE[0]}" ] || GATE_SCRIPT_DIR=.
 if [ "$GATE_SCOPE" = project ] && gate_resolve_dir "$GATE_SCRIPT_DIR/../.."; then
@@ -476,6 +530,7 @@ if [ "$GATE_SCOPE" = project ]; then
 else
   case "$GATE_FALLOW_BIN" in
     /* | [A-Za-z]:[\\/]*)
+      [ ! -L "$GATE_FALLOW_BIN" ] || GATE_RAN_TOOLS+=(readlink)
       if [ -x "$GATE_FALLOW_BIN" ] && ! gate_is_shim "$GATE_FALLOW_BIN"; then
         GATE_LOCAL_FALLOW="$GATE_FALLOW_BIN"
       fi
@@ -490,7 +545,9 @@ gate_git() {
   git -c safe.bareRepository=explicit "$@"
 }
 
-GATE_PATH_FALLOW="$(gate_find_fallow || true)"
+# The gate looks for the fallow on PATH only after it knows the targets of
+# the command, because the lookup can run readlink.
+GATE_PATH_FALLOW=""
 
 GATE_JSON_RUNNER=()
 GATE_JSON_DIR=""
@@ -503,6 +560,10 @@ gate_try_json_runner() {
   local anchor="$1" probe
   shift
   ! gate_runner_excluded "$1" || return 1
+  case "$1" in
+    /* | [A-Za-z]:[\\/]*) ;;
+    *) GATE_RAN_TOOLS+=("$1") ;;
+  esac
   # A probe never gets the hook stdin, so a launcher cannot read the payload.
   probe="$(CDPATH='' cd -P "$anchor" && "$@" hooks gate-runtime probe </dev/null 2>/dev/null)" || return 1
   [ "$probe" = fallow-gate-json-v1 ] || return 1
@@ -762,6 +823,16 @@ gate_mark_subshells() {
   printf '%s' "${parts[@]}"
 }
 
+# Returns 0 when the word $1 runs git: `git` in any letter case, with or
+# without the `.exe` suffix of Git for Windows, as a name or as the last part
+# of a path. A file system that ignores letter case runs git for `GIT` too.
+gate_git_word() {
+  case "$1" in
+    [Gg][Ii][Tt] | */[Gg][Ii][Tt] | [Gg][Ii][Tt].[Ee][Xx][Ee] | */[Gg][Ii][Tt].[Ee][Xx][Ee]) return 0 ;;
+  esac
+  return 1
+}
+
 is_git_write_command() {
   local cmd="$1" segment cd_dir="" dir value found=1 track=1 separators=';|&'
   local open_mark=$'\001(' close_mark=$'\001)'
@@ -803,7 +874,7 @@ is_git_write_command() {
       GIT_WRITE_CANDIDATES+=("$cd_dir")
     fi
     while [ "$#" -gt 0 ]; do
-      if [ "$1" != "git" ]; then
+      if ! gate_git_word "$1"; then
         # A git location prefix names a candidate too.
         case "$1" in
           GIT_WORK_TREE=?*)
@@ -848,6 +919,13 @@ is_git_write_command() {
             # (-cuser.name=x).
             shift
             continue
+            ;;
+          *[\$\{\`\?\*\[]*)
+            # An expansion, a brace or a glob can make the subcommand a
+            # write (`git c{o,}mmit`, `git co${x}mit`).
+            found=0
+            [ -n "$dir" ] && GIT_WRITE_CANDIDATES+=("$dir")
+            break
             ;;
           *)
             # A different subcommand; resume scanning for a later `git` word.
@@ -896,7 +974,7 @@ gate_loose_write() {
     # Intentional word splitting; globbing is disabled below.
     # shellcheck disable=SC2086
     for word in $segment; do
-      if [ "$word" = git ]; then
+      if gate_git_word "$word"; then
         seen_git=1
         continue
       fi
@@ -909,6 +987,26 @@ gate_loose_write() {
     done
   done <<<"$text"
   return 1
+}
+
+# Returns 0 for a command that the two checks above cannot read and that
+# holds a `commit` or `push` word in any letter case. Such a command names a
+# program or a word with an expansion, a brace, a glob or a backquote
+# (`$G commit`, `git {commit,status}`, `g?t push`), so the gate counts it as a
+# possible git write and the trusted fallow audits it.
+gate_unread_write() {
+  local hit=1
+  case "$1" in
+    *[\$\{\`\?\*\[]*) ;;
+    *) return 1 ;;
+  esac
+  gate_replace "$1" "[\\'\"\\\\]" ""
+  shopt -s nocasematch
+  case "$GATE_OUT" in
+    *commit* | *push*) hit=0 ;;
+  esac
+  shopt -u nocasematch
+  return "$hit"
 }
 
 # The exact check below reads `tool_input.command` before the gate starts any
@@ -943,25 +1041,16 @@ else
     GATE_REST="${GATE_REST#*"$GATE_MATCH"}"
   done
   GATE_PATH_FALLOW="$(gate_find_fallow || true)"
+  GATE_RAN_TOOLS+=(readlink)
   if [ -n "$GATE_LOCAL_FALLOW" ] && gate_try_json_runner "$PWD" "$GATE_LOCAL_FALLOW"; then
     GATE_INPUT_READER="$GATE_LOCAL_FALLOW"
   elif GATE_INPUT_READER="$(gate_which jq)"; then
-    :
+    GATE_RAN_TOOLS+=(jq)
   elif [ -n "$GATE_PATH_FALLOW" ] && gate_try_json_runner "$PWD" "$GATE_PATH_FALLOW"; then
     GATE_INPUT_READER="$GATE_PATH_FALLOW"
   else
     GATE_INPUT_READER=""
-    case "$INPUT" in
-      *'\u'*) GATE_MAYBE_WRITE=1 ;;
-      *)
-        gate_replace "$INPUT" "[\\'\"\\\\]" ""
-        case "$GATE_OUT" in
-          *git*commit* | *git*push* | *git*'$'*) GATE_MAYBE_WRITE=1 ;;
-          *) GATE_MAYBE_WRITE=0 ;;
-        esac
-        ;;
-    esac
-    if [ "$GATE_MAYBE_WRITE" -eq 1 ]; then
+    if gate_input_can_write "$INPUT"; then
       {
         echo "fallow-gate: blocked: the hook input needs jq or a fallow outside the project to read it, and the command can be a git commit or push."
         echo "fallow-gate: install jq, or install fallow outside the project."
@@ -977,6 +1066,7 @@ elif [ "$GATE_INPUT_READER" != "${GATE_JSON_RUNNER[0]:-}" ]; then
   CMD="$("$GATE_INPUT_READER" -r '.tool_input.command // empty' <<<"$INPUT")"
   SESSION_CWD="$("$GATE_INPUT_READER" -r '.cwd // empty' <<<"$INPUT" 2>/dev/null || true)"
 else
+  GATE_RAN_TOOLS+=(mktemp rm)
   GATE_INPUT="$(mktemp)"
   if ! gate_json input <<<"$INPUT" >"$GATE_INPUT"; then
     rm -f "$GATE_INPUT"
@@ -994,7 +1084,6 @@ fi
 # the gate blocks. The trusted fallow of the install stays trusted.
 if [ -n "$SESSION_CWD" ] && [ -d "$SESSION_CWD" ]; then
   gate_exclude_tree "$SESSION_CWD" "" self
-  GATE_PATH_FALLOW="$(gate_find_fallow || true)"
   case "$GATE_INPUT_READER" in
     "$GATE_LOCAL_FALLOW" | "") ;;
     /* | [A-Za-z]:[\\/]*)
@@ -1011,7 +1100,7 @@ if [ -n "$SESSION_CWD" ] && [ -d "$SESSION_CWD" ]; then
 fi
 
 set -f
-if is_git_write_command "$CMD" || gate_loose_write "$CMD"; then
+if is_git_write_command "$CMD" || gate_loose_write "$CMD" || gate_unread_write "$CMD"; then
   GIT_WRITE=1
 else
   GIT_WRITE=0
@@ -1029,7 +1118,9 @@ for GATE_CANDIDATE in ${GIT_WRITE_CANDIDATES[@]+"${GIT_WRITE_CANDIDATES[@]}"}; d
 done
 # A JSON reader that the gate found before the targets were known can lie in
 # a target tree. The check runs before the next reader probe.
-gate_check_targets fallow git
+gate_check_targets fallow git ${GATE_RAN_TOOLS[@]+"${GATE_RAN_TOOLS[@]}"}
+# A later audit root can add a tree after the programs below ran.
+GATE_RAN_TOOLS+=(readlink dirname basename)
 GATE_PATH_FALLOW="$(gate_find_fallow || true)"
 if [ "${#GATE_JSON_RUNNER[@]}" -gt 0 ] && gate_runner_excluded "${GATE_JSON_RUNNER[0]}"; then
   GATE_JSON_RUNNER=()
@@ -1464,7 +1555,7 @@ if [ "$GATE_TARGET_COUNT" -gt "$GATE_CHECKED_COUNT" ]; then
     GATE_PATH_FALLOW="$(gate_find_fallow || true)"
     gate_find_json_runner || true
   fi
-  GATE_CHECK_TOOLS=(fallow git)
+  GATE_CHECK_TOOLS=(fallow git "${GATE_RAN_TOOLS[@]}")
   [ "${#GATE_JSON_RUNNER[@]}" -gt 0 ] || GATE_CHECK_TOOLS+=(jq)
   gate_check_targets "${GATE_CHECK_TOOLS[@]}"
 fi

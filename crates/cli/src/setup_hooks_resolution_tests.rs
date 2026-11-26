@@ -497,6 +497,117 @@ fn gate_runs_no_fallow_for_a_command_that_is_not_a_git_write() {
     );
 }
 
+/// Runs the gate for `command` and returns whether it ran the fallow on PATH
+/// for the audit, with the exit code and stderr.
+fn gate_audits(command: &str) -> (bool, Option<i32>, String) {
+    let tmp = tempdir().unwrap();
+    let base = tmp.path().canonicalize().unwrap();
+    let project = base.join("project");
+    std::fs::create_dir_all(&project).unwrap();
+    let log = base.join("calls.log");
+    logging_stub(&base.join("bin/fallow"), "path", &log);
+    let input = serde_json::json!({ "cwd": project, "tool_input": { "command": command } });
+
+    let output = probe_gate(
+        &render_gate_script(true, None),
+        &base.join("home/.claude/hooks/fallow-gate.sh"),
+        &project,
+        &base.join("bin"),
+        input.to_string().as_bytes(),
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+    (
+        calls(&log).contains("path --version"),
+        output.status.code(),
+        stderr,
+    )
+}
+
+fn assert_gate_audits(commands: &[&str]) {
+    for command in commands {
+        let (audited, code, stderr) = gate_audits(command);
+        assert!(audited, "gate must audit {command:?}: {stderr}");
+        assert_eq!(code, Some(2), "{command:?}: {stderr}");
+    }
+}
+
+#[test]
+fn gate_audits_a_brace_expansion_with_a_write_word() {
+    assert_gate_audits(&[
+        "git {commit,status} -m x",
+        "git {status,push}",
+        "git c{o,}mmit -m x",
+    ]);
+}
+
+#[test]
+fn gate_audits_a_program_name_from_a_variable() {
+    assert_gate_audits(&[
+        "G=git; $G commit -m x",
+        "${G} push",
+        "`echo git` push",
+        "git co${x}mit -m x",
+        "git -C . $'push'",
+    ]);
+}
+
+#[test]
+fn gate_audits_a_git_write_after_env_or_command() {
+    assert_gate_audits(&["env git commit -m x", "command git push", "exec git push"]);
+}
+
+#[test]
+fn gate_audits_a_git_write_split_by_a_line_continuation() {
+    assert_gate_audits(&["git \\\ncommit -m x", "git -C . \\\n  push"]);
+}
+
+/// A file system that ignores letter case runs git for `GIT`.
+#[test]
+fn gate_audits_a_letter_case_variant_of_git() {
+    assert_gate_audits(&["GIT commit -m x", "Git push", "/usr/bin/GIT push"]);
+}
+
+#[test]
+fn gate_audits_git_named_by_a_path() {
+    assert_gate_audits(&["/usr/bin/git commit -m x", "./bin/git push"]);
+}
+
+/// Git for Windows runs `git.exe`, and git-bash also runs it as `git`.
+#[test]
+fn gate_audits_git_with_an_exe_suffix() {
+    assert_gate_audits(&["git.exe commit -m x", "/usr/bin/GIT.EXE push"]);
+}
+
+#[test]
+fn gate_audits_a_program_name_from_a_glob() {
+    assert_gate_audits(&[
+        "g?t commit -m x",
+        "gi[t] push",
+        "g*t push",
+        "git c?mmit -m x",
+    ]);
+}
+
+/// An expansion alone does not make a command a possible git write. The
+/// command must also hold a `commit` or `push` word.
+#[test]
+fn gate_skips_an_expansion_without_a_write_word() {
+    for command in [
+        "echo $HOME",
+        "ls {a,b}/*.ts",
+        "cat `which jq` | head -n 1",
+        "GIT_PAGER=cat git log -n 1",
+        "ls src/GIT",
+        "git log commit-message.txt",
+        "git add src/*.ts",
+        "git diff $base",
+    ] {
+        let (audited, code, stderr) = gate_audits(command);
+        assert!(!audited, "gate must skip {command:?}: {stderr}");
+        assert_eq!(code, Some(0), "{command:?}: {stderr}");
+    }
+}
+
 /// The small hook input reader decodes JSON string escapes, so a command with
 /// escaped quotes or a new line still reaches the exact check.
 #[test]
@@ -1390,6 +1501,159 @@ fn gate_blocks_when_a_target_holds_the_only_jq() {
     assert_eq!(output.status.code(), Some(2), "{stderr}");
     assert!(stderr.contains(&target.display().to_string()), "{stderr}");
     assert!(!calls(&log).contains("stub-jq"), "{}", calls(&log));
+}
+
+/// Prints the path of the jq on the test `PATH`, if any.
+fn host_jq() -> Option<PathBuf> {
+    std::process::Command::new("sh")
+        .args(["-c", "command -v jq"])
+        .output()
+        .ok()
+        .filter(|out| out.status.success())
+        .map(|out| PathBuf::from(String::from_utf8_lossy(&out.stdout).trim()))
+        .filter(|path| path.is_absolute())
+}
+
+/// The gate looks for a fallow on PATH that is not a version-manager shim,
+/// and follows a link with readlink. Before the gate knows the targets of the
+/// command, it runs no helper, so a readlink in a target tree never runs.
+#[test]
+fn gate_runs_no_helper_from_a_target_tree_before_it_knows_the_targets() {
+    let tmp = tempdir().unwrap();
+    let base = tmp.path().canonicalize().unwrap();
+    let session = base.join("clone");
+    let target = base.join("target");
+    std::fs::create_dir_all(&session).unwrap();
+    std::fs::create_dir_all(base.join("bin")).unwrap();
+    let log = base.join("calls.log");
+    logging_stub(&base.join("real/fallow"), "path", &log);
+    std::os::unix::fs::symlink(base.join("real/fallow"), base.join("bin/fallow")).unwrap();
+    logging_stub(&target.join("bin/readlink"), "stub-readlink", &log);
+    git_init(&session);
+    git_init(&target);
+    let input = serde_json::json!({
+        "cwd": session,
+        "tool_input": { "command": format!("git -C {} commit -m x", target.display()) },
+    });
+
+    let output = probe_gate_with_path_prefix(
+        &render_gate_script(true, None),
+        &base.join("home/.claude/hooks/fallow-gate.sh"),
+        &session,
+        &base.join("bin"),
+        input.to_string().as_bytes(),
+        &format!("{}:", target.join("bin").display()),
+    );
+    let calls = calls(&log);
+
+    assert!(!calls.contains("stub-readlink"), "{calls}");
+    assert!(
+        calls.contains("path --version"),
+        "{calls}\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+/// A large hook input goes to jq before the gate knows the targets of the
+/// command. When a target tree holds that jq, the gate blocks, also when a
+/// fallow JSON reader reads the audit report.
+#[test]
+fn gate_blocks_when_a_target_holds_the_jq_that_read_the_input() {
+    let Some(jq) = host_jq() else {
+        eprintln!("skipping: jq not on PATH");
+        return;
+    };
+    let tmp = tempdir().unwrap();
+    let base = tmp.path().canonicalize().unwrap();
+    let session = base.join("clone");
+    let target = base.join("target");
+    std::fs::create_dir_all(&session).unwrap();
+    std::fs::create_dir_all(target.join("bin")).unwrap();
+    std::os::unix::fs::symlink(jq, target.join("bin/jq")).unwrap();
+    let sys = system_bin_without_jq(&base);
+    let log = base.join("calls.log");
+    let command = format!(
+        "git -C {} commit -m '{}'",
+        target.display(),
+        "x".repeat(9000)
+    );
+    reader_stub(&base.join("bin/fallow"), "path", &log, &command, &session);
+    git_init(&session);
+    git_init(&target);
+    let input = serde_json::json!({ "cwd": session, "tool_input": { "command": command } });
+
+    let output = probe_gate_with_path(
+        &render_gate_script(true, None),
+        &base.join("home/.claude/hooks/fallow-gate.sh"),
+        &session,
+        &format!(
+            "{}:{}:{}",
+            target.join("bin").display(),
+            base.join("bin").display(),
+            sys.display()
+        ),
+        input.to_string().as_bytes(),
+        &[],
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let calls = calls(&log);
+
+    assert_eq!(output.status.code(), Some(2), "{stderr}");
+    assert!(stderr.contains("holds the jq of the gate"), "{stderr}");
+    assert!(stderr.contains(&target.display().to_string()), "{stderr}");
+    assert!(!calls.contains("--version"), "{calls}");
+}
+
+/// A PATH directory outside every target can hold a link to the jq of a target
+/// tree. The gate follows the link chain and blocks.
+#[test]
+fn gate_blocks_when_a_jq_outside_the_targets_links_into_a_target() {
+    let Some(jq) = host_jq() else {
+        eprintln!("skipping: jq not on PATH");
+        return;
+    };
+    let tmp = tempdir().unwrap();
+    let base = tmp.path().canonicalize().unwrap();
+    let session = base.join("clone");
+    let target = base.join("target");
+    let linked = base.join("linked-bin");
+    std::fs::create_dir_all(&session).unwrap();
+    std::fs::create_dir_all(target.join("tools")).unwrap();
+    std::fs::create_dir_all(&linked).unwrap();
+    std::os::unix::fs::symlink(jq, target.join("tools/jq")).unwrap();
+    std::os::unix::fs::symlink(target.join("tools/jq"), linked.join("jq")).unwrap();
+    let sys = system_bin_without_jq(&base);
+    let log = base.join("calls.log");
+    let command = format!(
+        "git -C {} commit -m '{}'",
+        target.display(),
+        "x".repeat(9000)
+    );
+    reader_stub(&base.join("bin/fallow"), "path", &log, &command, &session);
+    git_init(&session);
+    git_init(&target);
+    let input = serde_json::json!({ "cwd": session, "tool_input": { "command": command } });
+
+    let output = probe_gate_with_path(
+        &render_gate_script(true, None),
+        &base.join("home/.claude/hooks/fallow-gate.sh"),
+        &session,
+        &format!(
+            "{}:{}:{}",
+            linked.display(),
+            base.join("bin").display(),
+            sys.display()
+        ),
+        input.to_string().as_bytes(),
+        &[],
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let calls = calls(&log);
+
+    assert_eq!(output.status.code(), Some(2), "{stderr}");
+    assert!(stderr.contains("holds the jq of the gate"), "{stderr}");
+    assert!(stderr.contains(&target.display().to_string()), "{stderr}");
+    assert!(!calls.contains("--version"), "{calls}");
 }
 
 /// Bash below version 4 needs time that grows with the square of the length
