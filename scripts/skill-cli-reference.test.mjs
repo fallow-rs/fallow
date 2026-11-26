@@ -63,13 +63,17 @@ test("every released skill file fits in one MCP response", () => {
   assert.deepEqual(tooLarge, []);
 });
 
-test("the CLI reference index links each per-command file", () => {
+// The package check (`intent validate npm/fallow/skills` in CI) also needs a
+// direct link from SKILL.md to each reference file.
+test("SKILL.md and the CLI reference index link each per-command file", () => {
+  const skill = read(join(FALLOW_SKILL, "SKILL.md"));
   const index = read(join(FALLOW_SKILL, "references", "cli-reference.md"));
   const perCommand = cliReferenceFiles(FALLOW_SKILL).filter(
     (file) => file !== "references/cli-reference.md",
   );
   assert.ok(perCommand.length > 0, "the fallow skill has per-command CLI reference files");
   for (const file of perCommand) {
+    assert.ok(skill.includes(`](${file})`), `SKILL.md links ${file}`);
     const relative = file.slice("references/".length);
     assert.ok(index.includes(`](${relative})`), `cli-reference.md links ${relative}`);
   }
