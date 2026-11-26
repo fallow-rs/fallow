@@ -395,9 +395,17 @@ impl EditorAnalysisSession {
     /// project analyses of the session run duplication only when the run
     /// plans it.
     ///
+    /// The session config holds the type-aware decision of the run (the
+    /// given input, then the variables that the surface reads, then
+    /// `typeAware.enabled`) and the rule defaults of a type-aware run, as the
+    /// CLI applies them. [`Self::type_aware_options`] gives the options of
+    /// the refinement.
+    ///
     /// # Errors
     ///
-    /// Returns an error when the run skips the dead-code analysis.
+    /// Returns an error when the run skips the dead-code analysis, or when a
+    /// type-aware variable that the surface reads has a value that the run
+    /// cannot use.
     pub fn open(run: &crate::run::ResolvedRun) -> Result<Self, crate::ProgrammaticError> {
         use crate::run::AnalysisSlot;
         use fallow_config::PlannedAnalysis;
@@ -407,12 +415,41 @@ impl EditorAnalysisSession {
                 2,
             ));
         };
+        let type_aware = run
+            .type_aware()
+            .map_err(|err| crate::ProgrammaticError::new(err.message(), 2))?
+            .clone();
+        let inner = dead_code
+            .open_session_adjusted(|config| {
+                config.type_aware.enabled = *type_aware.enabled.value();
+                config.type_aware.projects = type_aware
+                    .projects
+                    .value()
+                    .iter()
+                    .map(|path| path.to_string_lossy().into_owned())
+                    .collect();
+                config.type_aware.require = *type_aware.require.value();
+                config.apply_type_aware_rule_defaults(false);
+            })
+            .map_err(|err| crate::ProgrammaticError::new(err.to_string(), 2))?;
         Ok(Self {
-            inner: dead_code.open_session(),
+            inner,
             runs_duplication: matches!(
                 run.analysis(PlannedAnalysis::Duplication),
                 AnalysisSlot::Runs(_)
             ),
+        })
+    }
+
+    /// The options of the type-aware refinement of the session, or `None`
+    /// when the session runs no type-aware analysis.
+    #[must_use]
+    pub fn type_aware_options(&self) -> Option<crate::TypeAwareOptions> {
+        let section = &self.inner.config().type_aware;
+        section.enabled.then(|| crate::TypeAwareOptions {
+            enabled: Some(true),
+            projects: section.projects.iter().map(PathBuf::from).collect(),
+            require: section.require,
         })
     }
 

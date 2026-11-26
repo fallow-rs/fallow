@@ -4,6 +4,7 @@ import {
   AnalysisFailureBackoff,
   buildAnalysisBackoffKey,
   buildAnalysisProcessEnv,
+  EDITOR_IGNORED_ENV_VARS,
 } from "../src/analysisBackoff.js";
 
 describe("AnalysisFailureBackoff", () => {
@@ -73,5 +74,30 @@ describe("buildAnalysisProcessEnv", () => {
         FALLOW_MAX_FILE_SIZE: ANALYSIS_DEFAULT_MAX_FILE_SIZE_MB,
       });
     }
+  });
+
+  it("drops the variables that the language server does not read", () => {
+    // In the editor the settings decide. A shell FALLOW_PRODUCTION=1 gave the
+    // sidebar run production mode and the status bar not.
+    const env = {
+      FALLOW_PRODUCTION: "1",
+      FALLOW_TYPE_AWARE: "1",
+      FALLOW_DIFF_FILE: "/tmp/pr.diff",
+      FALLOW_CACHE_DIR: "/tmp/cache",
+    };
+    const overrides = buildAnalysisProcessEnv(env);
+    expect(overrides).toEqual({
+      FALLOW_MAX_FILE_SIZE: ANALYSIS_DEFAULT_MAX_FILE_SIZE_MB,
+      FALLOW_PRODUCTION: undefined,
+      FALLOW_TYPE_AWARE: undefined,
+      FALLOW_DIFF_FILE: undefined,
+    });
+    expect("FALLOW_PRODUCTION" in overrides).toBe(true);
+    for (const name of EDITOR_IGNORED_ENV_VARS) {
+      expect(buildAnalysisProcessEnv({ [name]: "x" })[name]).toBeUndefined();
+    }
+    const mixedCase = buildAnalysisProcessEnv({ Fallow_Production: "1" });
+    expect("Fallow_Production" in mixedCase).toBe(true);
+    expect(mixedCase.Fallow_Production).toBeUndefined();
   });
 });

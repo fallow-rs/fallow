@@ -85,7 +85,7 @@ impl Scope {
 
 /// A child process environment without the `FALLOW_*` variables of the
 /// developer shell, so every surface reads the same inputs.
-fn scrub_environment(command: &mut Command) {
+pub fn scrub_environment(command: &mut Command) {
     for (name, _) in std::env::vars_os() {
         let Some(name) = name.to_str() else {
             continue;
@@ -251,36 +251,47 @@ pub fn cli_save_baseline(analysis: Analysis, root: &Path, target: &Path) {
 ///
 /// # Panics
 ///
-/// Panics with a build instruction when the binary is missing. The harness
-/// never skips the MCP surface.
+/// Panics with a build instruction when the binary is missing or older than
+/// one of its sources. The harness never skips the MCP surface.
 pub fn mcp_bin() -> PathBuf {
-    let path = fallow_bin().with_file_name(format!("fallow-mcp{}", std::env::consts::EXE_SUFFIX));
+    sibling_bin("fallow-mcp")
+}
+
+/// The binary `name` of package `name` next to the `fallow` binary under
+/// test, checked to be current.
+///
+/// # Panics
+///
+/// Panics with a build instruction when the binary is missing or older than
+/// one of its sources.
+pub fn sibling_bin(name: &str) -> PathBuf {
+    let path = fallow_bin().with_file_name(format!("{name}{}", std::env::consts::EXE_SUFFIX));
     assert!(
         path.is_file(),
-        "the drift harness needs the fallow-mcp binary at {}. Run `cargo build -p fallow-mcp` first, \
+        "the drift harness needs the {name} binary at {}. Run `cargo build -p {name}` first, \
          then run the harness again.",
         path.display()
     );
-    assert_mcp_bin_current(&path);
+    assert_bin_current(name, &path);
     path
 }
 
-/// Fail when a source file of `fallow-mcp` is newer than the binary.
+/// Fail when a source file of the binary `name` is newer than the binary.
 ///
-/// `cargo test -p fallow-cli` does not rebuild `fallow-mcp`, so an old binary
-/// would run old `fallow_api` code on the MCP typed path. The list of sources
+/// `cargo test -p fallow-cli` does not rebuild `fallow-mcp` or `fallow-lsp`,
+/// so an old binary would run old `fallow_api` code. The list of sources
 /// comes from the dep-info file that cargo writes next to the binary. It is the
 /// list cargo itself compares against, so a rebuild always clears the failure.
-/// A crate outside the dependency graph of `fallow-mcp` never triggers it.
-fn assert_mcp_bin_current(binary: &Path) {
+/// A crate outside the dependency graph of the binary never triggers it.
+fn assert_bin_current(name: &str, binary: &Path) {
     let dep_info = binary.with_extension("d");
     let listing = std::fs::read_to_string(&dep_info).unwrap_or_else(|err| {
         panic!(
-            "cannot read {} ({err}). Run `cargo build -p fallow-mcp`, then run the harness again.",
+            "cannot read {} ({err}). Run `cargo build -p {name}`, then run the harness again.",
             dep_info.display()
         )
     });
-    let built = modified(binary).expect("read the fallow-mcp modification time");
+    let built = modified(binary).unwrap_or_else(|| panic!("read the {name} modification time"));
     let newest = dep_info_sources(&listing)
         .into_iter()
         .filter_map(|source| modified(&source).map(|time| (time, source)))
@@ -289,7 +300,7 @@ fn assert_mcp_bin_current(binary: &Path) {
         && time > built
     {
         panic!(
-            "fallow-mcp at {} is older than {}. Run `cargo build -p fallow-mcp`, then run the \
+            "{name} at {} is older than {}. Run `cargo build -p {name}`, then run the \
              harness again.",
             binary.display(),
             source.display()

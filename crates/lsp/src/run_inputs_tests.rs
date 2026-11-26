@@ -99,7 +99,6 @@ fn analyze_in(root: &Path, options: &Value, sessions: &SharedSessionStore) -> Ou
         run_options: &parsed,
         duplication_options: parsed.duplication.as_ref(),
         inline_complexity_enabled: false,
-        type_aware_options: None,
         type_aware_sessions: &type_aware_sessions,
         type_aware_changes: &fallow_api::TypeAwareFileChanges::default(),
         cancellation: &cancellation,
@@ -145,7 +144,6 @@ fn blocking_run(
         run_options: crate::initialization::LspInitializationOptions::default(),
         duplication_options: None,
         inline_complexity_enabled: false,
-        type_aware_options: None,
         type_aware_sessions: Arc::new(Mutex::new(FxHashMap::default())),
         type_aware_changes: fallow_api::TypeAwareFileChanges::default(),
         root: root.to_path_buf(),
@@ -480,5 +478,90 @@ fn a_relative_config_path_resolves_from_the_workspace_root() {
     assert_eq!(
         run.config_file().value().as_deref(),
         Some(root.join("config/fallow.json").as_path())
+    );
+}
+
+#[test]
+fn the_type_aware_setting_is_an_input_only_when_it_turns_analysis_on() {
+    let root = Path::new("/workspace");
+    let off = translated(
+        &json!({ "typeAware": { "enabled": false, "projects": ["tsconfig.json"], "require": "complete" } }),
+        root,
+    );
+    assert_eq!(off.type_aware, fallow_config::TypeAwareInputs::default());
+
+    let on = translated(
+        &json!({ "typeAware": { "enabled": true, "projects": ["tsconfig.app.json"], "require": "complete" } }),
+        root,
+    );
+    assert_eq!(on.type_aware.enabled.map(|given| given.value), Some(true));
+    assert_eq!(
+        on.type_aware.projects.map(|given| given.value),
+        Some(vec![std::path::PathBuf::from("tsconfig.app.json")])
+    );
+    assert_eq!(
+        on.type_aware.require.map(|given| given.value),
+        Some(fallow_config::TypeAwareRequire::Complete)
+    );
+}
+
+/// A project whose entry exports a function with a private interface in its
+/// signature: one private type leak.
+fn private_type_leak_project(config: Option<&str>) -> (tempfile::TempDir, std::path::PathBuf) {
+    let (dir, root) = project();
+    std::fs::write(
+        root.join("src/index.ts"),
+        "interface Options { flag: boolean }\nexport function make(options: Options): boolean {\n  return options.flag;\n}\n",
+    )
+    .expect("entry");
+    if let Some(config) = config {
+        std::fs::write(root.join(".fallowrc.json"), config).expect("config");
+    }
+    (dir, root)
+}
+
+fn private_type_leaks(root: &Path, options: &Value) -> usize {
+    let outcome = analyze(root, options);
+    assert_eq!(outcome.result, Ok(()));
+    outcome.output.results.private_type_leaks.len()
+}
+
+/// A type-aware run turns the opt-in `private-type-leaks` rule on, on the CLI
+/// and in the editor alike. The server once skipped the default, so the
+/// VS Code status bar counted fewer findings than the sidebar (#5321). No
+/// companion runs here, so the syntactic candidate stays.
+#[test]
+fn a_type_aware_session_reports_private_type_leaks_as_the_cli_does() {
+    let editor_on =
+        json!({ "typeAware": { "enabled": true, "projects": [], "require": "best-effort" } });
+    let editor_off =
+        json!({ "typeAware": { "enabled": false, "projects": [], "require": "best-effort" } });
+
+    let (_dir, root) = private_type_leak_project(Some(r#"{ "typeAware": { "enabled": true } }"#));
+    assert_eq!(
+        private_type_leaks(&root, &editor_off),
+        1,
+        "typeAware.enabled of the config"
+    );
+
+    let (_dir, root) = private_type_leak_project(None);
+    assert_eq!(
+        private_type_leaks(&root, &editor_on),
+        1,
+        "the editor setting"
+    );
+    assert_eq!(
+        private_type_leaks(&root, &editor_off),
+        0,
+        "no type-aware analysis"
+    );
+
+    let (_dir, root) = private_type_leak_project(Some(
+        r#"{ "typeAware": { "enabled": true }, "rules": { "private-type-leaks": "off" } }"#,
+    ));
+    assert_eq!(
+        private_type_leaks(&root, &editor_on),
+        0,
+        "an explicit rule wins"
     );
 }

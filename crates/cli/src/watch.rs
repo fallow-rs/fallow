@@ -733,6 +733,7 @@ fn load_watch_config(opts: &WatchOptions<'_>) -> Result<WatchConfig, ExitCode> {
             config_override: None,
             projects: opts.type_aware_projects,
             require: opts.type_aware_require,
+            issue_filters_active: false,
         },
         &mut config,
     )?;

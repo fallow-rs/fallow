@@ -13,8 +13,9 @@
 //! - `FALLOW_DRIFT_CASES`: cases per invariant (default [`DEFAULT_CASES`]).
 //! - `FALLOW_DRIFT_SEED`: a number, or `random`. The default is a fixed seed.
 //!
-//! The harness needs the `fallow-mcp` binary next to the `fallow` binary:
-//! run `cargo build -p fallow-mcp` before `cargo test -p fallow-cli --test drift`.
+//! The harness needs the `fallow-mcp` and `fallow-lsp` binaries next to the
+//! `fallow` binary: run `cargo build -p fallow-mcp -p fallow-lsp` before
+//! `cargo test -p fallow-cli --test drift`.
 
 mod clone_controls;
 mod clones;
@@ -22,6 +23,7 @@ mod clones;
 mod common;
 mod invariants;
 mod keys;
+mod lsp;
 mod model;
 mod surfaces;
 
@@ -928,6 +930,126 @@ fn type_aware_config_agrees_across_surfaces() {
             })
             .map(drop),
         );
+    }
+}
+
+/// The initialization options of the VS Code extension with type-aware
+/// analysis on or off (`createInitializationOptions` in
+/// `editors/vscode/src/client.ts`).
+fn editor_options(type_aware: bool) -> Value {
+    serde_json::json!({
+        "typeAware": {"enabled": type_aware, "projects": [], "require": "best-effort"},
+    })
+}
+
+/// Check I15 on `project`: the LSP session with `type_aware` against the
+/// bare CLI run with `cli_args`. Returns the counts of the LSP.
+fn lsp_counts_agree(
+    context: &str,
+    project: &Project,
+    type_aware: bool,
+    cli_args: &[&str],
+) -> Result<BTreeMap<String, u64>, String> {
+    let mut args = vec!["--skip".to_string(), "health".to_string()];
+    args.extend(cli_args.iter().map(ToString::to_string));
+    let cli = cli_envelope(&run_cli(&project.root, &args));
+    let params =
+        lsp::lsp_analysis_complete(&project.root, &project.scratch, &editor_options(type_aware));
+    let counts = lsp::lsp_category_counts(&params);
+    invariants::i15_lsp_counts_agree(context, &counts, lsp::cli_category_counts(&cli, &counts))?;
+    Ok(counts)
+}
+
+#[test]
+#[ignore = "needs the fallow-lsp binary; run with: cargo build -p fallow-mcp -p fallow-lsp && cargo test -p fallow-cli --test drift -- --include-ignored"]
+fn i15_lsp_counts_agree_with_the_cli() {
+    lsp::lsp_bin();
+    run_invariant("I15", |model| {
+        let project = Project::new(model, true);
+        project.explain(lsp_counts_agree("generated project", &project, false, &[]).map(drop))
+    });
+}
+
+/// One exported function whose signature names a private interface: a
+/// private type leak, which only a type-aware run reports by default.
+fn private_type_leak_project(config: Option<&str>) -> Project {
+    let mut files = BTreeMap::new();
+    files.insert(
+        "package.json".to_string(),
+        r#"{"name":"leak","private":true,"main":"src/index.ts"}"#.to_string(),
+    );
+    files.insert(
+        "src/index.ts".to_string(),
+        "interface Options { flag: boolean }\nexport function make(options: Options): boolean {\n  return options.flag;\n}\n".to_string(),
+    );
+    if let Some(config) = config {
+        files.insert(".fallowrc.json".to_string(), config.to_string());
+    }
+    Project::from_files(Materialized {
+        base: files.clone(),
+        head: files,
+        renames: Vec::new(),
+    })
+}
+
+/// A type-aware run turns the opt-in `private-type-leaks` rule on unless the
+/// config sets it. A surface that skips the default reports no leaks, and the
+/// VS Code status bar then counts fewer findings than the sidebar (#5321).
+/// The harness has no type-aware companion; both surfaces keep the
+/// syntactic candidates.
+#[test]
+#[ignore = "needs the fallow-lsp binary; run with: cargo build -p fallow-mcp -p fallow-lsp && cargo test -p fallow-cli --test drift -- --include-ignored"]
+fn i15_control_type_aware_private_type_leaks_agree() {
+    let config_on = r#"{ "typeAware": { "enabled": true } }"#;
+    let explicit_off =
+        r#"{ "typeAware": { "enabled": true }, "rules": { "private-type-leaks": "off" } }"#;
+    struct LeakCase {
+        context: &'static str,
+        config: Option<&'static str>,
+        editor_type_aware: bool,
+        cli_args: &'static [&'static str],
+        leaks: u64,
+    }
+    let cases = [
+        LeakCase {
+            context: "typeAware.enabled in the config",
+            config: Some(config_on),
+            editor_type_aware: false,
+            cli_args: &[],
+            leaks: 1,
+        },
+        LeakCase {
+            context: "the fallow.typeAware.enabled setting",
+            config: None,
+            editor_type_aware: true,
+            cli_args: &["--type-aware"],
+            leaks: 1,
+        },
+        LeakCase {
+            context: "an explicit rule off",
+            config: Some(explicit_off),
+            editor_type_aware: true,
+            cli_args: &["--type-aware"],
+            leaks: 0,
+        },
+        LeakCase {
+            context: "no type-aware analysis",
+            config: None,
+            editor_type_aware: false,
+            cli_args: &[],
+            leaks: 0,
+        },
+    ];
+    for case in cases {
+        let project = private_type_leak_project(case.config);
+        let counts = lsp_counts_agree(
+            case.context,
+            &project,
+            case.editor_type_aware,
+            case.cli_args,
+        )
+        .unwrap_or_else(|err| panic!("{err}"));
+        assert_eq!(counts["privateTypeLeaks"], case.leaks, "{}", case.context);
     }
 }
 

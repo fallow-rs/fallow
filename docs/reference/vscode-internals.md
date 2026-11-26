@@ -105,6 +105,32 @@ Do not duplicate the full setting list in durable prose.
   check it. With a workspace scope, an LSP notification does not change the
   count after the first scoped CLI run, so the count follows the sidebar and
   changes on the next CLI run.
+- The two counts can only agree when both runs analyze the same thing.
+  Drift invariant I15 (`docs/development/drift-contract.md`) runs the real
+  `fallow-lsp` and the sidebar CLI run on generated projects and on a
+  type-aware control, and compares each category count.
+- After each LSP run, a loaded and visible sidebar starts a quiet CLI run:
+  window progress, no "found N issues" notification, and the failure backoff
+  of automatic runs. A failed quiet run shows no message
+  (`RunAnalysisOptions.silent`), keeps the last good count in the status
+  bar, and writes the failure to the output channel. A hidden sidebar marks
+  itself stale and refreshes when it shows again. The single-flight queue
+  coalesces the runs of a burst of saves. A manual run that starts a run
+  keeps its notification. Without this refresh, each save changed the status
+  bar and left the sidebar on its last count.
+- The sidebar CLI run drops the variables that the language server does not
+  read (`EDITOR_IGNORED_ENV_VARS` in `src/analysisBackoff.ts`, checked by a
+  Rust test in `env_policy.rs`): `FALLOW_PRODUCTION*`, `FALLOW_DIFF_FILE`
+  and `FALLOW_TYPE_AWARE`, `_PROJECTS` and `_REQUIRE`. The editor settings
+  decide instead. `fallow.typeAware.timeoutSeconds` reaches the CLI runs and
+  the server as `FALLOW_TYPE_AWARE_TIMEOUT_SECS`.
+- A category label of the sidebar counts findings, not rows. An unlisted
+  dependency, an unlisted binary and a duplicate export have one row for
+  each site. The advisory component categories (prop drilling, thin
+  wrappers, duplicate prop shapes) show `advisory`, because the total does
+  not count them. The hover breakdown has a line for each category of
+  `COUNTED_FINDING_KEYS`, and `buildParamsFromCli` derives its fields from
+  that list.
 - A click on the item runs `fallow.showStatusMenu`. Each menu row runs an
   existing command (`fallow.analyze`, `fallow.toggleAllDiagnostics`,
   `fallow.audit`, `fallow.selectWorkspace`, the license commands and

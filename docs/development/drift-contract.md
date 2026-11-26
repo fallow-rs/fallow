@@ -10,7 +10,7 @@ to the harness, as the test that failed before the fix.
 
 ## Terms
 
-- **Surface**: one way to get a result. The harness drives three surfaces:
+- **Surface**: one way to get a result. The harness drives four surfaces:
   - the CLI binary with `--format json`. I7 also reads the exit code of the
     human format,
   - the `fallow-mcp` server over stdio JSON-RPC, on the typed path (in-process
@@ -21,8 +21,10 @@ to the harness, as the test that failed before the fix.
     `detectDeadCode`, `detectDuplication` and `computeHealth` with the CLI
     `dead-code`, `dupes` and `health` output, without a scope and with one
     workspace.
-
-  The LSP server is not in the contract yet. It needs a scripted editor session.
+  - the `fallow-lsp` server over stdio, one editor session per case with the
+    initialization options of the VS Code extension. I15 reads the counts of
+    its `fallow/analysisComplete` notification. The harness does not compare
+    the published diagnostics yet.
 - **Finding key**: the identity of one finding. It is the tuple (issue kind,
   root-relative path, symbol or package name, line). The harness compares key
   sets, not presentation fields such as `actions`, columns, or prose.
@@ -74,6 +76,7 @@ tests are in `crates/engine/src/changed_files.rs`,
 | I12 | Every security finding has a `finding_id` that is unique in the run and equal on every surface | Checked by the harness |
 | I13 | A `--group` selector and a `--trend-from` baseline give the same groups and group trend status on every surface | Checked by the harness |
 | I14 | `architecture` reports the findings of `dead-code` with the five structure flags, under its own `kind` | Checked by the harness |
+| I15 | The language server counts each category as the CLI run of the VS Code sidebar does | Checked by the harness |
 
 ### I1: `check` is an alias of `dead-code`
 
@@ -442,6 +445,30 @@ tests are in `crates/engine/src/changed_files.rs`,
   command.
 - **Status**: checked by the harness.
 
+### I15: language server counts
+
+- **Statement**: for the same project and the same editor settings, each
+  count field of the `fallow/analysisComplete` notification of `fallow-lsp`
+  equals the length of the matching array of the bare CLI run that the
+  VS Code sidebar starts (`fallow --format json --skip health`). The status
+  bar shows the first count and the sidebar shows the second, so a difference
+  is a visible difference of two totals in the editor.
+- **Surfaces**: `fallow-lsp` over stdio, and the CLI.
+- **Comparison**: the count of each category. A field counts the array of the
+  same name in snake case. `boundaryViolations` counts the three boundary
+  arrays, and `cloneGroups` counts `dupes.clone_groups`. A non-empty CLI array
+  that no field counts fails the check, so a new category must get a field.
+- **Designed exceptions**: `deprecated_exports_in_use` and the advisory
+  component arrays (`prop_drilling_chains`, `thin_wrappers`,
+  `duplicate_prop_shapes`). The extension does not count them in its total.
+- **Controls**: a project with one private type leak, with type-aware
+  analysis from the config, from the editor setting (`--type-aware` on the
+  CLI side), with the rule explicitly off, and without type-aware analysis.
+  The harness has no type-aware companion, so both surfaces keep the
+  syntactic candidates. The language server once skipped the type-aware
+  default of `private-type-leaks` (#5321).
+- **Status**: checked by the harness.
+
 ## How the harness works
 
 The generator (`crates/cli/tests/drift/model.rs`) is a proptest strategy for a
@@ -467,7 +494,11 @@ the `fallow-mcp` binary next to the `fallow` binary, with `FALLOW_BIN` set to
 the CLI under test. To force the CLI-fallback path, it passes `save_baseline`.
 Each analysis tool sends a baseline parameter to the CLI, and saving a baseline
 does not change the findings of the run. The runner then checks that the
-baseline file exists, which proves that the fallback path ran.
+baseline file exists, which proves that the fallback path ran. The LSP runner
+in `crates/cli/tests/drift/lsp.rs` starts the `fallow-lsp` binary next to the
+`fallow` binary for each case, opens one source file, and reads the first
+`fallow/analysisComplete` notification. It writes the cache of the session to
+the scratch directory of the case.
 
 The runners remove `FALLOW_*` variables from each child process, so a developer
 shell cannot change one surface and not the others.
@@ -485,24 +516,24 @@ shell cannot change one surface and not the others.
   large case count with a random seed. Release validation gates publication and
   also runs every week.
 
-The harness needs the `fallow-mcp` binary. When the binary is missing, the
-harness fails with the build command. It never skips the MCP surface.
-`cargo test -p fallow-cli` does not rebuild `fallow-mcp`. When a source file
-of `fallow-mcp` is newer than the binary, the harness fails with the same
-build command.
+The harness needs the `fallow-mcp` and `fallow-lsp` binaries. When a binary
+is missing, the harness fails with the build command. It never skips the MCP
+or the LSP surface. `cargo test -p fallow-cli` does not rebuild these
+binaries. When a source file of a binary is newer than the binary, the harness
+fails with the same build command.
 
 ```bash
-cargo build -p fallow-cli -p fallow-mcp --bin fallow-mcp --test drift
+cargo build -p fallow-cli -p fallow-mcp -p fallow-lsp --bin fallow-mcp --bin fallow-lsp --test drift
 cargo test -p fallow-cli --test drift -- --include-ignored
 ```
 
-Build both packages in one invocation. `fallow-cli` and its test target turn
+Build the packages in one invocation. `fallow-cli` and its test target turn
 on more dependency features than `fallow-mcp` does. A separate
 `cargo build -p fallow-mcp` resolves a smaller feature set, so the test step
 compiles a second copy of most of the dependency tree.
 
 The invariant tests are marked `#[ignore]`, because a workspace-wide
-`cargo test` does not build `fallow-mcp`. The `drift` CI job and the
+`cargo test` does not build `fallow-mcp` or `fallow-lsp`. The `drift` CI job and the
 release validation job run them with `--include-ignored`.
 
 ## Reproduce a failure
@@ -511,8 +542,8 @@ A failure message gives the seed, the case count, the shrunk project with its
 files, and the difference between the two key sets.
 
 1. Build the binaries:
-   `cargo build -p fallow-cli -p fallow-mcp --bin fallow-mcp --test drift`. A local run needs this
-   step again after each change outside `crates/cli`.
+   `cargo build -p fallow-cli -p fallow-mcp -p fallow-lsp --bin fallow-mcp --bin fallow-lsp --test drift`.
+   A local run needs this step again after each change outside `crates/cli`.
 2. Run the failing test with the same seed and case count:
 
    ```bash

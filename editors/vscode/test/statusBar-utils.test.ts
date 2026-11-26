@@ -601,3 +601,36 @@ describe("alignWithSidebarCount", () => {
     expect(missing).toEqual([]);
   });
 });
+
+describe("category coverage of the status bar", () => {
+  const countedFields = [...new Set(COUNTED_FINDING_KEYS.map(toField))].filter(
+    (field) => field !== "boundaryCoverageViolations" && field !== "boundaryCallViolations",
+  );
+
+  it("gives each category of the total a line in the hover breakdown", () => {
+    // A category without a line made the hover lines sum to less than the total.
+    // Each field gets its own count, so each line names one field.
+    const counts = Object.fromEntries(countedFields.map((field, index) => [field, index + 2]));
+    const total = Object.values(counts).reduce((sum, count) => sum + count, 0);
+    const lines = buildAnalysisSummaryLines(lspParams({ ...counts, totalIssues: total }));
+    const missing = countedFields.filter(
+      (field) => !lines.some((line) => line.includes(` ${counts[field]} `)),
+    );
+    expect(missing).toEqual([]);
+    expect(lines).toHaveLength(countedFields.length);
+  });
+
+  it("gives each category of the CLI total a params field", () => {
+    // The status bar of a CLI run showed a total, and the hover had no field
+    // for many of the categories in it.
+    const check = Object.fromEntries(
+      COUNTED_FINDING_KEYS.map((key) => [key, [{ path: "src/a.ts" }]]),
+    ) as unknown as FallowCheckResult;
+    const params = buildParamsFromCli(check, null, null) as unknown as Record<string, number>;
+    for (const field of countedFields) {
+      const expected = field === "boundaryViolations" ? 3 : 1;
+      expect({ field, count: params[field] }).toEqual({ field, count: expected });
+    }
+    expect(params.totalIssues).toBe(COUNTED_FINDING_KEYS.length);
+  });
+});

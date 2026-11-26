@@ -134,6 +134,9 @@ const MUTED_ALL_NUDGE_KEY = "fallow.mutedAllNudgeShown.v1";
 
 let outputChannel: vscode.LogOutputChannel;
 let lastCheckResult: FallowCheckResult | null = null;
+// True once a sidebar CLI run has finished. `lastCheckResult` stays null when
+// that run printed nothing, so it cannot tell whether the sidebar has a count.
+let sidebarAnalysisCompleted = false;
 let lastDupesResult: FallowDupesResult | null = null;
 let lastAnalysisScope: FallowAnalysisScope | null = null;
 let lastHealthResult: HealthOutput | null = null;
@@ -224,14 +227,18 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
   // startClient / restartClient so it re-registers on every client instance
   // (a restart builds a fresh client; a handler bound only to the first client
   // would stop firing and freeze the status bar after the first restart).
+  // Set once the sidebar views exist. An LSP run that ends before then has no
+  // sidebar to refresh.
+  let refreshSidebarAfterLsp: (() => void) | null = null;
   const onAnalysisComplete = (params: AnalysisCompleteParams): void => {
     if (!shouldAcceptLspAnalysisComplete(vscode.workspace.textDocuments)) {
       return;
     }
     void vscode.commands.executeCommand("setContext", "fallow.hasAnalyzed", true);
+    refreshSidebarAfterLsp?.();
     // The LSP analyzes the whole project. After a scoped CLI run, the status
     // bar keeps the scoped count of the sidebar (#5278).
-    if (lastCheckResult !== null && resolveActiveWorkspaceScope(context) !== "") {
+    if (sidebarAnalysisCompleted && resolveActiveWorkspaceScope(context) !== "") {
       return;
     }
     updateStatusBarFromLsp(alignWithSidebarCount(params, getIssueTypes()));
@@ -310,25 +317,42 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
     readonly force?: boolean;
   }
 
-  const runCliAnalysisOnce = async (options: CliAnalysisTriggerOptions = {}): Promise<boolean> => {
-    setStatusBarAnalyzing();
+  interface CliAnalysisRunOptions extends CliAnalysisTriggerOptions {
+    /**
+     * A refresh after an LSP run: progress in the window status area, no
+     * "found N issues" notification, and the failure backoff of automatic
+     * runs.
+     */
+    readonly quiet?: boolean;
+  }
+
+  const runCliAnalysisOnce = async (options: CliAnalysisRunOptions = {}): Promise<boolean> => {
+    const quiet = options.quiet === true;
+    if (!quiet) {
+      setStatusBarAnalyzing();
+    }
     return await vscode.window.withProgress(
       {
-        location: vscode.ProgressLocation.Notification,
-        title: "Fallow: Analyzing...",
+        location: quiet ? vscode.ProgressLocation.Window : vscode.ProgressLocation.Notification,
+        title: quiet ? "Fallow: syncing" : "Fallow: Analyzing...",
         cancellable: false,
       },
       async () => {
         try {
           const { check, dupes, scope } = await runAnalysis(context, outputChannel, {
-            force: options.force === true,
+            force: options.force === true && !quiet,
+            silent: quiet,
           });
           lastCheckResult = check;
+          sidebarAnalysisCompleted = true;
           lastDupesResult = dupes;
           lastAnalysisScope = scope;
           updateViews();
           probeWorkspaceVisibility();
           void vscode.commands.executeCommand("setContext", "fallow.hasAnalyzed", true);
+          if (quiet) {
+            return true;
+          }
 
           const issueCount = countCheckIssues(check);
           const duplicateGroupCount = countDuplicationGroups(dupes);
@@ -371,7 +395,11 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
           }
           return true;
         } catch {
-          setStatusBarError();
+          // A failed refresh keeps the count of the last good run in the status
+          // bar. The failure is in the output channel.
+          if (!quiet) {
+            setStatusBarError();
+          }
           return false;
         }
       },
@@ -385,9 +413,31 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
   // view-visibility trigger dedups onto the in-flight run; a `force` run
   // (explicit, scope change, or config change) arriving mid-run re-runs once
   // afterward so the results reflect the latest scope and config.
-  const cliAnalysisFlight = createSingleFlight((force) => runCliAnalysisOnce({ force }));
-  const triggerCliAnalysis = async (options: CliAnalysisTriggerOptions = {}): Promise<boolean> =>
-    cliAnalysisFlight.run(options.force === true);
+  //
+  // A sidebar refresh after an LSP run is a forced run too: the in-flight run
+  // can predate the save. It stays quiet unless another trigger asked for a
+  // run since the last start, so a manual run that coalesces into it still
+  // shows its notification.
+  let loudRunRequested = false;
+  let cliAnalysisInFlight = false;
+  const cliAnalysisFlight = createSingleFlight(async (force) => {
+    const quiet = !loudRunRequested;
+    loudRunRequested = false;
+    cliAnalysisInFlight = true;
+    try {
+      return await runCliAnalysisOnce({ force, quiet });
+    } finally {
+      cliAnalysisInFlight = false;
+    }
+  });
+  const triggerCliAnalysis = async (options: CliAnalysisTriggerOptions = {}): Promise<boolean> => {
+    // A run that joins the run in flight starts no run, so it must not mark
+    // the next quiet refresh as loud.
+    if (options.force === true || !cliAnalysisInFlight) {
+      loudRunRequested = true;
+    }
+    return cliAnalysisFlight.run(options.force === true);
+  };
 
   // Inline complexity breakdown: per-line editor decorations driven by the same
   // health findings the tree renders. Reads the workspace root live so it tracks
@@ -549,7 +599,30 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
     }),
   );
 
+  // The status bar follows each LSP run, also after a save. The sidebar and
+  // its count follow the CLI run. Without a refresh the two counts differed
+  // after each save until a manual Analyze (#5321). Only a loaded and visible
+  // sidebar refreshes, so a hidden sidebar costs no CLI run until it shows.
+  // A hidden sidebar refreshes when it shows again.
+  let sidebarStale = false;
+  refreshSidebarAfterLsp = (): void => {
+    if (!sidebarAnalysisCompleted) {
+      return;
+    }
+    if (!(deadCodeView.visible || duplicatesView.visible)) {
+      sidebarStale = true;
+      return;
+    }
+    sidebarStale = false;
+    void cliAnalysisFlight.run(true);
+  };
+
   const onViewVisible = (): void => {
+    if (sidebarStale) {
+      sidebarStale = false;
+      void cliAnalysisFlight.run(true);
+      return;
+    }
     if (cliAnalysisRan) {
       return;
     }

@@ -14,7 +14,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::config_patterns::{self, UnmatchedConfigPattern};
 use crate::document_state::VersionSnapshot;
-use crate::initialization::{LspDuplicationOptions, LspInitializationOptions, LspTypeAwareOptions};
+use crate::initialization::{LspDuplicationOptions, LspInitializationOptions};
 use crate::path_utils::canonicalize_for_lsp;
 use crate::protocol::{ChangedSinceScopeState, ChangedSinceScopeStatus, config_load_error_detail};
 use crate::session_store::{ConfigSources, EditorSessionStore, SessionKey, TakenSession};
@@ -186,7 +186,6 @@ pub struct ProjectRootAnalysisInput<'a> {
     pub run_options: &'a LspInitializationOptions,
     pub duplication_options: Option<&'a LspDuplicationOptions>,
     pub inline_complexity_enabled: bool,
-    pub type_aware_options: Option<&'a LspTypeAwareOptions>,
     pub type_aware_sessions: &'a Arc<Mutex<FxHashMap<PathBuf, fallow_api::TypeAwareSession>>>,
     pub type_aware_changes: &'a fallow_api::TypeAwareFileChanges,
     pub cancellation: &'a Arc<AtomicBool>,
@@ -210,7 +209,6 @@ pub struct BlockingAnalysisInput {
     pub run_options: LspInitializationOptions,
     pub duplication_options: Option<LspDuplicationOptions>,
     pub inline_complexity_enabled: bool,
-    pub type_aware_options: Option<LspTypeAwareOptions>,
     pub type_aware_sessions: Arc<Mutex<FxHashMap<PathBuf, fallow_api::TypeAwareSession>>>,
     pub type_aware_changes: fallow_api::TypeAwareFileChanges,
     pub root: PathBuf,
@@ -428,14 +426,10 @@ fn run_typed_project_analysis(
     if input.run_cancellation.load(Ordering::SeqCst) {
         return Err(ProjectAnalysisError::cancelled(input.project_root));
     }
+    // The session config holds the type-aware decision of the run (#5321).
     if !input.cancellation.load(Ordering::SeqCst)
-        && let Some(options) = input.type_aware_options.filter(|options| options.enabled)
+        && let Some(type_aware) = session.type_aware_options()
     {
-        let type_aware = fallow_api::TypeAwareOptions {
-            enabled: Some(true),
-            projects: options.projects.iter().map(PathBuf::from).collect(),
-            require: options.require.unwrap_or_default(),
-        };
         let changes = changes_for_project(input.type_aware_changes, input.project_root);
         let canonical_root = input
             .project_root
@@ -634,7 +628,6 @@ pub fn run_blocking_analysis(
             run_options: &input.run_options,
             duplication_options: input.duplication_options.as_ref(),
             inline_complexity_enabled: input.inline_complexity_enabled,
-            type_aware_options: input.type_aware_options.as_ref(),
             type_aware_sessions: &input.type_aware_sessions,
             type_aware_changes: &input.type_aware_changes,
             cancellation: &input.cancellation,

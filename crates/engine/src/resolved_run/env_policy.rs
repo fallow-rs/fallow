@@ -199,6 +199,37 @@ mod tests {
 
     use super::*;
 
+    /// The VS Code sidebar runs the bare CLI, and the status bar counts the
+    /// language server. The sidebar run drops each variable that the CLI run
+    /// reads and the editor session does not, so both count the same
+    /// analysis (#5321). The list lives in the extension.
+    #[test]
+    fn the_vscode_sidebar_drops_each_variable_that_only_its_cli_run_reads() {
+        let manifest_dir = std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets it");
+        let source = std::fs::read_to_string(
+            std::path::Path::new(&manifest_dir).join("../../editors/vscode/src/analysisBackoff.ts"),
+        )
+        .expect("read the extension source");
+        let start = source
+            .find("export const EDITOR_IGNORED_ENV_VARS = [")
+            .expect("the extension declares EDITOR_IGNORED_ENV_VARS");
+        let list = &source[start..start + source[start..].find("] as const").expect("list end")];
+        let mut dropped: Vec<&str> = list.split('"').skip(1).step_by(2).collect();
+        dropped.sort_unstable();
+        let mut expected: Vec<&str> = EnvVar::ALL
+            .into_iter()
+            .filter(|var| {
+                applies(*var, Surface::Cli, CommandKind::Combined)
+                    && !applies(*var, Surface::Lsp, CommandKind::Editor)
+            })
+            .map(EnvVar::name)
+            .collect();
+        // The sidebar run skips health, so the coverage variables change no count.
+        expected.retain(|name| !name.starts_with("FALLOW_COVERAGE"));
+        expected.sort_unstable();
+        assert_eq!(dropped, expected);
+    }
+
     #[test]
     fn each_command_is_in_at_most_one_production_row() {
         let mut seen = FxHashSet::default();

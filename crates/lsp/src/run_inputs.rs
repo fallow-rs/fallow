@@ -3,7 +3,9 @@
 
 use std::path::{Path, PathBuf};
 
-use fallow_config::{CommandKind, ConfigFallback, EnvSnapshot, RunInputs, SelectionInput, Surface};
+use fallow_config::{
+    CommandKind, ConfigFallback, EnvSnapshot, RunInputs, SelectionInput, Surface, TypeAwareInputs,
+};
 use fallow_types::sourced::{Given, Origin};
 
 use crate::initialization::LspInitializationOptions;
@@ -27,8 +29,12 @@ const fn setting<T>(value: T, name: &'static str) -> Given<T> {
 /// resolves from `workspace_root`, because the snapshot has it as its
 /// current directory. `allowRemoteExtends: false` and
 /// `packageBaselines: true` are the defaults, so only the other value is a
-/// given input. The duplication, `changedSince` and type-aware options apply
-/// per run and are not inputs of the resolved run.
+/// given input. `typeAware.enabled: false` is the default of the editor, so
+/// only `true` is a given input, as `--type-aware` is for the CLI run of the
+/// extension: `typeAware.enabled` of the config then decides. The editor
+/// session reads no `FALLOW_TYPE_AWARE*` variable (`env_policy.rs`). The
+/// duplication and `changedSince` options apply per run and are not inputs
+/// of the resolved run.
 pub fn run_inputs(
     options: &LspInitializationOptions,
     workspace_root: &Path,
@@ -60,6 +66,24 @@ pub fn run_inputs(
         .map(|on| setting(on, "fallow.production"));
     inputs.package_baselines = (options.package_baselines == Some(false))
         .then(|| setting(false, "fallow.packageBaselines"));
+    if let Some(type_aware) = options
+        .type_aware
+        .as_ref()
+        .filter(|options| options.enabled)
+    {
+        inputs.type_aware = TypeAwareInputs {
+            enabled: Some(setting(true, "fallow.typeAware.enabled")),
+            projects: (!type_aware.projects.is_empty()).then(|| {
+                setting(
+                    type_aware.projects.iter().map(PathBuf::from).collect(),
+                    "fallow.typeAware.projects",
+                )
+            }),
+            require: type_aware
+                .require
+                .map(|require| setting(require, "fallow.typeAware.require")),
+        };
+    }
     inputs
 }
 

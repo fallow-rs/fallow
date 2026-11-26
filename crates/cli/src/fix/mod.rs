@@ -229,6 +229,9 @@ fn run_fix_impl(opts: &FixOptions<'_>, fix_count: &mut usize) -> ExitCode {
             config_override: None,
             projects: opts.type_aware_projects,
             require: opts.type_aware_require,
+            // `fix` removes no private type leak, so the companion does no
+            // API-surface work for the rule.
+            issue_filters_active: true,
         },
         &mut config,
     ) {

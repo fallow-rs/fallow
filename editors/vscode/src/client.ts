@@ -21,6 +21,7 @@ import {
   getAllowRemoteExtends,
   getProductionOverride,
   getTypeAwareSettings,
+  getTypeAwareTimeoutSeconds,
   getDuplicationCrossLanguageOverride,
   getDuplicationIgnoreImportsOverride,
   getDuplicationIgnoreSymlinksOverride,
@@ -33,6 +34,7 @@ import {
   getDuplicationThresholdOverride,
   getMutedDiagnosticCategories,
 } from "./config.js";
+import { typeAwareTimeoutEnv } from "./analysisBackoff.js";
 import { showBinarySkewToastOnce } from "./binary-skew.js";
 import {
   findBinaryInPath,
@@ -319,7 +321,14 @@ export const startClient = async (
     transport: TransportKind.stdio,
     // Each start resolves the companion again, so a restart with another binary
     // or another workspace does not reuse an old choice.
-    options: { env: fallowChildEnvironment(resolved.command, getWorkspaceRoot()) },
+    // The server reads `FALLOW_TYPE_AWARE_TIMEOUT_SECS` as the CLI run of the
+    // sidebar does, so a semantic pass that needs more time finishes on both.
+    options: {
+      env: {
+        ...fallowChildEnvironment(resolved.command, getWorkspaceRoot()),
+        ...typeAwareTimeoutEnv(getTypeAwareTimeoutSeconds()),
+      },
+    },
   };
 
   const traceLevel = getTraceLevel();

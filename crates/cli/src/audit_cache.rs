@@ -726,6 +726,7 @@ fn type_aware_fingerprint(
         config_override: type_aware.config_default,
         projects: type_aware.projects,
         require: type_aware.require,
+        issue_filters_active: false,
     };
     let values = crate::check::type_aware_values(Some(head), &request, section, root)?;
     Ok(values.enabled.then(|| AuditTypeAwareFingerprint {

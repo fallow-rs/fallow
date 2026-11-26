@@ -598,6 +598,7 @@ pub fn resolve_type_aware_health_options(
             config_override: None,
             projects: options.projects,
             require: options.require,
+            issue_filters_active: false,
         },
         &config.type_aware,
         &config.root,

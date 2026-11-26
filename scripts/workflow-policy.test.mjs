@@ -881,7 +881,7 @@ test("regular CI keeps affected checks on Ubuntu", () => {
   assert.match(windowsDriftJob, /runs-on: windows-latest/);
   assert.match(
     windowsDriftJob,
-    /^[ \t]+run: cargo build -p fallow-cli -p fallow-mcp --bin fallow-mcp --test drift$/m,
+    /^[ \t]+run: cargo build -p fallow-cli -p fallow-mcp -p fallow-lsp --bin fallow-mcp --bin fallow-lsp --test drift$/m,
   );
   assert.match(
     windowsDriftJob,
@@ -3411,11 +3411,12 @@ test("every workflow that runs tests turns off git automatic maintenance", () =>
 
 // A job-level or step-level `GIT_CONFIG_COUNT` replaces the top-level one, and
 // the jobs below it then run without the maintenance setting.
-test("the drift harness builds fallow-mcp and its test target in one invocation", () => {
+test("the drift harness builds fallow-mcp, fallow-lsp and its test target in one invocation", () => {
   // `fallow-cli` turns on more dependency features than `fallow-mcp`. A
   // separate `cargo build -p fallow-mcp` resolves a smaller feature set, and
   // the test step then compiles a second copy of most of the tree.
-  const single = "cargo build -p fallow-cli -p fallow-mcp --bin fallow-mcp --test drift";
+  const single =
+    "cargo build -p fallow-cli -p fallow-mcp -p fallow-lsp --bin fallow-mcp --bin fallow-lsp --test drift";
   let drift = 0;
   for (const name of readdirSync(".github/workflows").filter((file) => /\.ya?ml$/.test(file))) {
     const source = readWorkflow(join(".github/workflows", name));
@@ -3534,7 +3535,10 @@ test("the Check, Lint and contracts, and Windows jobs run each step exactly once
     ],
     napi: ["Install NAPI package dependencies", "Build NAPI package", "Run NAPI smoke test"],
     "windows-rust": ["Test Windows path and subprocess handling", "Clippy platform-specific paths"],
-    "windows-drift": ["Build fallow-mcp for the drift harness", "Test drift harness on Windows"],
+    "windows-drift": [
+      "Build fallow-mcp and fallow-lsp for the drift harness",
+      "Test drift harness on Windows",
+    ],
   };
   const stepNames = (text) => [...text.matchAll(/^ {6}- name: (.+)$/gm)].map((match) => match[1]);
   const allSteps = Object.keys(jobs).flatMap((job) => stepNames(indentedBlock(workflow, job, 2)));

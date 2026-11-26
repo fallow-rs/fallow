@@ -194,9 +194,11 @@ use fallow_api::{package_baseline_statuses, resolve_git_toplevel};
 use fallow_config::DetectionMode;
 #[cfg(test)]
 use fallow_config::DuplicatesConfig;
+#[cfg(test)]
+use initialization::LspTypeAwareOptions;
 use initialization::{
-    LspDuplicationOptions, LspInitializationOptions, LspTypeAwareOptions,
-    invalid_initialization_options, parse_initialization_options,
+    LspDuplicationOptions, LspInitializationOptions, invalid_initialization_options,
+    parse_initialization_options,
 };
 use path_utils::canonicalize_for_lsp;
 #[cfg(test)]
@@ -363,8 +365,6 @@ struct FallowLspServer {
     duplication_options: Arc<RwLock<Option<LspDuplicationOptions>>>,
     /// Whether the client opted in to heuristic complexity code lenses.
     inline_complexity_enabled: Arc<RwLock<bool>>,
-    /// Optional semantic TypeScript refinement for editor diagnostics.
-    type_aware_options: Arc<RwLock<Option<LspTypeAwareOptions>>>,
     type_aware_sessions: Arc<StdMutex<FxHashMap<PathBuf, fallow_api::TypeAwareSession>>>,
     /// Project sessions kept between runs. See `session_store.rs`.
     editor_sessions: SharedSessionStore,
@@ -484,7 +484,6 @@ impl LanguageServer for FallowLspServer {
                 .health
                 .and_then(|health| health.inline_complexity)
                 .unwrap_or(false);
-            *self.type_aware_options.write().await = parsed_options.type_aware;
             self.prewarm.store(parsed_options.prewarm, Ordering::SeqCst);
         }
 
@@ -824,7 +823,6 @@ impl FallowLspServer {
             run_options: Arc::default(),
             duplication_options: Arc::new(RwLock::new(None)),
             inline_complexity_enabled: Arc::new(RwLock::new(false)),
-            type_aware_options: Arc::new(RwLock::new(None)),
             type_aware_sessions: Arc::new(StdMutex::new(FxHashMap::default())),
             editor_sessions: Arc::default(),
             prewarm: Arc::new(AtomicBool::new(false)),
@@ -1175,7 +1173,6 @@ impl FallowLspServer {
         let run_options = self.run_options.read().await.clone();
         let duplication_options = self.duplication_options.read().await.clone();
         let inline_complexity_enabled = *self.inline_complexity_enabled.read().await;
-        let type_aware_options = self.type_aware_options.read().await.clone();
         let type_aware_sessions = Arc::clone(&self.type_aware_sessions);
         let type_aware_changes = {
             let mut pending = self
@@ -1199,7 +1196,6 @@ impl FallowLspServer {
                 run_options,
                 duplication_options,
                 inline_complexity_enabled,
-                type_aware_options,
                 type_aware_sessions,
                 type_aware_changes,
                 root: blocking_root,

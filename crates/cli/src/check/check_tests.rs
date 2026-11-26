@@ -1,4 +1,3 @@
-use super::configuration::apply_type_aware_private_leak_default;
 use super::*;
 use fallow_types::extract::MemberKind;
 use fallow_types::output_dead_code::*;
@@ -48,6 +47,7 @@ fn type_aware_override_precedence_is_cli_then_scoped_config_then_config() {
                 config_override: scoped,
                 projects: &[],
                 require: None,
+                issue_filters_active: false,
             },
             &mut config,
         )
@@ -55,6 +55,37 @@ fn type_aware_override_precedence_is_cli_then_scoped_config_then_config() {
         assert_eq!(
             config.type_aware.enabled, expected,
             "cli={cli:?} scoped={scoped:?} config={config_enabled}"
+        );
+    }
+}
+
+/// Every command that decides type-aware analysis through
+/// `apply_type_aware_overrides_from` (check, watch, fix, inspect) gets the
+/// rule default of a type-aware run. Only a run whose filter flags select the
+/// reported issue types keeps the rule off.
+#[test]
+fn the_type_aware_decision_applies_the_private_type_leak_default() {
+    for (enabled, filters, expected) in [
+        (Some(true), false, Severity::Warn),
+        (Some(true), true, Severity::Off),
+        (Some(false), false, Severity::Off),
+        (None, false, Severity::Off),
+    ] {
+        let mut config = resolved_config(false);
+        apply_type_aware_overrides_from(
+            None,
+            fallow_config::OutputFormat::Json,
+            &TypeAwareRequest {
+                enabled,
+                issue_filters_active: filters,
+                ..TypeAwareRequest::default()
+            },
+            &mut config,
+        )
+        .expect("overrides should apply");
+        assert_eq!(
+            config.rules.private_type_leaks, expected,
+            "enabled={enabled:?} filters={filters}"
         );
     }
 }
@@ -221,7 +252,7 @@ fn type_aware_defaults_private_type_leaks_on_when_unconfigured() {
     assert_eq!(config.rules.private_type_leaks, Severity::Off);
     assert!(!config.rules.private_type_leaks_configured);
 
-    apply_type_aware_private_leak_default(&mut config, false);
+    config.apply_type_aware_rule_defaults(false);
 
     assert_eq!(config.rules.private_type_leaks, Severity::Warn);
 }
@@ -231,7 +262,7 @@ fn type_aware_respects_explicit_private_type_leaks_off() {
     let mut config = type_aware_resolved_config();
     config.rules.private_type_leaks_configured = true;
 
-    apply_type_aware_private_leak_default(&mut config, false);
+    config.apply_type_aware_rule_defaults(false);
 
     assert_eq!(config.rules.private_type_leaks, Severity::Off);
 }
@@ -260,7 +291,7 @@ fn loaded_explicit_private_type_leaks_off_survives_resolve_and_type_aware_defaul
     assert!(config.type_aware.enabled);
     assert!(config.rules.private_type_leaks_configured);
 
-    apply_type_aware_private_leak_default(&mut config, false);
+    config.apply_type_aware_rule_defaults(false);
 
     assert_eq!(config.rules.private_type_leaks, Severity::Off);
 }
@@ -271,7 +302,7 @@ fn loaded_unset_private_type_leaks_defaults_on_after_resolve_under_type_aware() 
     assert!(config.type_aware.enabled);
     assert!(!config.rules.private_type_leaks_configured);
 
-    apply_type_aware_private_leak_default(&mut config, false);
+    config.apply_type_aware_rule_defaults(false);
 
     assert_eq!(config.rules.private_type_leaks, Severity::Warn);
 }
