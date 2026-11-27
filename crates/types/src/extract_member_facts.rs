@@ -258,6 +258,12 @@ pub struct InstanceExportBindingFact {
     pub export_name: String,
     /// Local class or interface symbol used as the instance target.
     pub target_name: String,
+    /// The static method of `target_name` whose call result the export
+    /// holds (`export const sm = Cls.getInstance()`). `None` when the export
+    /// is a direct instance. The class can be imported, so the analyze layer
+    /// checks that the method returns an instance.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub factory_method: Option<String>,
 }
 
 /// A property of an exported object whose value is an instance of a local class.

@@ -31,7 +31,8 @@ impl From<String> for UsedClassMemberRule {
 #[derive(Debug, Clone, Serialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ScopedUsedClassMemberRule {
-    /// Only apply when the class extends this parent class name.
+    /// Only apply when the class extends this parent class name. The rule
+    /// does not apply to the parent class itself.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub extends: Option<String>,
     /// Only apply when the class implements this interface name.

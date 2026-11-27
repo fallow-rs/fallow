@@ -141,6 +141,7 @@ fn typed_fact_helpers_collect_each_family() {
         SemanticFact::InstanceExportBinding(InstanceExportBindingFact {
             export_name: "exported".to_string(),
             target_name: "target".to_string(),
+            factory_method: None,
         }),
     );
     push_semantic_fact(
@@ -174,6 +175,7 @@ fn typed_fact_helpers_collect_each_family() {
         vec![InstanceExportBindingFact {
             export_name: "exported".to_string(),
             target_name: "target".to_string(),
+            factory_method: None,
         }]
     );
     assert_eq!(
@@ -229,6 +231,7 @@ fn semantic_fact_view_exposes_typed_first_contract() {
         SemanticFact::InstanceExportBinding(InstanceExportBindingFact {
             export_name: "exported".to_string(),
             target_name: "target".to_string(),
+            factory_method: None,
         }),
     );
 
@@ -255,6 +258,7 @@ fn semantic_fact_view_exposes_typed_first_contract() {
         vec![InstanceExportBindingFact {
             export_name: "exported".to_string(),
             target_name: "target".to_string(),
+            factory_method: None,
         }]
     );
 }

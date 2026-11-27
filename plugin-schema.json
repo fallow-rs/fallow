@@ -340,7 +340,7 @@
       "type": "object",
       "properties": {
         "extends": {
-          "description": "Only apply when the class extends this parent class name.",
+          "description": "Only apply when the class extends this parent class name. The rule\ndoes not apply to the parent class itself.",
           "type": [
             "string",
             "null"

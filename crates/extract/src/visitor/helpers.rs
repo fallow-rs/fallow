@@ -15,6 +15,8 @@ mod heritage_root;
 mod host_refs;
 #[path = "helpers_return_bindings.rs"]
 mod return_bindings;
+#[path = "helpers_singleton_return.rs"]
+mod singleton_return;
 pub(super) use super::visit_impl::visit_value_alias::is_builtin_constructor;
 use super::visit_impl::visit_value_alias::value_alias_source;
 use crate::js_text::JsText;
@@ -874,7 +876,7 @@ pub fn extract_class_members(
                 if !is_member_slot_of_method(class, method, &mut overload_slots) {
                     continue;
                 }
-                if let Some(mut member) = build_method_member(method, class_name) {
+                if let Some(mut member) = build_method_member(class, method, class_name) {
                     member.override_base = override_base(method.r#override);
                     merge_overload_return_flags(class, method, class_name, &mut member);
                     members.push(member);
@@ -992,7 +994,7 @@ fn merge_overload_return_flags(
         }
         if method.r#static {
             member.is_instance_returning_static |=
-                is_instance_returning_static_method(other, class_name);
+                is_instance_returning_static_method(class, other, class_name);
         } else {
             member.is_self_returning |= is_self_returning_instance_method(other, class_name);
         }
@@ -1002,6 +1004,7 @@ fn merge_overload_return_flags(
 /// Build a `MemberInfo` for a non-constructor, non-private method. A
 /// `protected` method gets `is_protected`.
 fn build_method_member(
+    class: &Class<'_>,
     method: &oxc_ast::ast::MethodDefinition<'_>,
     class_name: Option<&str>,
 ) -> Option<MemberInfo> {
@@ -1013,7 +1016,7 @@ fn build_method_member(
         return None;
     }
     let is_instance_returning_static =
-        method.r#static && is_instance_returning_static_method(method, class_name);
+        method.r#static && is_instance_returning_static_method(class, method, class_name);
     let is_self_returning =
         !method.r#static && is_self_returning_instance_method(method, class_name);
     let decorator_names = method
@@ -1188,6 +1191,7 @@ fn output_is_event_emitter(value: Option<&Expression<'_>>) -> bool {
 }
 
 fn is_instance_returning_static_method(
+    class: &Class<'_>,
     method: &oxc_ast::ast::MethodDefinition<'_>,
     class_name: Option<&str>,
 ) -> bool {
@@ -1209,6 +1213,7 @@ fn is_instance_returning_static_method(
     body.statements
         .last()
         .is_some_and(|stmt| statement_returns_class_instance(stmt, class_name))
+        || singleton_return::returns_static_singleton_instance(class, body, class_name)
 }
 
 fn statement_returns_class_instance(stmt: &Statement<'_>, class_name: Option<&str>) -> bool {

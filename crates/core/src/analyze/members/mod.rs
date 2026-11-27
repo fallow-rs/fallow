@@ -279,9 +279,8 @@ impl<'a> ClassMemberAllowlist<'a> {
             .filter(|pattern| !pattern.matched.load(Ordering::Relaxed))
         {
             tracing::warn!(
-                "usedClassMembers scoped glob pattern '{}' did not match any class member for {}",
-                pattern.raw,
-                heritage_clause(pattern.rule)
+                "{}",
+                unmatched_scoped_pattern_message(pattern.raw, pattern.rule)
             );
         }
     }

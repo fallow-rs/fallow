@@ -1,6 +1,8 @@
+use std::fmt::Write as _;
+
 use super::*;
 
-pub(super) fn heritage_clause(rule: &ScopedUsedClassMemberRule) -> String {
+fn heritage_clause(rule: &ScopedUsedClassMemberRule) -> String {
     match (rule.extends.as_deref(), rule.implements.as_deref()) {
         (Some(extends), Some(implements)) => {
             format!("extends='{extends}', implements='{implements}'")
@@ -9,6 +11,39 @@ pub(super) fn heritage_clause(rule: &ScopedUsedClassMemberRule) -> String {
         (None, Some(implements)) => format!("implements='{implements}'"),
         (None, None) => "unconstrained heritage".to_string(),
     }
+}
+
+/// The warning for a scoped `usedClassMembers` glob that matched no unused
+/// member.
+///
+/// A user can expect `{"extends": "Cls"}` to cover the members of `Cls`
+/// itself, but it covers only the subclasses of `Cls`. The message names
+/// that scope and the suppression for one class. See issue #5233.
+pub(super) fn unmatched_scoped_pattern_message(
+    raw: &str,
+    rule: &ScopedUsedClassMemberRule,
+) -> String {
+    let scope = match (rule.extends.as_deref(), rule.implements.as_deref()) {
+        (Some(extends), Some(implements)) => {
+            format!("a class that extends '{extends}' and implements '{implements}'")
+        }
+        (Some(extends), None) => format!("a class that extends '{extends}'"),
+        (None, Some(implements)) => format!("a class that implements '{implements}'"),
+        (None, None) => "any class".to_string(),
+    };
+    let mut message = format!(
+        "usedClassMembers scoped glob pattern '{raw}' ({}) matched no unused class member. \
+         A scoped rule matches the members of {scope}",
+        heritage_clause(rule)
+    );
+    if let Some(extends) = rule.extends.as_deref() {
+        let _ = write!(
+            message,
+            ", not of '{extends}' itself. To keep the members of one class, put \
+             `// fallow-ignore-file unused-class-member` in the file of that class"
+        );
+    }
+    message
 }
 
 /// Credit one Angular external-template member access `<object>.<member>` whose

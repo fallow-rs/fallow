@@ -13,19 +13,20 @@ impl ModuleInfoExtractor {
             let Some(local_name) = export.local_name.as_deref() else {
                 continue;
             };
-            let Some(target_name) = self
-                .binding_target_names
-                .get(local_name)
-                .and_then(BindingTarget::class_name)
-            else {
-                continue;
+            let (target_name, factory_method) = match self.binding_target_names.get(local_name) {
+                Some(BindingTarget::Class(class_name)) => (class_name.clone(), None),
+                Some(BindingTarget::FactoryCall {
+                    callee_object,
+                    callee_method,
+                }) => (callee_object.clone(), Some(callee_method.clone())),
+                Some(BindingTarget::Ambiguous) | None => continue,
             };
-            let export_name = export.name.to_string();
             self.semantic_facts
                 .push(SemanticFact::InstanceExportBinding(
                     InstanceExportBindingFact {
-                        export_name,
-                        target_name: target_name.to_string(),
+                        export_name: export.name.to_string(),
+                        target_name,
+                        factory_method,
                     },
                 ));
         }
@@ -144,6 +145,26 @@ impl ModuleInfoExtractor {
             return;
         }
         let candidates = std::mem::take(&mut self.factory_call_candidates);
+        // Candidates come from every scope. Two different calls for one name
+        // (a module-level `const sm = A.getInstance()` and a `const sm =
+        // B.getInstance()` in a function) give no single target, the same as
+        // two `new` expressions. The exported-instance fact reads this map
+        // across modules, so the first candidate must not win. See #5233.
+        let mut first_call: FxHashMap<&str, (&str, &str)> = FxHashMap::default();
+        let mut conflicting: FxHashSet<String> = FxHashSet::default();
+        for candidate in &candidates {
+            let call = (
+                candidate.callee_object.as_str(),
+                candidate.callee_method.as_str(),
+            );
+            if *first_call
+                .entry(candidate.local_name.as_str())
+                .or_insert(call)
+                != call
+            {
+                conflicting.insert(candidate.local_name.clone());
+            }
+        }
         for candidate in candidates {
             let FactoryCallCandidate {
                 local_name,
@@ -152,6 +173,11 @@ impl ModuleInfoExtractor {
             } = candidate;
 
             if self.binding_target_names.contains_key(&local_name) {
+                continue;
+            }
+            if conflicting.contains(&local_name) {
+                self.binding_target_names
+                    .insert(local_name, BindingTarget::Ambiguous);
                 continue;
             }
 
