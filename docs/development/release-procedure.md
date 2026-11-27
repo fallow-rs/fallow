@@ -845,6 +845,14 @@ runs. The gate fails when these conditions occur:
 - A profile does not transfer to another target of the same OS. The Linux
   x64 gnu profile matched only about 42% of the functions of the musl build
   and made it no faster.
+- Do not train a cross-compiled leg under `qemu-user` in the bullseye
+  container. Bullseye has `qemu-user` only in the frozen security suite,
+  whose index points to removed packages. Use `train_os` and
+  `pgo-profile-cross` instead.
+- Thin LTO in the instrumented build gave the final binary less than 1% more
+  speed in two measurements, so the build keeps LTO off. `-Clto=thin` in
+  rustflags fails, because rustc accepts LTO only for the final crate. A
+  profile LTO value of `thin` changes the crate hashes.
 - Build the four Rust binaries in one cargo invocation. A build of one
   package resolves other features and gives other crate hashes.
 - `absolute_path` in `scripts/pgo-train.sh` runs `cd` in a command
