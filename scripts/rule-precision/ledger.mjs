@@ -431,6 +431,27 @@ const settleFinding = (entries) => {
 };
 
 /**
+ * Carries the verdicts of earlier reviews over to a new sample of the same
+ * pinned commits. A finding ID names the same code in both samples, so its
+ * verdict stays valid. Each review keeps only the verdicts of sampled
+ * findings. The first review must judge every finding of its sample, because
+ * a sampled finding without a verdict in it needs a new review. A later review
+ * (for example a tie-break) can cover a part of the sample.
+ */
+export const carryVerdicts = (items, reviews) => {
+  const errors = reviews.flatMap((review, i) => reviewShapeErrors(review, `review ${i + 1}`));
+  if (reviews.length === 0) errors.push("carry needs at least one earlier review");
+  if (errors.length > 0) return { ok: false, errors };
+  const sampled = new Set(items.map(verdictKey));
+  const carried = reviews.map((review) => ({
+    reviewed_on: review.reviewed_on,
+    verdicts: review.verdicts.filter((entry) => sampled.has(verdictKey(entry))),
+  }));
+  const known = new Set(reviews[0].verdicts.map(verdictKey));
+  return { ok: true, carried, fresh: items.filter((entry) => !known.has(verdictKey(entry))) };
+};
+
+/**
  * Combines independent reviews of one sample into one verdict file.
  *
  * The first two reviews cover the whole sample. A later review settles the

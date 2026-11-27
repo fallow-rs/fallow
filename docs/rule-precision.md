@@ -181,4 +181,14 @@ rows, because the corpus run costs review time.
 To measure a rule again after a fix, take a new sample with the new binary on
 the same pinned commits. A finding with the same finding ID as before points at
 the same code, so its earlier verdict carries over. Only the new findings in
-the sample need a review.
+the sample need a review. `carry` does this split:
+
+```bash
+node scripts/rule-precision.mjs carry --in <new rule sample dir> \
+  --from <old verdicts.r1.json> --from <old verdicts.r2.json>
+```
+
+Give one `--from` for each earlier review, with the full review first. `carry`
+writes `carried.0.json`, `carried.1.json` and so on, and `review.new.json` with
+the findings that need a review. Merge the new verdicts of each reviewer into
+its carried file, then pass each merged file to `record` as one `--verdicts`.

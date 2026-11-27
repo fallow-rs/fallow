@@ -3,6 +3,7 @@
  * Measures and records the precision of fallow rules on a pinned public corpus.
  *
  *   sample   run fallow on the corpus projects, write review sheets
+ *   carry    keep earlier verdicts for a new sample, list the new findings
  *   record   merge the verdicts of a review into the ledger
  *   summary  write the summary from the ledger
  *   check    fail when the ledger is malformed or the summary is stale
@@ -25,6 +26,7 @@ import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import {
   buildRow,
+  carryVerdicts,
   combineReviews,
   findingAnchor,
   findingsByRule,
@@ -292,6 +294,20 @@ const record = (values) => {
   console.log(`recorded ${result.row.command} ${result.row.rule}`);
 };
 
+const carry = (values) => {
+  const ruleDir = values.in ?? fail("carry needs --in <rule sample dir>");
+  const reviewPaths = values.from ?? fail("carry needs --from (once per earlier review)");
+  const earlier = readdirSync(ruleDir).filter((name) => /^carried\.\d+\.json$/.test(name));
+  if (earlier.length > 0) {
+    fail(`${ruleDir} already has ${earlier.join(", ")}; remove them to carry the verdicts again`);
+  }
+  const result = carryVerdicts(readJson(join(ruleDir, "review.json")), reviewPaths.map(readJson));
+  if (!result.ok) fail(`the earlier reviews are malformed:\n  ${result.errors.join("\n  ")}`);
+  result.carried.forEach((review, i) => writeJson(join(ruleDir, `carried.${i}.json`), review));
+  writeJson(join(ruleDir, "review.new.json"), result.fresh);
+  console.log(`${result.carried[0].verdicts.length} carried, ${result.fresh.length} new`);
+};
+
 const check = () => {
   const ledger = readJson(LEDGER);
   const errors = ledgerErrors(ledger);
@@ -321,6 +337,7 @@ const parseCli = () => {
         "sample-size": { type: "string", default: String(DEFAULT_SAMPLE_SIZE) },
         in: { type: "string" },
         verdicts: { type: "string", multiple: true },
+        from: { type: "string", multiple: true },
       },
     });
   } catch (error) {
@@ -331,6 +348,7 @@ const { positionals, values } = parseCli();
 
 const subcommands = {
   sample: () => sample(values),
+  carry: () => carry(values),
   record: () => record(values),
   summary: () => {
     const ledger = readJson(LEDGER);
