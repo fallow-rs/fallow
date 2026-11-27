@@ -1326,8 +1326,10 @@ node scripts/compare-binaries.mjs --base /path/to/base/fallow --head target/rele
 ```
 
 The script runs both binaries with `--format json --quiet --no-cache` on each
-project and command. It removes volatile keys, such as timings and run IDs,
-and compares the results. Each pair gives one line: `IDENTICAL`, `DIFF` or
+project and command, with `FALLOW_SUGGESTIONS=off`. The next steps read local
+state, such as the Impact history, so they can differ between two runs. The
+script removes volatile keys, such as timings and run IDs, and compares the
+results. Each pair gives one line: `IDENTICAL`, `DIFF` or
 `ERROR`, the two exit codes, and the user CPU time of each run. The script
 writes the normalized output and a unified diff of each `DIFF` to
 `target/compare-binaries`. It exits 1 on a `DIFF`, an `ERROR` or an exit-code
