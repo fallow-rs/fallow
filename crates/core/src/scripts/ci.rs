@@ -402,14 +402,16 @@ enum AnchorTarget {
     /// GitLab `$CI_PROJECT_DIR`.
     Root,
     /// The directory of the composite action: `${{ github.action_path }}`,
-    /// `$GITHUB_ACTION_PATH`, `${{ env.GITHUB_ACTION_PATH }}`.
+    /// `$GITHUB_ACTION_PATH`, `${GITHUB_ACTION_PATH}`.
     Action,
 }
 
 const ROOT_ANCHOR_VARIABLES: &[&str] = &["GITHUB_WORKSPACE", "CI_PROJECT_DIR"];
 const ROOT_ANCHOR_EXPRESSIONS: &[&str] = &["github.workspace", "env.GITHUB_WORKSPACE"];
 const ACTION_ANCHOR_VARIABLES: &[&str] = &["GITHUB_ACTION_PATH"];
-const ACTION_ANCHOR_EXPRESSIONS: &[&str] = &["github.action_path", "env.GITHUB_ACTION_PATH"];
+/// The `env` context holds only the `env:` values of the workflow, job and
+/// step, not the runner variables, so `${{ env.GITHUB_ACTION_PATH }}` is empty.
+const ACTION_ANCHOR_EXPRESSIONS: &[&str] = &["github.action_path"];
 
 fn expression_target(expression: &str) -> Option<AnchorTarget> {
     if ROOT_ANCHOR_EXPRESSIONS.contains(&expression) {
@@ -1875,6 +1877,10 @@ runs:
       shell: bash
     - run: node "${{ env.GITHUB_ACTION_PATH }}/lib/env_expr.mjs"
       shell: bash
+    - run: node "${GITHUB_ACTION_PATHS}/lib/longer_name.mjs"
+      shell: bash
+    - run: node "${GITHUB_ACTION_PATH-/tmp}/lib/default.mjs"
+      shell: bash
 "#,
         )
         .unwrap();
@@ -1904,7 +1910,6 @@ runs:
             sorted(&analysis.entry_files),
             [
                 "$GITHUB_ACTION_PATH/lib/workflow_only.mjs",
-                ".github/actions/build/lib/env_expr.mjs",
                 ".github/actions/build/lib/envvar.mjs",
                 ".github/actions/build/lib/unbraced.mjs",
                 ".github/actions/build/run.ts",
