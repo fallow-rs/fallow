@@ -21,7 +21,7 @@ use super::protocol::{
 use super::setup_timeout::{self_check_help, setup_timeout_hint};
 use super::transport::{CompanionLink, CompanionSpawner, SpawnFailure};
 use super::{MutationProgress, MutationProgressSink};
-use reserve::PhaseDeadline;
+use reserve::{PhaseDeadline, Retry};
 use retry_set::{confirmation_tests, fastest_first, retried_status, retry_extra_ms, whole_files};
 
 mod adopt;
@@ -1601,13 +1601,11 @@ fn record_first_runs(
     let mut suspects = Vec::new();
     let mut first_runs = FxHashMap::default();
     for (job, attempt) in attempts {
-        let suspect = match attempt.status {
-            MutantStatus::Survived => Some(job.clone().for_confirmation()),
-            MutantStatus::Timeout if !attempt.settled => Some(job.clone().with_doubled_timeout()),
-            MutantStatus::Killed if retries_unique_kill(config, &job, &attempt) => {
-                Some(job.clone())
-            }
-            _ => None,
+        let suspect = match retry_of(config.target_full, &job, &attempt) {
+            Retry::Confirmation => Some(job.clone().for_confirmation()),
+            Retry::DoubledTimeout => Some(job.clone().with_doubled_timeout()),
+            Retry::Same => Some(job.clone()),
+            Retry::None => None,
         };
         if let Some(suspect) = suspect {
             first_runs.insert(job.id.clone(), attempt_record(&attempt));
@@ -1616,6 +1614,17 @@ fn record_first_runs(
         record(outcome.workers, outcome, facts, memo, job, attempt);
     }
     (suspects, first_runs)
+}
+
+/// How the retry phase runs `job` again after its first `attempt`. The time
+/// reserve of the first pass uses the same rule.
+fn retry_of(target_full: bool, job: &Job, attempt: &Attempt) -> Retry {
+    match attempt.status {
+        MutantStatus::Survived => Retry::Confirmation,
+        MutantStatus::Timeout if !attempt.settled => Retry::DoubledTimeout,
+        MutantStatus::Killed if retries_unique_kill(target_full, job, attempt) => Retry::Same,
+        _ => Retry::None,
+    }
 }
 
 /// Runs each survivor and each timeout again in a new companion (section
@@ -1850,7 +1859,7 @@ pub fn run_schedule_with_progress(
         runner,
         &phase_files,
         jobs,
-        PhaseDeadline::first_pass(config, &outcome.timings, &facts),
+        PhaseDeadline::first_pass(config, outcome.timings.setup, runner.first_dry_run, &facts),
         (links, &finished),
         |done, total| MutationProgress::Mutants { done, total },
     )?;

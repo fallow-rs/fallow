@@ -275,8 +275,8 @@ fn merge_target_phases(targets: Attempt, others: Attempt) -> Attempt {
 /// unique kill of the target, and one flaky run must not decide that a test
 /// is not redundant. A shared kill, a kill of two or more target tests and
 /// each result of the full mode get no such retry.
-pub(super) fn retries_unique_kill(config: &ScheduleConfig, job: &Job, attempt: &Attempt) -> bool {
-    !config.target_full
+pub(super) fn retries_unique_kill(target_full: bool, job: &Job, attempt: &Attempt) -> bool {
+    !target_full
         && attempt.status == MutantStatus::Killed
         && attempt.kill_matrix_complete
         && matches!(attempt.killing_tests.as_slice(), [test] if job.targets.contains(test))
