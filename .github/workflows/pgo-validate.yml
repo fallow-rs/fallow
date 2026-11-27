@@ -1,9 +1,11 @@
 name: PGO Validate
 
 # Ship gate for profile-guided optimization (PGO) of the release binaries.
-# The train job makes one profile per PGO target with scripts/pgo-train.sh, as
-# the pgo-profile job in release.yml does: x86_64 Linux in the release
-# container, and arm64 macOS on the macos-latest runner. A profile matches
+# The train job makes one profile per gated target with scripts/pgo-train.sh,
+# as the pgo-profile job in release.yml does: x86_64 Linux in the release
+# container, and arm64 macOS on the macos-latest runner. release.yml trains
+# more targets. Their legs need musl, arm64 Linux or cross-training runners,
+# which run only in a release, not on pull requests. A profile matches
 # only a build for the same target on the same host toolchain, because Cargo
 # hashes both into the crate symbol names. The compare job builds
 # fallow-multicall twice per PGO target, once without and once with the

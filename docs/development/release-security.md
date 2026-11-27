@@ -249,10 +249,14 @@ and [federated app credentials](https://learn.microsoft.com/en-us/entra/workload
   environment subject.
 - Keep `pgo-profile` outside the `release` environment and without
   credentials. It installs the dependencies of public fixtures with
-  `--ignore-scripts`. It uploads only the merged `.profdata` file, as the
-  `pgo-profile-<target>` artifact. The instrumented binary never leaves the job. The
-  artifact name must not start with `fallow-`, because `release-assets`
-  downloads that pattern as release assets. The `build` job fails when a
+  `--ignore-scripts`. It uploads the merged `.profdata` file as the
+  `pgo-profile-<target>` artifact. A cross-compiled leg (`train_os`) uploads
+  its instrumented binary as `pgo-instrumented-<target>` for one day instead.
+  Only `pgo-profile-cross`, which has the same permissions and no
+  credentials, downloads it. No other job may name or match that artifact,
+  and `scripts/workflow-policy.test.mjs` checks this. No artifact name of
+  these jobs may start with `fallow-`, `npm-` or `unsigned-binaries-`,
+  because later jobs download those patterns as release content. The `build` job fails when a
   release binary contains the LLVM profiler runtime.
 - Keep `build` outside the `release` environment, with no signing credential.
   Upload raw binary data only as `unsigned-binaries-<platform>`, separately from

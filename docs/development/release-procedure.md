@@ -675,10 +675,22 @@ local image before you run the other platform.
 ## Profile-guided optimization
 
 `release.yml` builds the Rust release binaries with profile-guided
-optimization (PGO) on two targets: `x86_64-unknown-linux-gnu` and
-`aarch64-apple-darwin`. These binaries are `fallow`, `fallow-lsp`,
+optimization (PGO) on these targets: `x86_64-unknown-linux-gnu`,
+`aarch64-apple-darwin`, `x86_64-apple-darwin`, `x86_64-unknown-linux-musl`,
+`aarch64-unknown-linux-gnu`, and `x86_64-pc-windows-msvc`. These binaries are `fallow`, `fallow-lsp`,
 `fallow-mcp`, and the multicall binary that the npm packages ship. The other
-6 build legs, the similar-code provider, and the NAPI addon do not use PGO.
+build legs, the similar-code provider, and the NAPI addon do not use PGO.
+
+The `aarch64-unknown-linux-musl` leg cannot get a profile. Its build links
+with `cargo zigbuild`, and the zig linker rejects the profiler runtime of an
+instrumented build. A training build on an arm64 host links, but the host
+toolchain changes the crate hashes, so its profile does not match the
+release build. The profile of `aarch64-unknown-linux-gnu` matches only about
+41% of the functions of the musl build.
+
+The `aarch64-pc-windows-msvc` leg has no profile yet. On the `windows-11-arm`
+runner, `npm install` of the training fixtures reaches its timeout and
+`pnpm install` fails, so the training job cannot run.
 
 A profile applies only to a build with the same target, the same host
 toolchain, and the same resolved features. Cargo hashes these values into the
@@ -691,9 +703,16 @@ The release workflow does these steps:
 
 1. The `pgo-profile` job runs after `release-context`, with one leg for each
    PGO target. Each leg uses the runner and the container of its build leg.
+   The `aarch64-unknown-linux-gnu` build leg cross-compiles on an x64 runner,
+   so its training leg has `train_os`. That leg builds the instrumented
+   binary, uploads it as the `pgo-instrumented-<target>` artifact for one
+   day, and trains nothing. The `pgo-profile-cross` job downloads that binary
+   on the `train_os` runner and does steps 3 and 4 there.
+   The `x86_64-apple-darwin` leg builds on the arm64 runner of its build leg
+   and runs the instrumented binary through Rosetta.
 2. The job builds an instrumented `fallow-multicall` and fetches the pinned
    training fixtures: preact, fastify, zod, vue-core, and svelte. An
-   `actions/cache` entry keyed on the runner OS and
+   `actions/cache` entry keyed on the runner OS, the runner architecture, and
    `benchmarks/download-fixtures.mjs` holds the fixtures. The instrumented
    build skips LTO through `-Clto=off` and `-Clinker-plugin-lto=no` in its
    rustflags. Do not move this switch into `profile.release.lto`: Cargo hashes
@@ -703,7 +722,7 @@ The release workflow does these steps:
    `health` on each fixture, plus one short `lsp-server` session and one short
    `mcp-server` session. It merges the raw profiles with the `llvm-profdata`
    of the `llvm-tools` component.
-4. The job uploads only the merged profile, as the `pgo-profile-<target>`
+4. The job uploads the merged profile as the `pgo-profile-<target>`
    artifact.
 5. The `build` legs with `pgo_profile: true` download their profile and write
    `target/pgo-profile/pgo.toml`. That file sets `target.<triple>.rustflags`
@@ -780,8 +799,9 @@ query, vite, and astro, then run
 `benchmarks/download-fixtures.mjs`, `.github/actions/setup-rust/**`,
 `.cargo/config.toml`, `release.yml`, `pgo-validate.yml`, `Cargo.toml`, or
 `rust-toolchain.toml`. It skips Dependabot Cargo branches, and it runs every
-Sunday on `main`. It trains one profile per PGO target
-with the same script, runners, and container as `release.yml`. It builds
+Sunday on `main`. It trains a profile for the Linux x64 gnu and macOS arm64
+targets with the same script, runners, and container as `release.yml`. The
+other PGO targets need runners that run only in a release. It builds
 `fallow-multicall` with and without the profile on Linux x64 and macOS arm64,
 and compares the held-out fixtures query, vite, and astro with interleaved
 runs. The gate fails when these conditions occur:
@@ -815,10 +835,16 @@ runs. The gate fails when these conditions occur:
   must never become a release asset.
 - Never apply a profile to a target, a host, or a package set that it was not
   trained on. It matches almost no function and gives no benefit. To add a
-  PGO target, add a leg to the `pgo-profile` job and to the `train` and
-  `compare` jobs of `pgo-validate.yml`, and set `pgo_profile: true` on its
-  build leg. A cross-compiled leg cannot run its instrumented binary on its
-  runner, so it needs a native runner.
+  PGO target, add a leg to the `pgo-profile` job, set `pgo_profile: true` on
+  its build leg, and add the target to `PGO_LEGS` in
+  `scripts/workflow-policy.test.mjs`. A cross-compiled leg cannot run its
+  instrumented binary on its runner: give it `train_os` and a leg in
+  `pgo-profile-cross`. Do not train on a native host instead, because the
+  host toolchain changes the crate hashes. `pgo-validate.yml` runs on pull
+  requests, so it covers only the Linux x64 and macOS arm64 targets.
+- A profile does not transfer to another target of the same OS. The Linux
+  x64 gnu profile matched only about 42% of the functions of the musl build
+  and made it no faster.
 - Build the four Rust binaries in one cargo invocation. A build of one
   package resolves other features and gives other crate hashes.
 - `absolute_path` in `scripts/pgo-train.sh` runs `cd` in a command

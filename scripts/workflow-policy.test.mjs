@@ -1351,7 +1351,7 @@ test("release publication waits for the aggregate verification gate", () => {
   // `administration` is not a grantable GITHUB_TOKEN scope; declaring it makes
   // the workflow unparseable and every dispatch fails with HTTP 422.
   assert.doesNotMatch(workflow, /^\s+administration:/mu);
-  assert.match(build, /needs: \[release-context, pgo-profile\]/);
+  assert.match(build, /needs: \[release-context, pgo-profile, pgo-profile-cross\]/);
   assert.match(validate, /needs: release-context/);
   assert.match(similarCodeConformance, /needs: \[build, sign\]/);
   assert.match(similarCodeConformance, /permissions:\n\s+contents: read/);
@@ -2374,16 +2374,30 @@ const PGO_GENERATE_RUSTFLAGS =
   "rustflags = ['-Cprofile-generate=/tmp/pgo-raw', '-Clto=off', '-Clinker-plugin-lto=no']";
 const PROFILE_LTO_OVERRIDE = /profile\.release\.lto|CARGO_PROFILE_RELEASE_LTO/u;
 const PGO_RUST_BINARY_PACKAGES = ["fallow-cli", "fallow-lsp", "fallow-mcp", "fallow-multicall"];
+const RELEASE_CONTAINER = /container: rust:1\.97\.1-bullseye@sha256:[0-9a-f]{64}/u;
 // A profile matches only a build for the same target on the same runner and
 // container, so each PGO target has a training leg that mirrors its build leg.
+// A cross-compiled leg runs its instrumented binary on `trainOs`. pgo-validate
+// runs on pull requests, so it covers only the legs with `validated: true`.
 const PGO_LEGS = [
   {
     target: "x86_64-unknown-linux-gnu",
     os: "ubuntu-26.04",
-    container: /container: rust:1\.97\.1-bullseye@sha256:[0-9a-f]{64}/u,
+    container: RELEASE_CONTAINER,
+    validated: true,
   },
-  { target: "aarch64-apple-darwin", os: "macos-latest", container: null },
+  { target: "aarch64-apple-darwin", os: "macos-latest", container: null, validated: true },
+  { target: "x86_64-apple-darwin", os: "macos-latest", container: null },
+  { target: "x86_64-unknown-linux-musl", os: "ubuntu-26.04", container: null },
+  {
+    target: "aarch64-unknown-linux-gnu",
+    os: "ubuntu-26.04",
+    container: RELEASE_CONTAINER,
+    trainOs: "ubuntu-24.04-arm",
+  },
+  { target: "x86_64-pc-windows-msvc", os: "windows-latest", container: null },
 ];
+const PGO_VALIDATED_LEGS = PGO_LEGS.filter((leg) => leg.validated);
 
 const cargoRunLines = (job) =>
   Array.from(job.matchAll(/^\s+run: (.*\bcargo (?:build|zigbuild)\b.*)$/gmu), (match) => match[1]);
@@ -2395,6 +2409,13 @@ const matrixEntries = (job) =>
     .split(/^\s{4}steps:/mu)[0]
     .split(/^\s{10}- /mu)
     .slice(1);
+
+/** Maps each job name of a workflow to its block. */
+const workflowJobs = (workflow) => {
+  const jobs = indentedBlock(workflow, "jobs", 0);
+  const names = Array.from(jobs.matchAll(/^ {2}([\w-]+):$/gmu), (match) => match[1]);
+  return Object.fromEntries(names.map((name) => [name, indentedBlock(jobs, name, 2)]));
+};
 
 const matrixEntry = (job, target) =>
   matrixEntries(job).find((entry) => new RegExp(`target: ${target}\\n`, "u").test(entry));
@@ -2473,27 +2494,54 @@ test("release trains one PGO profile per PGO target and can build without it", (
   assert.match(profileJob, /-p fallow-multicall --config target\/pgo-generate\.toml/u);
   assert.match(profileJob, /scripts\/pgo-train\.sh/u);
   assert.match(profileJob, /download-fixtures\.mjs --only preact,fastify,zod,vue-core,svelte/u);
-  assert.match(
-    profileJob,
-    /key: pgo-train-fixtures-[^\n]*runner\.os[^\n]*hashFiles\('benchmarks\/download-fixtures\.mjs'\)/u,
-  );
+  // node_modules of the fixtures hold native packages for one OS and CPU.
+  const fixtureKey =
+    /key: pgo-train-fixtures-[^\n]*runner\.os[^\n]*runner\.arch[^\n]*hashFiles\('benchmarks\/download-fixtures\.mjs'\)/u;
+  assert.match(profileJob, fixtureKey);
   assert.doesNotMatch(profileJob, /^\s+id-token: write$|secrets\./mu);
-  // Only the profile leaves the job. A `fallow-` artifact would become a release asset.
+  // Only the profile leaves the job, plus the instrumented binary of a
+  // cross-compiled leg. A `fallow-` artifact would become a release asset.
   const uploads = Array.from(profileJob.matchAll(/^\s+name: (.+)\n\s+path: (.+)$/gmu));
   assert.deepEqual(
     uploads.map((upload) => [upload[1], upload[2]]),
-    [["pgo-profile-${{ matrix.target }}", "pgo-profile/fallow.profdata"]],
+    [
+      [
+        "pgo-instrumented-${{ matrix.target }}",
+        "target/${{ matrix.target }}/release/fallow-multicall",
+      ],
+      ["pgo-profile-${{ matrix.target }}", "pgo-profile/fallow.profdata"],
+    ],
   );
+  const profileSteps = workflowSteps(profileJob);
+  const instrumentedUpload = profileSteps.find((step) => /pgo-instrumented-/u.test(step));
+  assert.match(instrumentedUpload, /if: [^\n]*&& matrix\.train_os\n/u);
+  assert.match(instrumentedUpload, /retention-days: 1\n/u);
+  for (const name of ["Train PGO profile", "Fetch training fixtures", "Upload PGO profile"]) {
+    const step = profileSteps.find((candidate) => candidate.includes(`name: ${name}\n`));
+    assert.match(step, /if: [^\n]*&& !matrix\.train_os\n/u, `${name} skips cross legs`);
+  }
 
   const trainLegs = matrixEntries(profileJob);
   const pgoBuildLegs = matrixEntries(build).filter((entry) => /pgo_profile: true/u.test(entry));
+  const crossJob = indentedBlock(workflow, "pgo-profile-cross", 2);
   assert.equal(trainLegs.length, PGO_LEGS.length);
   assert.equal(pgoBuildLegs.length, PGO_LEGS.length, "only the trained targets get a profile");
+  assert.equal(
+    matrixEntries(crossJob).length,
+    PGO_LEGS.filter((leg) => leg.trainOs).length,
+    "one cross training leg per cross-compiled PGO target",
+  );
   for (const leg of PGO_LEGS) {
     const train = matrixEntry(profileJob, leg.target);
     const buildLeg = matrixEntry(build, leg.target);
     assert.ok(train, `${leg.target} needs a training leg`);
     assert.match(buildLeg, /pgo_profile: true/u);
+    assert.equal(train.match(/train_os: (.+)/u)?.[1], leg.trainOs);
+    if (leg.trainOs) {
+      const cross = matrixEntry(crossJob, leg.target);
+      assert.ok(cross, `${leg.target} needs a cross training leg`);
+      assert.match(cross, new RegExp(`os: ${leg.trainOs}\\n`, "u"));
+    }
     for (const entry of [train, buildLeg]) {
       assert.match(entry, new RegExp(`os: ${leg.os}\\n`, "u"));
       if (leg.container) {
@@ -2507,6 +2555,57 @@ test("release trains one PGO profile per PGO target and can build without it", (
       buildLeg.match(/container: (.+)/u)?.[1],
       `${leg.target} must train in the container of its build leg`,
     );
+  }
+
+  assert.match(crossJob, /needs: pgo-profile\n/u);
+  assert.match(crossJob, fixtureKey);
+  // With `pgo` false the job must do no work, or a missing artifact fails it
+  // and skips the build job.
+  for (const step of workflowSteps(crossJob)) {
+    assert.match(step, /if: needs\.pgo-profile\.outputs\.enabled == 'true'\n/u);
+  }
+  const instrumentedBuild = profileSteps.find((step) =>
+    step.startsWith("name: Build instrumented multicall binary"),
+  );
+  assert.match(
+    instrumentedBuild,
+    /CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc/u,
+  );
+  assert.match(
+    instrumentedBuild,
+    /if \[ "\$FALLOW_TARGET" = aarch64-unknown-linux-gnu \]; then\n\s+export CARGO_BUILD_JOBS=1/u,
+    "the instrumented build must link as its build leg does",
+  );
+  assert.match(crossJob, /permissions:\n\s+contents: read\n/u);
+  assert.doesNotMatch(crossJob, /^\s+\w+: write$|secrets\./mu);
+  assert.doesNotMatch(crossJob, /environment:/u);
+  assert.match(crossJob, /scripts\/pgo-train\.sh/u);
+  assert.deepEqual(
+    Array.from(crossJob.matchAll(/^\s+name: (.+)\n\s+path: (.+)$/gmu), (m) => [m[1], m[2]]),
+    [
+      ["pgo-instrumented-${{ matrix.target }}", "target/pgo-instrumented"],
+      ["pgo-profile-${{ matrix.target }}", "pgo-profile/fallow.profdata"],
+    ],
+  );
+  // The instrumented binary must reach no job but the cross training job.
+  for (const [job, source] of Object.entries(workflowJobs(workflow))) {
+    if (job === "pgo-profile" || job === "pgo-profile-cross") continue;
+    const block = source
+      .split("\n")
+      .filter((line) => !isIgnoredLine(line))
+      .join("\n");
+    assert.doesNotMatch(block, /pgo-instrumented/u, `${job} must not read the instrumented binary`);
+    // A download without a name or a pattern gets every artifact of the run.
+    for (const step of workflowSteps(block).filter((s) => /actions\/download-artifact@/u.test(s))) {
+      assert.match(step, /^\s+(?:name|pattern): /mu, `${job} downloads every artifact`);
+    }
+    for (const [, pattern] of block.matchAll(/^\s+pattern: (.+)$/gmu)) {
+      const prefix = pattern.replace(/\*.*$/u, "");
+      assert.ok(
+        !"pgo-instrumented-".startsWith(prefix),
+        `${job} downloads ${pattern}, which matches the instrumented binary`,
+      );
+    }
   }
 
   assert.match(
@@ -2612,9 +2711,9 @@ test("pgo-validate gates PGO on the held-out fixtures for the PGO paths", async 
   for (const heldOut of ["query", "vite", "astro"]) {
     assert.ok(!trainFixtures.includes(heldOut), `${heldOut} is a held-out fixture`);
   }
-  // The same PGO targets, runners and container as release.yml.
+  // The same runners and container as release.yml for the validated targets.
   const releaseProfile = indentedBlock(release, "pgo-profile", 2);
-  for (const leg of PGO_LEGS) {
+  for (const leg of PGO_VALIDATED_LEGS) {
     const validateTrain = matrixEntry(train, leg.target);
     assert.ok(validateTrain, `${leg.target} needs a training leg`);
     assert.match(validateTrain, new RegExp(`os: ${leg.os}\\n`, "u"));
@@ -2624,8 +2723,8 @@ test("pgo-validate gates PGO on the held-out fixtures for the PGO paths", async 
     );
     assert.ok(matrixEntry(compare, leg.target), `${leg.target} needs a compare leg`);
   }
-  assert.equal(matrixEntries(train).length, PGO_LEGS.length);
-  assert.equal(matrixEntries(compare).length, PGO_LEGS.length);
+  assert.equal(matrixEntries(train).length, PGO_VALIDATED_LEGS.length);
+  assert.equal(matrixEntries(compare).length, PGO_VALIDATED_LEGS.length);
   assert.match(compare, /--only query,vite,astro/u);
   assert.match(compare, /--projects 'query,vite,astro'/u);
   assert.match(compare, /--min-gain 0\.05/u);
