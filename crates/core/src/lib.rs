@@ -1856,7 +1856,7 @@ fn analyze_root_scripts(
     let catalog =
         scripts::ScriptCatalog::from_scripts_with_bodies(pkg_scripts, &scripts_to_analyze)
             .with_workspaces(std::sync::Arc::clone(deps.workspace_packages), "");
-    let script_analysis = scripts::analyze_scripts_with_dependency_context(
+    let mut script_analysis = scripts::analyze_scripts_with_dependency_context(
         &scripts_to_analyze,
         &config.root,
         deps.bin_map,
@@ -1864,7 +1864,7 @@ fn analyze_root_scripts(
         &catalog,
         scripts::IgnoredCommandEntries::new(&config.ignore_command_entries),
     );
-    plugin_result.script_used_packages = script_analysis.used_packages;
+    plugin_result.script_used_packages = std::mem::take(&mut script_analysis.used_packages);
     plugin_result.merge_into(deps.registry.resolve_script_config_files(
         &script_analysis.binary_config_files,
         &config.root,
@@ -1883,8 +1883,7 @@ fn analyze_root_scripts(
         &mut plugin_result.entry_patterns,
         &config.root,
         "",
-        &script_analysis.entry_files,
-        &script_analysis.test_entry_files,
+        script_entries::ScriptEntryFiles::of(&script_analysis),
         None,
     );
 }
@@ -1952,7 +1951,7 @@ fn analyze_one_workspace_scripts(
     let catalog =
         scripts::ScriptCatalog::from_scripts_with_bodies(&ws_scripts, &scripts_to_analyze)
             .with_workspaces(std::sync::Arc::clone(deps.workspace_packages), &ws_prefix);
-    let ws_analysis = scripts::analyze_scripts_with_dependency_context(
+    let mut ws_analysis = scripts::analyze_scripts_with_dependency_context(
         &scripts_to_analyze,
         &ws.root,
         deps.bin_map,
@@ -1960,7 +1959,7 @@ fn analyze_one_workspace_scripts(
         &catalog,
         scripts::IgnoredCommandEntries::new(&config.ignore_command_entries),
     );
-    used_packages.extend(ws_analysis.used_packages);
+    used_packages.extend(std::mem::take(&mut ws_analysis.used_packages));
     let config_result = deps.registry.resolve_script_config_files(
         &ws_analysis.binary_config_files,
         &ws.root,
@@ -1977,8 +1976,7 @@ fn analyze_one_workspace_scripts(
         &mut entry_patterns,
         &config.root,
         &ws_prefix,
-        &ws_analysis.entry_files,
-        &ws_analysis.test_entry_files,
+        script_entries::ScriptEntryFiles::of(&ws_analysis),
         None,
     );
     (

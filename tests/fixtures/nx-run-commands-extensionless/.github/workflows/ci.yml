@@ -4,3 +4,4 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - run: node scripts/ci-check
+      - run: node scripts/ci-dir

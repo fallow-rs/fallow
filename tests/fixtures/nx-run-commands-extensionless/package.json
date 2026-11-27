@@ -3,5 +3,11 @@
   "private": true,
   "main": "src/index.ts",
   "workspaces": ["packages/*"],
+  "scripts": {
+    "test": "vitest run src/lib/",
+    "deploy": "bash scripts/pkg-deploy.sh",
+    "gen": "time tsx scripts/wrapped-dir",
+    "shell": "bash scripts/sh-dir"
+  },
   "devDependencies": { "nx": "21.0.0", "tsx": "4.0.0", "vitest": "3.0.0" }
 }

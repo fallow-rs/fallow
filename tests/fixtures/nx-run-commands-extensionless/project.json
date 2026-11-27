@@ -16,6 +16,10 @@
     "test-lib": {
       "executor": "nx:run-commands",
       "options": { "command": "vitest run src/lib/" }
+    },
+    "node-dir": {
+      "executor": "nx:run-commands",
+      "options": { "command": "node scripts/nx-dir" }
     }
   }
 }

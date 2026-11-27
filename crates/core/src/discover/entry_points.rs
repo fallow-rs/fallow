@@ -1,6 +1,10 @@
 use std::path::{Component, Path, PathBuf};
 
-use super::{project_read, source_probe::probe_source_file, walk::SOURCE_EXTENSIONS};
+use super::{
+    project_read,
+    source_probe::{has_non_runnable_extension, probe_runnable_file, probe_source_file},
+    walk::SOURCE_EXTENSIONS,
+};
 use fallow_config::{PackageJson, ResolvedConfig, TsconfigOutputMap, TsconfigOutputResolution};
 use fallow_graph::resolve::{OUTPUT_DIRS, directory_index_entry, output_entry_to_source_path};
 use fallow_types::discover::{DiscoveredFile, EntryPoint, EntryPointSource};
@@ -15,6 +19,8 @@ mod entry_dedup;
 mod manual_entries;
 #[path = "plugin_entries.rs"]
 mod plugin_entries;
+#[path = "script_package.rs"]
+mod script_package;
 #[path = "wildcard_entries.rs"]
 mod wildcard_entries;
 use manual_entries::{push_manual_entry_matches, push_support_entry_matches};
@@ -22,6 +28,7 @@ use manual_entries::{push_manual_entry_matches, push_support_entry_matches};
 use plugin_entries::discover_plugin_entry_point_sets;
 pub use plugin_entries::is_below_fixture_dir;
 pub use plugin_entries::{discover_plugin_entry_point_sets_timed, discover_plugin_entry_points};
+use script_package::{ScriptPackage, push_script_entries};
 use wildcard_entries::{expand_wildcard_entries, exports_package_dirs};
 
 const SKIPPED_ENTRY_WARNING_PREVIEW: usize = 5;
@@ -201,6 +208,7 @@ pub fn resolve_entry_path_with_tracking(
         EntryTargets {
             output_map: &output_map,
             discovered,
+            probe: EntryProbe::Package,
         },
     )
 }
@@ -257,6 +265,34 @@ pub(super) struct EntryTargets<'a> {
     pub(super) output_map: &'a TsconfigOutputMap,
     /// `None` keeps the disk check: a `lib/` file on disk stays the entry.
     pub(super) discovered: Option<IsDiscovered<'a>>,
+    /// How a reference that is not build output maps to a file on disk.
+    pub(super) probe: EntryProbe,
+}
+
+/// How an entry reference maps to a file on disk, after the build output
+/// mapping (`dist/server.js` to `src/server.ts`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum EntryProbe {
+    /// A package entry (`main`, `bin`, `exports`): the exact file, the path
+    /// with any source extension, then the index file of a directory.
+    Package,
+    /// A module that a script runtime runs (`node scripts/build`): the exact
+    /// file, a JS or TS extension, then the index file of a directory.
+    ScriptModule,
+    /// A path that another program reads (`vitest run src/lib/`): the exact
+    /// file or a JS or TS extension. A directory is a filter and names no
+    /// entry (issue #5370).
+    ScriptPath,
+}
+
+impl EntryProbe {
+    /// Whether `entry` can map to another source file: from build output
+    /// (`dist/server.js` to `src/server.ts`) or, when it is missing, to the
+    /// source index of the package. A command argument with a non-script
+    /// extension never does: `bash index.sh` does not run `src/index.ts`.
+    fn may_map_to_source(self, entry: &str) -> bool {
+        self == Self::Package || !has_non_runnable_extension(Path::new(entry))
+    }
 }
 
 fn resolve_entry_path_with_output_map(
@@ -291,7 +327,14 @@ fn resolve_entry_path_with_output_map(
         return result;
     }
 
-    resolve_entry_via_filesystem_probe(base, entry, canonical_root, source, skipped_entries)
+    resolve_entry_via_filesystem_probe(
+        base,
+        entry,
+        canonical_root,
+        source,
+        skipped_entries,
+        targets.probe,
+    )
 }
 
 /// Record a skipped entry in the dedup map, or warn when no map is tracking skips.
@@ -326,6 +369,9 @@ pub(super) fn resolve_entry_via_output_dir(
     mut skipped_entries: Option<&mut FxHashMap<String, usize>>,
     targets: EntryTargets<'_>,
 ) -> OutputDirEntry {
+    if !targets.probe.may_map_to_source(entry) {
+        return OutputDirEntry::Continue;
+    }
     let resolution = targets
         .output_map
         .resolve_source_for_entry(entry, SOURCE_EXTENSIONS);
@@ -408,11 +454,18 @@ fn resolve_entry_via_filesystem_probe(
     canonical_root: &Path,
     source: EntryPointSource,
     mut skipped_entries: Option<&mut FxHashMap<String, usize>>,
+    probe: EntryProbe,
 ) -> Option<EntryPoint> {
     let resolved = base.join(entry);
-    if let Some(file) =
-        probe_source_file(&resolved).or_else(|| directory_index_entry(&resolved, SOURCE_EXTENSIONS))
-    {
+    let file = match probe {
+        EntryProbe::Package => probe_source_file(&resolved),
+        EntryProbe::ScriptModule | EntryProbe::ScriptPath => probe_runnable_file(&resolved),
+    };
+    if let Some(file) = file.or_else(|| {
+        (probe != EntryProbe::ScriptPath)
+            .then(|| directory_index_entry(&resolved, SOURCE_EXTENSIONS))
+            .flatten()
+    }) {
         return validated_entry_point(
             &file,
             canonical_root,
@@ -423,6 +476,7 @@ fn resolve_entry_via_filesystem_probe(
     }
 
     if is_package_root_index_entry(entry)
+        && probe.may_map_to_source(entry)
         && let Some(source_path) = try_source_index_fallback(base)
     {
         tracing::info!(
@@ -499,12 +553,37 @@ fn validated_entry_point(
     })
 }
 
+/// Resolve a file reference of a command in an infrastructure file
+/// (`Dockerfile`, `Procfile`, `fly.toml`) with the probe of the program that
+/// takes it.
+pub(super) fn resolve_script_entry_path(
+    base: &Path,
+    entry: &str,
+    canonical_root: &Path,
+    source: EntryPointSource,
+    probe: EntryProbe,
+) -> Option<EntryPoint> {
+    resolve_entry_path_with_output_map(
+        base,
+        entry,
+        canonical_root,
+        source,
+        None,
+        EntryTargets {
+            output_map: &TsconfigOutputMap::from_project(base),
+            discovered: None,
+            probe,
+        },
+    )
+}
+
 /// Resolve a package entry path with the disk check: a `lib/` file on disk
 /// stays the entry, also when the analysis does not include it.
 ///
 /// Use [`resolve_entry_path_with_discovered`] when the analyzed files are
 /// known.
-pub fn resolve_entry_path(
+#[cfg(test)]
+fn resolve_entry_path(
     base: &Path,
     entry: &str,
     canonical_root: &Path,
@@ -655,6 +734,7 @@ fn push_package_json_entries(
             EntryTargets {
                 output_map: &output_map,
                 discovered: workspaces.discovered,
+                probe: EntryProbe::Package,
             },
         ) {
             discovery.entries.push(ep);
@@ -710,149 +790,6 @@ pub struct ScriptWorkspaces<'a> {
 /// project root (empty for the root package), that a runtime script of
 /// another package calls.
 pub type RuntimeScriptSeeds = FxHashMap<String, FxHashSet<String>>;
-
-/// The package whose scripts add entry points.
-struct ScriptPackage<'a> {
-    root: &'a Path,
-    canonical_root: &'a Path,
-    output_map: &'a TsconfigOutputMap,
-    workspaces: ScriptWorkspaces<'a>,
-}
-
-impl ScriptPackage<'_> {
-    /// The directory of the package relative to the project root, with `/`
-    /// separators. `None` for a package outside the project root.
-    fn dir(&self) -> Option<String> {
-        self.root
-            .strip_prefix(self.workspaces.project_root)
-            .ok()
-            .map(|dir| dir.to_string_lossy().replace('\\', "/"))
-    }
-
-    /// Resolve a file reference of the script `script` of the package. A
-    /// reference outside the package, such as `../web/scripts/a.ts` from
-    /// `yarn workspace web node scripts/a.ts`, resolves from the project
-    /// root.
-    fn resolve(
-        &self,
-        file_ref: &str,
-        script: &str,
-        dir: Option<&str>,
-        skipped_entries: &mut FxHashMap<String, usize>,
-    ) -> Option<EntryPoint> {
-        if entry_has_parent_dir(file_ref)
-            && let Some(project_ref) =
-                dir.and_then(|dir| crate::scripts::normalize_script_entry_pattern(dir, file_ref))
-        {
-            let project_root = self.workspaces.project_root;
-            let canonical_project_root =
-                dunce::canonicalize(project_root).unwrap_or_else(|_| project_root.to_path_buf());
-            return resolve_entry_path_with_tracking(
-                project_root,
-                &project_ref,
-                &canonical_project_root,
-                EntryPointSource::package_json_script(script),
-                Some(skipped_entries),
-                self.workspaces.discovered,
-            );
-        }
-        resolve_entry_path_with_output_map(
-            self.root,
-            file_ref,
-            self.canonical_root,
-            EntryPointSource::package_json_script(script),
-            Some(skipped_entries),
-            EntryTargets {
-                output_map: self.output_map,
-                discovered: self.workspaces.discovered,
-            },
-        )
-    }
-}
-
-/// Push the entries that the scripts of `package` reference. A file that a
-/// runtime script runs is a runtime entry: the `start` lifecycle, and the
-/// scripts that a runtime script of another package calls. Other script
-/// files and every config file are support entries.
-#[expect(
-    clippy::disallowed_types,
-    reason = "API matches serde-deserialized package.json scripts map"
-)]
-fn push_script_entries(
-    package: &ScriptPackage<'_>,
-    scripts: &std::collections::HashMap<String, String>,
-    ignored: IgnoredCommandEntries<'_>,
-    entries: &mut PackageEntryBuckets<'_>,
-    skipped_entries: &mut FxHashMap<String, usize>,
-) {
-    let dir_buf = package.dir();
-    let dir = dir_buf.as_deref();
-    let no_seeds = FxHashSet::default();
-    let seeds = dir
-        .and_then(|dir| package.workspaces.runtime_seeds.get(dir))
-        .unwrap_or(&no_seeds);
-    let runtime_scripts = runtime_package_script_names_with_seeds(scripts, seeds);
-    let catalog = ScriptCatalog::from_scripts(scripts).with_workspaces(
-        std::sync::Arc::clone(package.workspaces.packages),
-        dir.unwrap_or_default(),
-    );
-    // Key order: the entry dedup keeps the first script that runs a file.
-    let sorted: std::collections::BTreeMap<_, _> = scripts.iter().collect();
-    for (script_name, script_value) in sorted {
-        let refs = package_script_refs(script_value, &catalog, ignored);
-        for file_ref in refs.inheritable {
-            if let Some(ep) = package.resolve(&file_ref, script_name, dir, skipped_entries) {
-                if runtime_scripts.contains(script_name) {
-                    entries.runtime.push(ep);
-                } else {
-                    entries.support.push(ep);
-                }
-            }
-        }
-        for config_ref in refs.support {
-            if let Some(ep) = package.resolve(&config_ref, script_name, dir, skipped_entries) {
-                entries.support.push(ep);
-            }
-        }
-    }
-}
-
-struct PackageScriptRefs {
-    inheritable: Vec<String>,
-    support: Vec<String>,
-}
-
-/// Collect the file references of one script. `catalog` holds the scripts of
-/// the same package, so a call such as `npm run lint -- src/a.ts` resolves to
-/// the command that the package manager runs.
-fn package_script_refs(
-    script: &str,
-    catalog: &ScriptCatalog,
-    ignored: IgnoredCommandEntries<'_>,
-) -> PackageScriptRefs {
-    let mut inheritable = Vec::new();
-    let mut support = Vec::new();
-    for command in crate::scripts::parse_script_with_catalog(script, catalog) {
-        inheritable.extend_from_slice(command.entry_files(ignored));
-        support.extend(command.config_args);
-    }
-    inheritable.extend(super::parse_scripts::extract_script_file_refs(
-        script,
-        super::parse_scripts::CommandRefContext {
-            ignored,
-            scripts: catalog,
-        },
-    ));
-    support.sort_unstable();
-    support.dedup();
-    inheritable.retain(|path| support.binary_search(path).is_err());
-    inheritable.sort_unstable();
-    inheritable.dedup();
-    PackageScriptRefs {
-        inheritable,
-        support,
-    }
-}
 
 /// npm's start lifecycle is a production execution surface. Other package
 /// scripts are conservatively treated as tooling: their files stay reachable,
@@ -1206,6 +1143,7 @@ fn collect_nested_package_entries(
             EntryTargets {
                 output_map: &output_map,
                 discovered: search.workspaces.discovered,
+                probe: EntryProbe::Package,
             },
         ) {
             entries.runtime.push(ep);
@@ -1249,6 +1187,7 @@ pub fn discover_workspace_package_entry_points(
                 EntryTargets {
                     output_map: &output_map,
                     discovered: workspaces.discovered,
+                    probe: EntryProbe::Package,
                 },
             ) {
                 discovery.entries.push(ep);
@@ -1830,6 +1769,58 @@ mod tests {
             .expect("directory index should resolve");
 
             assert!(result.path.ends_with("scripts/process-messages/index.js"));
+        }
+
+        #[test]
+        fn script_probes_resolve_a_directory_only_for_a_module() {
+            let dir = tempfile::tempdir().expect("create temp dir");
+            let canonical = dunce::canonicalize(dir.path()).unwrap();
+            std::fs::create_dir_all(canonical.join("scripts/gen")).unwrap();
+            std::fs::write(canonical.join("scripts/gen/index.js"), "").unwrap();
+            std::fs::write(canonical.join("scripts/deploy.ts"), "").unwrap();
+            let resolve = |entry: &str, probe: EntryProbe| {
+                resolve_script_entry_path(
+                    &canonical,
+                    entry,
+                    &canonical,
+                    EntryPointSource::InfrastructureConfig,
+                    probe,
+                )
+                .map(|ep| ep.path)
+            };
+
+            assert_eq!(
+                resolve("scripts/gen", EntryProbe::ScriptModule),
+                Some(canonical.join("scripts/gen/index.js"))
+            );
+            assert_eq!(resolve("scripts/gen", EntryProbe::ScriptPath), None);
+            for probe in [EntryProbe::ScriptModule, EntryProbe::ScriptPath] {
+                assert_eq!(resolve("scripts/deploy.sh", probe), None);
+            }
+        }
+
+        #[test]
+        fn a_non_script_extension_does_not_fall_back_to_the_source_index() {
+            let dir = tempfile::tempdir().expect("create temp dir");
+            let canonical = dunce::canonicalize(dir.path()).unwrap();
+            std::fs::create_dir_all(canonical.join("src")).unwrap();
+            std::fs::write(canonical.join("src/index.ts"), "").unwrap();
+            let resolve = |entry: &str, probe: EntryProbe| {
+                resolve_script_entry_path(
+                    &canonical,
+                    entry,
+                    &canonical,
+                    EntryPointSource::InfrastructureConfig,
+                    probe,
+                )
+                .map(|ep| ep.path)
+            };
+
+            let source_index = Some(canonical.join("src/index.ts"));
+            assert_eq!(resolve("index.sh", EntryProbe::ScriptModule), None);
+            assert_eq!(resolve("dist/index.sh", EntryProbe::ScriptPath), None);
+            assert_eq!(resolve("index.js", EntryProbe::ScriptModule), source_index);
+            assert_eq!(resolve("index.sh", EntryProbe::Package), source_index);
         }
 
         #[test]

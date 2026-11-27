@@ -6,7 +6,7 @@ use fallow_config::TsconfigOutputMap;
 use fallow_types::discover::EntryPointSource;
 
 use super::entry_points::{
-    EntryTargets, OutputDirEntry, entry_has_parent_dir, resolve_entry_via_output_dir,
+    EntryProbe, EntryTargets, OutputDirEntry, entry_has_parent_dir, resolve_entry_via_output_dir,
 };
 use crate::plugins::config_parser::lexical_normalize;
 
@@ -25,6 +25,7 @@ pub fn output_entry_source_file(base: &Path, entry: &str) -> Option<PathBuf> {
     let targets = EntryTargets {
         output_map: &output_map,
         discovered: None,
+        probe: EntryProbe::Package,
     };
     match resolve_entry_via_output_dir(
         base,

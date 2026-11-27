@@ -2,8 +2,11 @@ use std::path::{Path, PathBuf};
 
 use fallow_types::discover::{EntryPoint, EntryPointSource};
 
-use super::entry_points::resolve_entry_path;
-use super::parse_scripts::{CommandRefContext, extract_script_file_refs, looks_like_script_file};
+use super::entry_points::{EntryProbe, resolve_script_entry_path};
+use super::parse_scripts::{
+    CommandRefContext, ScriptFileRefs, extract_script_file_refs_with_modules,
+    looks_like_script_file,
+};
 use crate::scripts::{DeclaredScriptCall, MAX_SCRIPT_EXPANSIONS, MAX_SCRIPT_INDIRECTION_DEPTH};
 
 /// Discover entry points from infrastructure config files (Dockerfile, Procfile, fly.toml).
@@ -17,7 +20,7 @@ pub fn discover_infrastructure_entry_points(
     let _span = tracing::info_span!("discover_infrastructure_entry_points").entered();
     let file_refs = collect_infrastructure_file_refs(root, context);
 
-    if file_refs.is_empty() {
+    if file_refs.paths.is_empty() {
         return Vec::new();
     }
 
@@ -26,8 +29,8 @@ pub fn discover_infrastructure_entry_points(
     entries
 }
 
-fn collect_infrastructure_file_refs(root: &Path, context: CommandRefContext<'_>) -> Vec<String> {
-    let mut file_refs = Vec::new();
+fn collect_infrastructure_file_refs(root: &Path, context: CommandRefContext<'_>) -> ScriptFileRefs {
+    let mut file_refs = ScriptFileRefs::default();
     collect_dockerfile_refs(root, context, &mut file_refs);
     collect_procfile_refs(root, context, &mut file_refs);
     collect_fly_toml_refs(root, context, &mut file_refs);
@@ -37,7 +40,7 @@ fn collect_infrastructure_file_refs(root: &Path, context: CommandRefContext<'_>)
 fn collect_dockerfile_refs(
     root: &Path,
     context: CommandRefContext<'_>,
-    file_refs: &mut Vec<String>,
+    file_refs: &mut ScriptFileRefs,
 ) {
     for dir in infrastructure_search_dirs(root) {
         for entry in super::project_read::read_project_dir(root, &dir)
@@ -50,7 +53,7 @@ fn collect_dockerfile_refs(
             if is_dockerfile(&name_str)
                 && let Some(content) = super::project_read::read_project_file(root, &entry.path())
             {
-                file_refs.extend(extract_dockerfile_file_refs(&content, context));
+                file_refs.append(extract_dockerfile_file_refs(&content, context));
             }
         }
     }
@@ -67,34 +70,51 @@ fn infrastructure_search_dirs(root: &Path) -> Vec<PathBuf> {
         .collect()
 }
 
-fn collect_procfile_refs(root: &Path, context: CommandRefContext<'_>, file_refs: &mut Vec<String>) {
+fn collect_procfile_refs(
+    root: &Path,
+    context: CommandRefContext<'_>,
+    file_refs: &mut ScriptFileRefs,
+) {
     if let Some(content) = super::project_read::read_project_file(root, &root.join("Procfile")) {
-        file_refs.extend(extract_procfile_file_refs(&content, context));
+        file_refs.append(extract_procfile_file_refs(&content, context));
     }
 }
 
-fn collect_fly_toml_refs(root: &Path, context: CommandRefContext<'_>, file_refs: &mut Vec<String>) {
+fn collect_fly_toml_refs(
+    root: &Path,
+    context: CommandRefContext<'_>,
+    file_refs: &mut ScriptFileRefs,
+) {
     for entry in std::fs::read_dir(root).into_iter().flatten().flatten() {
         let name = entry.file_name();
         let name_str = name.to_string_lossy();
         if (name_str == "fly.toml" || (name_str.starts_with("fly.") && name_str.ends_with(".toml")))
             && let Some(content) = super::project_read::read_project_file(root, &entry.path())
         {
-            file_refs.extend(extract_fly_toml_file_refs(&content, context));
+            file_refs.append(extract_fly_toml_file_refs(&content, context));
         }
     }
 }
 
-fn resolve_infrastructure_file_refs(root: &Path, file_refs: &[String]) -> Vec<EntryPoint> {
+/// Resolve the file references of the infrastructure commands. Only a module
+/// that a script runtime runs can name a directory with an index file.
+fn resolve_infrastructure_file_refs(root: &Path, file_refs: &ScriptFileRefs) -> Vec<EntryPoint> {
     let canonical_root = dunce::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
     let mut entries: Vec<EntryPoint> = file_refs
+        .paths
         .iter()
         .filter_map(|file_ref| {
-            resolve_entry_path(
+            let probe = if file_refs.modules.contains(file_ref) {
+                EntryProbe::ScriptModule
+            } else {
+                EntryProbe::ScriptPath
+            };
+            resolve_script_entry_path(
                 root,
                 file_ref,
                 &canonical_root,
                 EntryPointSource::InfrastructureConfig,
+                probe,
             )
         })
         .collect();
@@ -124,8 +144,8 @@ fn is_dockerfile(name: &str) -> bool {
 ///
 /// Handles both shell form (`CMD node file.js`) and exec form (`CMD ["node", "file.js"]`).
 /// Multi-line commands with `\` continuation are joined.
-fn extract_dockerfile_file_refs(content: &str, context: CommandRefContext<'_>) -> Vec<String> {
-    let mut refs = Vec::new();
+fn extract_dockerfile_file_refs(content: &str, context: CommandRefContext<'_>) -> ScriptFileRefs {
+    let mut refs = ScriptFileRefs::default();
     let lines: Vec<&str> = content.lines().collect();
     let mut i = 0;
 
@@ -160,8 +180,8 @@ fn extract_dockerfile_file_refs(content: &str, context: CommandRefContext<'_>) -
             cmd_str.to_string()
         };
 
-        refs.extend(extract_script_file_refs(&command, context));
-        refs.extend(extract_flag_value_file_refs(&command, context));
+        refs.append(extract_script_file_refs_with_modules(&command, context));
+        refs.extend(extract_flag_value_file_refs(&command, context), false);
         i += 1;
     }
 
@@ -239,7 +259,7 @@ fn collect_flag_value_file_refs(
             continue;
         }
         // A script runtime gives its flag values to no file, except the
-        // modules that its loading flags name. `extract_script_file_refs`
+        // modules that its loading flags name. `extract_script_file_refs_with_modules`
         // reads those (issue #3967).
         let binary = invoked
             .as_ref()
@@ -309,15 +329,18 @@ fn parse_exec_form(s: &str) -> String {
 /// Extract file path references from a Procfile.
 ///
 /// Format: `process_type: command`
-fn extract_procfile_file_refs(content: &str, context: CommandRefContext<'_>) -> Vec<String> {
-    let mut refs = Vec::new();
+fn extract_procfile_file_refs(content: &str, context: CommandRefContext<'_>) -> ScriptFileRefs {
+    let mut refs = ScriptFileRefs::default();
     for line in content.lines() {
         let line = line.trim();
         if line.is_empty() || line.starts_with('#') {
             continue;
         }
         if let Some((_process_type, command)) = line.split_once(':') {
-            refs.extend(extract_script_file_refs(command.trim(), context));
+            refs.append(extract_script_file_refs_with_modules(
+                command.trim(),
+                context,
+            ));
         }
     }
     refs
@@ -326,8 +349,8 @@ fn extract_procfile_file_refs(content: &str, context: CommandRefContext<'_>) -> 
 /// Extract file path references from fly.toml.
 ///
 /// Parses `release_command`, `cmd` at any level, and all keys under `[processes]`.
-fn extract_fly_toml_file_refs(content: &str, context: CommandRefContext<'_>) -> Vec<String> {
-    let mut refs = Vec::new();
+fn extract_fly_toml_file_refs(content: &str, context: CommandRefContext<'_>) -> ScriptFileRefs {
+    let mut refs = ScriptFileRefs::default();
     let mut in_processes_section = false;
 
     for line in content.lines() {
@@ -352,7 +375,7 @@ fn extract_fly_toml_file_refs(content: &str, context: CommandRefContext<'_>) -> 
                 } else {
                     value.to_string()
                 };
-                refs.extend(extract_script_file_refs(&command, context));
+                refs.append(extract_script_file_refs_with_modules(&command, context));
             }
         }
     }
@@ -367,6 +390,18 @@ mod unicode_span_oracle;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn extract_dockerfile_file_refs(content: &str, context: CommandRefContext<'_>) -> Vec<String> {
+        super::extract_dockerfile_file_refs(content, context).paths
+    }
+
+    fn extract_procfile_file_refs(content: &str, context: CommandRefContext<'_>) -> Vec<String> {
+        super::extract_procfile_file_refs(content, context).paths
+    }
+
+    fn extract_fly_toml_file_refs(content: &str, context: CommandRefContext<'_>) -> Vec<String> {
+        super::extract_fly_toml_file_refs(content, context).paths
+    }
 
     /// A Procfile or a Dockerfile that links out of the project is not read.
     #[test]

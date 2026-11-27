@@ -10,10 +10,13 @@
 //! `ts-node`). Shell operators (`&&`, `||`, `;`, `|`, `&`) are split correctly.
 
 mod argument_entries;
-pub use argument_entries::{ArgumentEntries, argument_entries, is_glob, is_script_runtime};
+pub use argument_entries::{
+    ArgumentEntries, argument_entries, is_glob, is_script_runtime, runs_modules,
+};
 mod borp;
 pub mod ci;
 mod ci_action_inputs;
+mod command_args;
 #[cfg(test)]
 mod command_forms_tests;
 mod command_wrappers;
@@ -40,6 +43,7 @@ use std::sync::Arc;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
+use command_args::{command_path_args, wrapped_command_args};
 use command_wrappers::{command_wrapper_child_index, skip_command_wrappers};
 pub use config_tasks::config_task_scripts;
 use file_target_tools::file_target_tool;
@@ -1140,6 +1144,10 @@ pub struct ScriptAnalysis {
     /// The subset of `entry_files` that a built-in test runner runs as tests
     /// (`node --test`, `bun test`, `deno test`). These are test entry points.
     pub test_entry_files: Vec<String>,
+    /// The subset of `entry_files` that a script runtime runs as modules
+    /// (`node scripts/build`). Such a file argument can name a directory
+    /// with an index file.
+    pub module_entry_files: Vec<String>,
 }
 
 impl ScriptAnalysis {
@@ -1153,6 +1161,7 @@ impl ScriptAnalysis {
         retain_first_seen(&mut self.binary_config_files);
         retain_first_seen(&mut self.entry_files);
         retain_first_seen(&mut self.test_entry_files);
+        retain_first_seen(&mut self.module_entry_files);
     }
 }
 
@@ -1245,6 +1254,10 @@ pub struct ScriptCommand {
     /// the built-in test runner of a runtime (`node --test`, `bun test`,
     /// `deno test`). These files are test entry points.
     pub test_file_args: Vec<String>,
+    /// Whether `file_args_command` is a script runtime that runs `file_args`
+    /// as modules (`node scripts/build`). A module argument can name a
+    /// directory with an index file.
+    pub runs_modules: bool,
 }
 
 impl ScriptCommand {
@@ -1490,6 +1503,11 @@ fn accumulate_parsed_commands(
         result
             .test_entry_files
             .extend_from_slice(cmd.test_entry_files(ignored));
+        if cmd.runs_modules {
+            result
+                .module_entry_files
+                .extend_from_slice(cmd.entry_files(ignored));
+        }
         result
             .entry_files
             .extend_from_slice(cmd.entry_files(ignored));
@@ -2693,6 +2711,7 @@ fn parse_command_segment(
             flag_packages: Vec::new(),
             production_runtime_host: None,
             test_file_args: location.resolve_all(wrapped.test_file_args, catalog),
+            runs_modules: wrapped.runs_modules,
         }));
         let Some(next) = shell::skip_initial_wrappers(&tokens, command_start) else {
             return outcomes;
@@ -2716,6 +2735,7 @@ fn parse_command_segment(
             flag_packages: Vec::new(),
             production_runtime_host: None,
             test_file_args: Vec::new(),
+            runs_modules: false,
         }));
         outcomes.extend(
             inline_commands
@@ -2728,11 +2748,8 @@ fn parse_command_segment(
         return outcomes;
     }
 
-    let (args_command, (file_args, config_args)) = match vite_plus::subcommand_tool(&tokens, idx) {
-        Some((Some(tool), sub_idx)) => (tool.to_string(), binary_path_args(tool, &tokens, sub_idx)),
-        Some((None, _)) => (binary.clone(), (Vec::new(), Vec::new())),
-        None => (binary.clone(), binary_path_args(&binary, &tokens, idx)),
-    };
+    let (args_command, (file_args, config_args), runs_modules) =
+        command_path_args(&binary, &tokens, idx);
     let flag_packages = flag_credits::flag_referenced_packages(&binary, &tokens[idx + 1..]);
 
     let production_runtime_host = command_runtime_host(&binary, &tokens[idx + 1..], &location);
@@ -2745,91 +2762,9 @@ fn parse_command_segment(
         file_args: location.resolve_all(file_args, catalog),
         flag_packages,
         production_runtime_host,
+        runs_modules,
     }));
     outcomes
-}
-
-/// Return the file and config arguments of `binary` at `idx` in `tokens`.
-fn binary_path_args(binary: &str, tokens: &[&str], idx: usize) -> (Vec<String>, Vec<String>) {
-    let args = &tokens[idx + 1..];
-    let (mut file_args, mut config_args) =
-        extract_args_for_binary(tokens, idx + 1, NODE_RUNNERS.contains(&binary));
-    file_args = argument_entries::entry_file_args(binary, args, file_args);
-    if is_task_runner(binary) {
-        file_args.clear();
-        config_args.clear();
-    }
-    let file_args = node_test::with_default_test_patterns(binary, args, file_args);
-    (file_args, config_args)
-}
-
-/// The file and config arguments that a command wrapper records for the
-/// command it runs.
-struct WrappedCommandArgs<'a> {
-    file_args: Vec<String>,
-    config_args: Vec<String>,
-    /// The name of the command that the wrapper runs.
-    command: &'a str,
-    /// The subset of `file_args` that the command runs as tests.
-    test_file_args: Vec<String>,
-}
-
-impl<'a> WrappedCommandArgs<'a> {
-    const fn without_args(command: &'a str) -> Self {
-        Self {
-            file_args: Vec::new(),
-            config_args: Vec::new(),
-            command,
-            test_file_args: Vec::new(),
-        }
-    }
-}
-
-/// Return the file and config arguments that a command wrapper records for
-/// the command it runs from `command_start`, plus the name of that command.
-///
-/// The arguments stay with the wrapper only when the command runs in the
-/// same package as a binary. Then an executable path or a package-manager
-/// form that does not resolve to a dependency keeps its entry references.
-/// A declared script call and a command in another location record their
-/// arguments when the segment parses the command itself.
-fn wrapped_command_args<'a>(
-    tokens: &[&'a str],
-    command_start: usize,
-    advance_package_manager: &impl Fn(&[&str], usize, &ScriptCatalog) -> Option<PackageManagerTarget>,
-    catalog: &ScriptCatalog,
-) -> WrappedCommandArgs<'a> {
-    let (child_idx, runs_here) =
-        match wrapped_command_target(tokens, command_start, advance_package_manager, catalog) {
-            Some(PackageManagerTarget::Binary(child_idx, location)) => {
-                (child_idx, location == RunLocation::Here)
-            }
-            Some(PackageManagerTarget::Script { .. }) => {
-                return WrappedCommandArgs::without_args(tokens[command_start]);
-            }
-            None => invoked_command(tokens, command_start, &ScriptCatalog::default())
-                .map_or((command_start, true), |invoked| {
-                    (invoked.index, invoked.base_dirs.is_none())
-                }),
-        };
-    let child = tokens[child_idx];
-    if !runs_here {
-        return WrappedCommandArgs::without_args(child);
-    }
-    let (mut file_args, mut config_args) = extract_args_for_binary(tokens, command_start, false);
-    file_args = argument_entries::entry_file_args(child, &tokens[child_idx + 1..], file_args);
-    if is_task_runner(child) {
-        file_args.clear();
-        config_args.clear();
-    }
-    let file_args =
-        node_test::with_default_test_patterns(child, &tokens[child_idx + 1..], file_args);
-    WrappedCommandArgs {
-        test_file_args: node_test::test_file_args(child, &tokens[child_idx + 1..], &file_args),
-        file_args,
-        config_args,
-        command: child,
-    }
 }
 
 /// Return `true` when `binary` is a monorepo task runner such as `turbo`,

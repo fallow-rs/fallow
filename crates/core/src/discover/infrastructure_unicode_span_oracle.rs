@@ -188,15 +188,15 @@ fn check(lines: &[Line], refs: &[String]) -> Result<(), TestCaseError> {
 }
 
 fn dockerfile_refs(content: &str) -> Vec<String> {
-    extract_dockerfile_file_refs(content, CommandRefContext::NONE)
+    extract_dockerfile_file_refs(content, CommandRefContext::NONE).paths
 }
 
 fn procfile_refs(content: &str) -> Vec<String> {
-    extract_procfile_file_refs(content, CommandRefContext::NONE)
+    extract_procfile_file_refs(content, CommandRefContext::NONE).paths
 }
 
 fn fly_toml_refs(content: &str) -> Vec<String> {
-    extract_fly_toml_file_refs(content, CommandRefContext::NONE)
+    extract_fly_toml_file_refs(content, CommandRefContext::NONE).paths
 }
 
 proptest! {
