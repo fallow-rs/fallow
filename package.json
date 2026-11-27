@@ -44,7 +44,8 @@
     "lint:js": "node scripts/assert-local-resolution.mjs oxlint && oxlint --disable-nested-config npm benchmarks crates/napi .github/scripts editors/vscode/src viz-frontend/src scripts tools/type-aware-sidecar tools/mutation-runner tests/coverage-producer-corpus/producers/drivers tests/coverage-producer-corpus/producers/lib commitlint.config.mjs",
     "fmt:js": "node scripts/assert-local-resolution.mjs oxfmt && oxfmt --disable-nested-config npm benchmarks crates/napi .github/scripts editors/vscode/src viz-frontend/src scripts tools/type-aware-sidecar tools/mutation-runner tests/coverage-producer-corpus/producers/drivers tests/coverage-producer-corpus/producers/lib commitlint.config.mjs",
     "fmt:js:check": "node scripts/assert-local-resolution.mjs oxfmt && oxfmt --check --disable-nested-config npm benchmarks crates/napi .github/scripts editors/vscode/src viz-frontend/src scripts tools/type-aware-sidecar tools/mutation-runner tests/coverage-producer-corpus/producers/drivers tests/coverage-producer-corpus/producers/lib commitlint.config.mjs",
-    "test:scripts": "node --test scripts/*.test.mjs"
+    "test:scripts": "node --test scripts/*.test.mjs",
+    "test:ci-scripts": "node --test .github/scripts/*.test.mjs"
   },
   "engines": {
     "node": ">=22.13.0",

@@ -21,7 +21,7 @@ import { appendFileSync, readFileSync, realpathSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 
-const MISSING_FUNCTION = /no profile data available for function/u;
+export const MISSING_FUNCTION = /no profile data available for function/u;
 const DEFAULT_MAX_MISSING_RATIO = "0.2";
 
 /** Counts the LLVM warnings for functions without a profile record. */

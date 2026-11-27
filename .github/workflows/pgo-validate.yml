@@ -27,6 +27,7 @@ on:
       - 'scripts/pgo-train.sh'
       - '.github/scripts/pgo-compare.mjs'
       - '.github/scripts/pgo-profile-match.mjs'
+      - '.github/scripts/pgo-build-log.mjs'
       - 'benchmarks/download-fixtures.mjs'
       - '.github/actions/setup-rust/**'
       - '.cargo/config.toml'
@@ -236,7 +237,7 @@ jobs:
 
       - name: Build PGO binary
         shell: bash
-        run: cargo build --release --locked --target ${{ matrix.target }} -p fallow-multicall --target-dir target/pgo-use --config target/pgo-profile/pgo.toml 2>&1 | tee target/pgo-use-build.log
+        run: cargo build --release --locked --target ${{ matrix.target }} -p fallow-multicall --target-dir target/pgo-use --config target/pgo-profile/pgo.toml 2>&1 | node .github/scripts/pgo-build-log.mjs target/pgo-use-build.log
 
       # A profile from another target or another package set matches no
       # function, but it still changes the code. So the size and identity
