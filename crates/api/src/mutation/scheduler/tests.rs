@@ -3461,3 +3461,6 @@ mod target_first_tests;
 
 #[path = "concurrency_tests.rs"]
 mod concurrency_tests;
+
+#[path = "shard_tests.rs"]
+mod shard_tests;
