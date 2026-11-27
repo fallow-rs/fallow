@@ -198,7 +198,7 @@ A call without a key stops before the analysis starts. It returns `isError` and 
     ToolGuideSection {
         topic: "root",
         summary: "Why the checkout matters as much as the repository name.",
-        detail: r"The cloud returns functions by file path and name. Before reporting them, the tool joins them against static analysis of the project at `root`. A cloud function that no longer matches a definition in the checkout is dropped from the merge and counted in a `cloud_functions_unmatched` warning.
+        detail: r"The cloud returns functions by file path and name. Before reporting them, the tool joins them against static analysis of the project at `root`. A cloud function that no longer matches a definition in the checkout is dropped from the merge and counted in a `cloud_functions_unmatched` warning. When under 80% of the cloud functions match, `safe_to_delete` findings become `review_required` and a `cloud_local_join_incomplete` warning says so.
 
 Pointing `root` at an unrelated project or a checkout many commits away from production can leave the findings empty without failing. Pin `commit_sha` to the deployed revision, or check out that revision, when the answer must align with a specific deployment.",
     },
@@ -217,7 +217,7 @@ A short window can make rarely exercised code appear never called. Do not treat 
     ToolGuideSection {
         topic: "cloud_context",
         summary: "The production signals that the cloud sends next to each row.",
-        detail: r"Each finding and hot path carries `cloud_context`: the fields of its cloud row that the CLI does not read itself, as the cloud sent them. Examples are `errors`, `performance.cpu`, `performance.browser`, `branches`, `covered_by_test` and `test_hit_count`. A cloud blast-radius row carries `production_callers`, `caller_sites` and the caller counts the same way. `runtime_coverage.cloud_context` holds the top-level fields, such as `capabilities` and `page`. A `null` count or an `untracked` state means not measured, never zero. These signals are context only: they never change a verdict, a confidence or an action. A called function below the hot-path threshold has no row, so its signals are not in the output. Set `min_invocations_hot` to 1 to get a hot path, with its signals, for each called function.",
+        detail: r"Each finding and hot path carries `cloud_context`: the fields of its cloud row that the CLI does not read itself, as the cloud sent them. Examples are `errors`, `performance.cpu`, `performance.browser`, `branches`, `covered_by_test` and `test_hit_count`. A cloud blast-radius row carries `production_callers` and `caller_sites` the same way. When the cloud has no caller graph, the caller counts of the row come from the local AST. `runtime_coverage.cloud_context` holds the top-level fields, such as `capabilities` and `page`. A `null` count or an `untracked` state means not measured, never zero. These signals are context only: they never change a verdict, a confidence or an action. A called function below the hot-path threshold has no row, so its signals are not in the output. Set `min_invocations_hot` to 1 to get a hot path, with its signals, for each called function.",
     },
 ];
 
