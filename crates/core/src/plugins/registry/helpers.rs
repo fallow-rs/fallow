@@ -1184,7 +1184,7 @@ mod tests {
     }
 
     #[test]
-    fn descendant_queries_check_only_folders_that_hold_the_name() {
+    fn descendant_queries_visit_only_folders_under_the_root() {
         let mut paths: Vec<PathBuf> = (0..200)
             .map(|i| PathBuf::from(format!("/project/packages/p{i}/src/index.ts")))
             .collect();
@@ -1217,6 +1217,70 @@ mod tests {
         let p1 = Path::new("/project/packages/p1");
         assert!(index.any_descendant_contains(p1, OsStr::new("index.ts")));
         assert!(!index.any_descendant_contains(p1, OsStr::new("mkdocs.yml")));
+    }
+
+    #[test]
+    fn descendant_queries_match_a_scan_of_all_folders() {
+        let paths: Vec<PathBuf> = [
+            "/project/mkdocs.yml",
+            "/project/a/src/index.ts",
+            "/project/a b/mkdocs.yml",
+            "/project/a-b/tsconfig.app.json",
+            "/project/a.b/.env.schema",
+            "/project/a/b/c/tsconfig.base.json",
+            "/project/ab/mkdocs.yml",
+            "/project/a1/.env.schema",
+            "/project/a10/src/index.ts",
+            "/other/mkdocs.yml",
+        ]
+        .iter()
+        .map(PathBuf::from)
+        .collect();
+        let index = ConfigCandidateIndex::build(paths.iter().map(PathBuf::as_path));
+        let matcher = globset::Glob::new("tsconfig.*.json")
+            .expect("valid glob")
+            .compile_matcher();
+        let scan = |root: &Path, hit: &dyn Fn(&OsStr) -> bool| {
+            paths.iter().any(|path| {
+                path.parent().is_some_and(|dir| dir.starts_with(root))
+                    && path.file_name().is_some_and(hit)
+            })
+        };
+        let names = ["mkdocs.yml", ".env.schema", "index.ts", "missing"];
+        for root in [
+            "/",
+            "/project",
+            "/project/",
+            "/project/./a",
+            "/project/a",
+            "/project/a/",
+            "/project/a b",
+            "/project/a-b",
+            "/project/a.b",
+            "/project/a1",
+            "/project/a/b",
+            "/project/absent",
+            "/proj",
+            "project",
+            "",
+            "/other",
+        ] {
+            let root = Path::new(root);
+            for name in names {
+                assert_eq!(
+                    index.any_descendant_contains(root, OsStr::new(name)),
+                    scan(root, &|file| file == name),
+                    "contains {name} under {}",
+                    root.display()
+                );
+            }
+            assert_eq!(
+                index.any_descendant_matches(root, &matcher),
+                scan(root, &|file| matcher.is_match(Path::new(file))),
+                "matches under {}",
+                root.display()
+            );
+        }
     }
 
     #[test]
