@@ -108,6 +108,8 @@ struct Context<'a> {
     /// runner executes: type tests, bench files and test helper modules. No
     /// runner test covers them.
     runner_unreached: FxHashSet<FileId>,
+    /// The test entry points of the graph that a test runner executes.
+    runner_entries: FxHashSet<FileId>,
     /// The files that load a database client package.
     database_files: FxHashSet<FileId>,
     /// The reach facts of the tool config files. Empty when the plan has no
@@ -155,6 +157,7 @@ pub(super) fn build(
         },
         test_entries: FxHashMap::default(),
         runner_unreached: FxHashSet::default(),
+        runner_entries: runner_entries(inputs),
         database_files: database_files(graph),
         build_tool: inputs
             .framework_config_exports
@@ -173,7 +176,7 @@ pub(super) fn build(
     context.test_entries = graph.test_entry_points_reaching(&reachable);
     for (&file_id, entries) in &mut context.test_entries {
         let before = entries.len();
-        entries.retain(|&entry| is_runner_test_entry(graph, inputs.root, entry));
+        entries.retain(|entry| context.runner_entries.contains(entry));
         if before > 0 && entries.is_empty() {
             context.runner_unreached.insert(file_id);
         }
@@ -221,10 +224,7 @@ pub(super) fn build(
         test_file_reach: reach.reach,
         support_files: super::reach::support_files(graph, inputs.root, inputs.setup_files),
         test_files,
-        no_test_files: graph
-            .test_entry_points
-            .iter()
-            .all(|&entry| !is_runner_test_entry(graph, inputs.root, entry)),
+        no_test_files: context.runner_entries.is_empty(),
         framework_config_checked: inputs.framework_config_exports.is_some(),
         skipped_files,
         unmatched_paths,
@@ -257,7 +257,7 @@ fn skipped_tests(context: &Context<'_>) -> Vec<super::SkippedTest> {
         .graph
         .test_entry_points
         .iter()
-        .filter(|&&entry| is_runner_test_entry(context.graph, root, entry))
+        .filter(|&entry| context.runner_entries.contains(entry))
         .filter_map(|&entry| context.graph.module(entry))
         .filter(|node| {
             diff.key_for(&node.path, root)
@@ -1067,27 +1067,46 @@ fn static_test_files(context: &Context<'_>, file_id: FileId) -> Vec<String> {
 const BENCH_FILE_MARKERS: &[&str] = &[".bench.", ".benchmark."];
 
 /// The directory of Jest-style tests. A file below it without a test-file
-/// marker is a test helper when another test entry point imports it.
+/// marker is a test helper unless a runner test pattern selects it.
 const JEST_TEST_DIR_NAME: &str = "__tests__";
 
 /// File-name markers of a test file in the default patterns of Vitest,
 /// `node --test` and `bun test`.
 const TEST_FILE_MARKERS: &[&str] = &[".test.", ".spec.", "_test.", "-test.", "_spec."];
 
+/// True when a lowercase file name holds a test-file marker such as
+/// `.test.` or `_spec.`.
+fn has_name_marker(name: &str) -> bool {
+    TEST_FILE_MARKERS.iter().any(|marker| name.contains(marker))
+}
+
 /// File-name prefixes of a test file in the default patterns of
 /// `node --test` (`test.js`, `test-name.js`).
 const TEST_FILE_PREFIXES: &[&str] = &["test.", "test-"];
+
+/// The test entry points of the graph that a test runner executes.
+fn runner_entries(inputs: &MutationPlanInputs<'_>) -> FxHashSet<FileId> {
+    inputs
+        .graph
+        .as_graph()
+        .test_entry_points
+        .iter()
+        .copied()
+        .filter(|&entry| is_runner_test_entry(inputs, entry))
+        .collect()
+}
 
 /// True when a test runner executes the test entry point. A type test, a
 /// bench file and a test helper module are entry points of the module graph,
 /// but `vitest run`, `node --test` and `bun test` do not run them, so they
 /// never cover a mutant and the runner never lists them.
-fn is_runner_test_entry(graph: &ModuleGraph, root: &Path, entry: FileId) -> bool {
+fn is_runner_test_entry(inputs: &MutationPlanInputs<'_>, entry: FileId) -> bool {
+    let graph = inputs.graph.as_graph();
     let Some(node) = graph.module(entry) else {
         return false;
     };
-    let path = relative_key_path(&node.path, root);
-    !is_type_test_path(&path) && !is_bench_path(&path) && !is_test_helper(graph, entry, &path)
+    let path = relative_key_path(&node.path, inputs.root);
+    !is_type_test_path(&path) && !is_bench_path(&path) && !is_test_helper(inputs, entry, &path)
 }
 
 /// True for a bench file that is not also a test file. `perf.bench.test.ts`
@@ -1104,23 +1123,32 @@ fn is_bench_path(path: &str) -> bool {
 /// True when a lowercase file name matches a default test pattern of a
 /// supported runner.
 fn has_test_file_marker(name: &str) -> bool {
-    TEST_FILE_MARKERS.iter().any(|marker| name.contains(marker))
+    has_name_marker(name)
         || TEST_FILE_PREFIXES
             .iter()
             .any(|prefix| name.starts_with(prefix))
 }
 
 /// True for a module below `__tests__` that has no test-file marker and that
-/// another module imports, for example `src/__tests__/utils.ts`. The Vitest
-/// default include does not match it. A test file that a custom include
-/// selects is never imported, so it stays a test.
-fn is_test_helper(graph: &ModuleGraph, entry: FileId, path: &str) -> bool {
+/// no runner test pattern selects, for example `src/__tests__/utils.ts` or
+/// `src/__tests__/support/test-gateway.ts`. The Vitest default include does
+/// not select it. The `test-` and `test.` prefixes are `node --test` patterns,
+/// so they do not count here: a file that a `node --test` script names is
+/// selected by its script pattern. Without the runner patterns, a module that
+/// another module imports is a helper.
+fn is_test_helper(inputs: &MutationPlanInputs<'_>, entry: FileId, path: &str) -> bool {
     let lower = path.to_ascii_lowercase();
     let mut segments = lower.split('/').rev();
     let name = segments.next().unwrap_or_default();
-    !has_test_file_marker(name)
-        && segments.any(|segment| segment == JEST_TEST_DIR_NAME)
-        && !graph.importers_of(entry).is_empty()
+    if !segments.any(|segment| segment == JEST_TEST_DIR_NAME) {
+        return false;
+    }
+    match inputs.test_includes {
+        Some(includes) => !has_name_marker(name) && !includes.selects(path),
+        None => {
+            !has_test_file_marker(name) && !inputs.graph.as_graph().importers_of(entry).is_empty()
+        }
+    }
 }
 
 /// File-name markers of a type test (`index.test-d.ts`, `a.spec-d.ts`).

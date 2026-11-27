@@ -211,6 +211,11 @@ pub struct MutationPlanInputs<'a> {
     /// The ignore globs of the config. They give the reason of an unmatched
     /// path. `None` when the caller has no config.
     pub ignore_patterns: Option<&'a fallow_config::IgnorePatternSet>,
+    /// The test entry patterns that a test runner reads. A file below
+    /// `__tests__` without a test-file marker is a test only when one of
+    /// them selects it. `None` when the caller has no plugin facts. The plan
+    /// then counts such a file as a test unless another module imports it.
+    pub test_includes: Option<&'a crate::core_backend::BackendTestIncludes>,
 }
 
 /// Why a static rule removes a mutant.
@@ -582,6 +587,7 @@ pub fn plan_mutations_for_session_with(
     let framework_config_exports = framework_config_exports(session, graph, &inventory);
     let mut setup_files = inventory.plugins.backend().setup_files();
     setup_files.extend(crate::core_backend::bun_preload_files(session.root()));
+    let test_includes = inventory.plugins.backend().test_includes();
     let inputs = MutationPlanInputs {
         root: session.root(),
         graph,
@@ -590,6 +596,7 @@ pub fn plan_mutations_for_session_with(
         framework_config_exports: Some(&framework_config_exports),
         setup_files: &setup_files,
         ignore_patterns: Some(&session.config().ignore_patterns),
+        test_includes: Some(&test_includes),
     };
     let plan = plan_mutations(&inputs, request);
     let has_component = plan

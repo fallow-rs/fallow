@@ -1792,16 +1792,24 @@ Two other kinds of test entry points are not test files of the plan, because
 - a Vitest bench file (`*.bench.*` or `*.benchmark.*`). `vitest bench` runs
   it. A bench file with a test marker, such as `perf.bench.test.ts`, stays a
   test file;
-- a test helper: a module below a `__tests__` directory that another module
-  imports, and whose name has no test marker of a supported runner (`.test.`,
-  `.spec.`, `_test.`, `-test.`, `_spec.`, or a `test.` or `test-` prefix). An
-  example is `src/__tests__/utils.ts`.
+- a test helper: a module below a `__tests__` directory whose name has no
+  test marker (`.test.`, `.spec.`, `_test.`, `-test.` or `_spec.`), and that
+  no test pattern of a runner selects. Examples are `src/__tests__/utils.ts`
+  and `src/__tests__/support/test-gateway.ts`. The helper rule applies also
+  when no module imports the file.
+
+The Vitest plugin adds `**/__tests__/**/*` as a test entry pattern, so that
+the analysis does not report a helper as unused. The Vitest default include
+does not select these files, so the plan does not read that pattern as a test
+pattern. The other test patterns stay: a configured Vitest `include`, a Jest
+or tap default, and a file that a `node --test` script names. The `test.` and
+`test-` prefixes are `node --test` defaults, so they do not make a file below
+`__tests__` a test file.
 
 Without this rule the runner did not list these files, and each run was
-`partial` with `test-files-not-discovered`. A test file that a custom
-`include` selects is never imported, so it stays a test file. The rules of
-type tests for `no_test_files` and for a file that only these entry points
-reach apply the same way.
+`partial` with `test-files-not-discovered`. The rules of type tests for
+`no_test_files` and for a file that only these entry points reach apply the
+same way.
 
 ## Runner notes
 

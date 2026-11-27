@@ -1803,6 +1803,7 @@ mod railway;
 pub mod registry;
 mod rstest;
 mod serverless_framework;
+mod test_includes;
 mod textlint;
 mod tooling;
 pub(crate) mod trace_provenance;
@@ -1820,6 +1821,7 @@ pub use registry::{
     AggregatedPluginResult, CheckedAliasPrefix, PluginRegistry, PluginToolingDependencies,
     PluginToolingEvidence, VirtualModuleMatch, VirtualModuleProviderRule,
 };
+pub use test_includes::TestIncludes;
 pub use tooling::types_package_target;
 pub(crate) use tooling::{
     cli_tooling_config_patterns, is_ambient_types_package, is_known_tooling_dependency,
