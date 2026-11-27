@@ -128,6 +128,15 @@ impl ModuleInfoExtractor {
                 },
             );
         }
+        if strict_eligible
+            && properties.is_none()
+            && function_body_is_terminal(body)
+            && let Some(callee) = function_body_returns_call_of(body, input.params)
+            && callee != name
+        {
+            self.factory_pass_through_functions
+                .insert(name.to_string(), callee);
+        }
         self.record_factory_binding_producer(name, input, body, properties, returns_promise);
         if strict_eligible
             && (self.strict_factory_return_functions.contains_key(name)

@@ -1000,6 +1000,11 @@ pub(crate) struct ModuleInfoExtractor {
     /// `factory_return_functions` entry, so `const x = useApi()` credits the
     /// class without tracing the assignment chain. See issue #1441 (var-return).
     factory_return_alias_functions: FxHashMap<String, String>,
+    /// Same-file pass-through wrappers (`const setup = () => newService()`),
+    /// keyed by wrapper name, valued by the callee the wrapper returns. A
+    /// factory call candidate on a wrapper resolves through the callee
+    /// (issue #5366).
+    factory_pass_through_functions: FxHashMap<String, String>,
     /// Subset of factory-return functions (by local name) whose body provably
     /// returns a SINGLE class across ALL static return paths, the all-paths
     /// unanimity proof required before a factory may be exported as cross-module

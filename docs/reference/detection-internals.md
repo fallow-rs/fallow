@@ -175,8 +175,20 @@ error by suppressing a downstream detector.
   inherited members. A destructured property of an object factory result
   (`const { ctx } = newService()`) resolves as the property path `ctx` of the
   result. The member accesses of a module are not scoped, so this credit
-  applies only when the module binds the local name once and the pattern
-  gives the property no default value. Known limit: a receiver that a second local helper returns again
+  applies only when each binding of the local name in the module is a
+  destructure of the same property of the same callee (for example
+  `const { ctx } = setup()` in each test of a file), and the pattern gives
+  the property no default value. A parameter, an import or another
+  declaration of the name stops the credit. A pass-through wrapper resolves as
+  the call that it returns (issue #5366): a module-scope function that is
+  not `async` and not a generator, with one `return` or a concise body, whose
+  result is a bare call `callee(...)`. So `const { ctx } = setup()` with
+  `const setup = () => newService(db)` reads the result of `newService`.
+  The wrapper gives no credit when a parameter or a local declaration of the
+  wrapper binds the callee name, when the call is optional, or when the
+  wrapper has more than one `return`. A wrapper chain resolves to the first
+  name that is a factory or that is not a wrapper. Known limit: a receiver
+  that a second local helper builds again
   (`const setup = () => { const { ctx } = newService(); return { ctx }; }`)
   needs type inference and gives no credit.
 - A member name probe (`"name" in value` or `Reflect.has(value, "name")` with

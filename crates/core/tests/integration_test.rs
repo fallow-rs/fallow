@@ -880,6 +880,8 @@ mod issue_5297_mobx_annotation_members;
 mod issue_5298_proven_receiver_forms;
 #[path = "integration_test/issue_5299_inherited_interface_contract.rs"]
 mod issue_5299_inherited_interface_contract;
+#[path = "integration_test/issue_5366_setup_wrapper_receiver.rs"]
+mod issue_5366_setup_wrapper_receiver;
 #[path = "integration_test/issue_609_velite.rs"]
 mod issue_609_velite;
 #[path = "integration_test/issue_704_auto_import_components.rs"]

@@ -200,7 +200,7 @@ export type SemanticCandidateDecisionKind = ("confirmed-used" | "contract-preser
 /**
  * How a class member participates in an inherited or implemented relation.
  */
-export type SemanticContractRelation = ("interface-implementation" | "abstract-implementation" | "override" | "optional-contract")
+export type SemanticContractRelation = ("interface-implementation" | "abstract-implementation" | "override" | "optional-contract" | "dependency-hook")
 /**
  * Heritage relation used by a framework-owned class-member contract.
  */

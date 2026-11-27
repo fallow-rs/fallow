@@ -1,6 +1,7 @@
 //! Typed client for the batched type-aware semantic protocol.
 
 mod call_evidence;
+mod contract_decision;
 mod empty;
 mod queries;
 mod reconcile;
@@ -20,12 +21,12 @@ use fallow_types::semantic::{
     ApiSurfaceEntry, ApiSurfaceResult, DEFERRED_PROJECT_CONFIG_HASH, PublicTypeReference,
     SemanticAliasHop, SemanticAnalysisIdentity, SemanticAnalysisMode, SemanticCandidateDecision,
     SemanticCandidateDecisionKind, SemanticCapability, SemanticCompleteness,
-    SemanticContractEvidence, SemanticContractRelation, SemanticEditGuard,
-    SemanticFrameworkContract, SemanticFrameworkContractEvidence, SemanticFrameworkRelation,
-    SemanticGapReason, SemanticImpactConfidence, SemanticImpactPath, SemanticNamespace,
-    SemanticOmission, SemanticPrivateTypeLeak, SemanticQuerySummary, SemanticReference,
-    SemanticSourceLocation, SemanticSymbol, SemanticSymbolImpact, SemanticSymbolTrace,
-    TypeCouplingCycle, TypeCouplingEdge, TypeCouplingFile, TypeCouplingReport, TypeCouplingSummary,
+    SemanticContractEvidence, SemanticEditGuard, SemanticFrameworkContract,
+    SemanticFrameworkContractEvidence, SemanticFrameworkRelation, SemanticGapReason,
+    SemanticImpactConfidence, SemanticImpactPath, SemanticNamespace, SemanticOmission,
+    SemanticPrivateTypeLeak, SemanticQuerySummary, SemanticReference, SemanticSourceLocation,
+    SemanticSymbol, SemanticSymbolImpact, SemanticSymbolTrace, TypeCouplingCycle, TypeCouplingEdge,
+    TypeCouplingFile, TypeCouplingReport, TypeCouplingSummary,
 };
 use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
@@ -38,6 +39,7 @@ use super::manifest::{
 #[cfg(test)]
 use super::manifest::{BACKEND_FAMILY, BACKEND_VERSION};
 use super::transport::{TypeAwareError, TypeAwareOutcome};
+use contract_decision::{contract_relation_phrase, deciding_contract};
 use empty::empty_semantic_outcome;
 use queries::{build_dead_code_queries, query_supports_guarded_fix};
 use reconcile::apply_dead_code_response;
@@ -1517,11 +1519,7 @@ fn decode_candidate_decision(
         source_cache,
     )?;
     let evidence = decode_symbol_use_evidence(result, scope)?;
-    let required_contract = data
-        .contract_relations
-        .iter()
-        .find(|contract| !contract.optional)
-        .cloned();
+    let required_contract = deciding_contract(&data.contract_relations).cloned();
     let framework_contract = data.framework_contract_relations.first().cloned();
     let (expected_assertion, decision) = expected_candidate_decision(
         &data,
@@ -2014,15 +2012,6 @@ fn evidence_count_suffix(total: usize, truncated: bool) -> String {
         format!(" (first of {total}, evidence truncated)")
     } else {
         format!(" (first of {total})")
-    }
-}
-
-const fn contract_relation_phrase(relation: SemanticContractRelation) -> &'static str {
-    match relation {
-        SemanticContractRelation::InterfaceImplementation => "implements",
-        SemanticContractRelation::AbstractImplementation => "implements the abstract member",
-        SemanticContractRelation::Override => "overrides",
-        SemanticContractRelation::OptionalContract => "matches the optional contract",
     }
 }
 
@@ -3898,7 +3887,7 @@ mod tests {
         let mut interface_member = method.clone();
         interface_member.owner = Some("Repository".to_string());
         let contract = SemanticContractEvidence {
-            relation: SemanticContractRelation::InterfaceImplementation,
+            relation: fallow_types::semantic::SemanticContractRelation::InterfaceImplementation,
             declaration: interface_member,
             optional: false,
         };

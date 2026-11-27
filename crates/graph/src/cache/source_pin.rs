@@ -29,7 +29,7 @@ use syn::{Attribute, Meta, Token};
 use super::GRAPH_CACHE_VERSION;
 
 /// The graph cache version and the source hash that it was decided for.
-const PIN: (u32, &str) = (136, "f6e56341e25a7513");
+const PIN: (u32, &str) = (137, "5f837da05b90e50e");
 
 #[test]
 #[cfg_attr(miri, ignore = "the filesystem is blocked by Miri isolation")]

@@ -327,6 +327,67 @@ impl ModuleInfoExtractor {
         }
     }
 
+    /// Rewrite the callee of each factory call on a pass-through wrapper to the
+    /// callee that the wrapper returns, so `const { ctx } = setup()` with
+    /// `const setup = () => newService()` resolves as `newService()` (issue
+    /// #5366). A name that is a factory itself keeps its own proof.
+    pub(super) fn resolve_factory_pass_through_callees(&mut self) {
+        if self.factory_pass_through_functions.is_empty() {
+            return;
+        }
+        let targets: FxHashMap<String, String> = self
+            .factory_pass_through_functions
+            .keys()
+            .filter_map(|wrapper| {
+                self.pass_through_target(wrapper)
+                    .map(|target| (wrapper.clone(), target))
+            })
+            .collect();
+        let target_of = |callee: &mut String| {
+            if let Some(target) = targets.get(callee.as_str()) {
+                callee.clone_from(target);
+            }
+        };
+        for candidate in &mut self.factory_return_candidates {
+            target_of(&mut candidate.callee_name);
+        }
+        for (callee, _, _) in &mut self.factory_unnamed_result_accesses {
+            target_of(callee);
+        }
+        for callee in &mut self.factory_whole_object_candidates {
+            target_of(callee);
+        }
+    }
+
+    /// The end of the wrapper chain that starts at `wrapper`. `None` when the
+    /// chain has a cycle, passes the hop limit, or starts at a name that is a
+    /// factory itself.
+    fn pass_through_target(&self, wrapper: &str) -> Option<String> {
+        const MAX_PASS_THROUGH_HOPS: usize = 8;
+        let is_factory = |name: &str| {
+            self.factory_return_functions.contains_key(name)
+                || self.factory_return_object_shapes.contains_key(name)
+        };
+        if is_factory(wrapper) {
+            return None;
+        }
+        let mut current = wrapper;
+        for _ in 0..MAX_PASS_THROUGH_HOPS {
+            if !self.name_has_one_fixed_binding(current) {
+                return None;
+            }
+            let next = self.factory_pass_through_functions.get(current)?;
+            if next == wrapper {
+                return None;
+            }
+            if is_factory(next) || !self.factory_pass_through_functions.contains_key(next) {
+                return Some(next.clone());
+            }
+            current = next;
+        }
+        None
+    }
+
     /// Resolve `const x = useApi()` bindings. A same-file factory whose body
     /// returns `new Class()` binds `x` directly to the class so `x.member`
     /// credits it. An IMPORTED factory callee instead emits a typed
@@ -338,11 +399,17 @@ impl ModuleInfoExtractor {
             return;
         }
         let candidates = std::mem::take(&mut self.factory_return_candidates);
+        let mut destructured_locals = self.uniform_destructured_locals(&candidates);
         let mut deferred_factory_facts: Vec<(String, String, bool)> = Vec::new();
         let mut deferred_object_property_facts: Vec<(String, String, String)> = Vec::new();
         let mut deferred_member_accesses: Vec<MemberAccess> = Vec::new();
         for candidate in candidates {
             if let Some(property) = &candidate.property_path {
+                // One resolution for each local name: the reads of a name are
+                // not scoped, so a second binding adds the same reads again.
+                if !destructured_locals.remove(&candidate.local_name) {
+                    continue;
+                }
                 self.resolve_destructured_property_candidate(
                     &candidate,
                     property,
@@ -440,6 +507,53 @@ impl ModuleInfoExtractor {
         }
     }
 
+    /// Whether the module binds `name` once and never assigns it again. Calls
+    /// and reads are matched by name, not by scope, so a second binding (a
+    /// shadowing local, a parameter, an import) or an assignment can give the
+    /// name another value.
+    fn name_has_one_fixed_binding(&self, name: &str) -> bool {
+        self.binding_name_counts.get(name) == Some(&1)
+            && !self.identifier_write_values.contains_key(name)
+            && !self.imports.iter().any(|import| import.local_name == name)
+    }
+
+    /// The local names of destructured factory properties whose reads are safe
+    /// to credit. The member accesses of a module are not scoped, so a name
+    /// qualifies only when each of its bindings is a destructure of the same
+    /// property of the same callee, as in a test file where each test runs
+    /// `const { ctx } = setup()` (issues #5298 and #5366). A parameter, an
+    /// import, another declaration, or a plain assignment of the name
+    /// disqualifies it.
+    fn uniform_destructured_locals(
+        &self,
+        candidates: &[FactoryReturnCandidate],
+    ) -> FxHashSet<String> {
+        let mut groups: FxHashMap<&str, (u32, &FactoryReturnCandidate, bool)> =
+            FxHashMap::default();
+        for candidate in candidates.iter().filter(|c| c.property_path.is_some()) {
+            let group = groups
+                .entry(candidate.local_name.as_str())
+                .or_insert((0, candidate, true));
+            group.0 += 1;
+            group.2 &= group.1.callee_name == candidate.callee_name
+                && group.1.property_path == candidate.property_path
+                && group.1.awaited == candidate.awaited;
+        }
+        groups
+            .into_iter()
+            .filter(|(local, (count, _, uniform))| {
+                *uniform
+                    && self.binding_name_counts.get(*local) == Some(count)
+                    && !self.identifier_write_values.contains_key(*local)
+                    && !self
+                        .imports
+                        .iter()
+                        .any(|import| import.local_name == *local)
+            })
+            .map(|(local, _)| local.to_string())
+            .collect()
+    }
+
     /// Resolve the reads on `local` from `const { property: local } = callee()`
     /// as reads on `callee().property` (issue #5298). A same-file object
     /// factory credits the class of the matching shape path. An imported callee
@@ -452,13 +566,6 @@ impl ModuleInfoExtractor {
         member_accesses: &mut Vec<MemberAccess>,
         object_property_facts: &mut Vec<(String, String, String)>,
     ) {
-        if self
-            .binding_name_counts
-            .get(&candidate.local_name)
-            .is_some_and(|count| *count > 1)
-        {
-            return;
-        }
         let object_prefix = format!("{}.", candidate.local_name);
         let paths = self.member_accesses.iter().filter_map(|access| {
             if access.object == candidate.local_name {

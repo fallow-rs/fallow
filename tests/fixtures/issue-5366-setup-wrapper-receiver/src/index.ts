@@ -1,0 +1,21 @@
+import { runWrappers } from "./consumer";
+import { runGuards } from "./guards";
+import { describeContexts } from "./helper";
+import { importedName } from "./imported";
+import { runLocal } from "./local";
+import { fromFactory, fromParameter } from "./mixed";
+import { directTests, firstTest, secondTest } from "./repeated";
+import { reassigned, shadowed } from "./shadow";
+
+runWrappers();
+runLocal();
+runGuards();
+firstTest();
+secondTest();
+directTests();
+fromFactory();
+fromParameter({ mixedOnly: (): void => {} });
+shadowed();
+reassigned();
+importedName();
+export { describeContexts };

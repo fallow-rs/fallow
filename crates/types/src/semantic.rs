@@ -280,6 +280,10 @@ pub enum SemanticContractRelation {
     Override,
     /// An optional inherited or interface member that still blocks auto-fix.
     OptionalContract,
+    /// An optional member of an interface or base class that a dependency or
+    /// the platform declares. Code of the dependency can call it as a hook,
+    /// so the contract keeps the declaration.
+    DependencyHook,
 }
 
 /// Exact declaration evidence for an inherited or implemented class-member relation.
