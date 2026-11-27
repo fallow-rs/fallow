@@ -1283,8 +1283,7 @@ mutant. Their results decide no mutant status.
 - A runner with the `adopt` capability (Vitest) does no dry run in a
   restarted companion. The first dry run gives an index entry for each test,
   and a new companion takes the entries of the test files of its jobs with
-  an `adopt` request. The passing tests and the shared-worker modes also
-  come from the first dry run. A companion that took a test has not shown
+  an `adopt` request. The passing tests also come from the first dry run. A companion that took a test has not shown
   that the test passes in it. So a kill or a timeout by a taken test counts
   only after a control run, with no active mutant, of the taken tests of the
   test files of the killing tests. A test that fails in that control run is
@@ -2053,12 +2052,11 @@ this rule keeps the result of a warm run equal to the result of a
 - The store keeps only a file with no failed test and no error. A file with a
   baseline failure dry-runs again in each run.
 - Facts that name a mutant id outside the plan are not used.
-- A stored test keeps its test index entry, and a stored file keeps the
-  worker mode that its dry run proved, with each file of that check. A
-  runner with the `adopt` capability then gives a new companion the stored
-  entries, so a warm run starts its mutant runs with no dry run. The run uses
-  a stored worker mode only when each file of the mode has valid facts. A
-  runner without the capability dry-runs the test files of the jobs in each
+- A stored test keeps its test index entry. A runner with the `adopt`
+  capability then gives a new companion the stored entries, so a warm run
+  starts its mutant runs with no dry run. The worker mode is not stored: the
+  check of each set of test files runs in each run (see
+  [Vitest shared workers](#vitest-shared-workers)). A runner without the capability dry-runs the test files of the jobs in each
   new companion, also for a file with stored facts.
 - The test index entries hold absolute module paths, so the project root is
   a key part.
