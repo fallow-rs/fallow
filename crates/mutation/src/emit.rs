@@ -36,6 +36,7 @@
 
 use std::collections::BTreeSet;
 
+use crate::reach::Probe;
 use crate::{ACTIVE_FUNCTION, HIT_FUNCTION, SpliceMap, SpliceSegment, is_identifier_byte};
 
 /// One mutant of a site, ready to emit.
@@ -143,6 +144,16 @@ struct Emitter<'s, 't> {
     /// one to write.
     top_level: &'t [Insertion],
     next_top_level: usize,
+    /// The entry probes, sorted by offset. See `copy_original`.
+    probes: &'t [Probe],
+    /// True for each probe that the output holds.
+    placed: Vec<bool>,
+    /// The branch of each placed probe: the site whose original branch holds
+    /// it, or `None` outside each site.
+    placed_in: Vec<Option<usize>>,
+    /// The sites whose original branch the emitter writes now, innermost
+    /// last.
+    branches: Vec<usize>,
 }
 
 impl Emitter<'_, '_> {
@@ -156,10 +167,45 @@ impl Emitter<'_, '_> {
                 break;
             }
             let offset = insertion.offset.max(cursor);
-            self.writer.copy(cursor, offset);
+            self.copy_original(cursor, offset);
             self.writer.push(&insertion.text);
             cursor = offset;
             self.next_top_level += 1;
+        }
+        self.copy_original(cursor, to);
+    }
+
+    /// Copies `from..to` of the original text on the path that runs with no
+    /// active mutant, with each entry probe at an offset in `from..=to`.
+    /// A mutated branch copies its text with no probe.
+    ///
+    /// A probe goes into the first copy that reaches its offset, so a probe
+    /// at the start of a site goes before the site. The `)` that ends a comma
+    /// expression goes only into a copy of the same branch as its opening
+    /// part, so a probe pair around a site expression stays outside the
+    /// site, and a pair inside a branch stays inside it.
+    fn copy_original(&mut self, from: u32, to: u32) {
+        let branch = self.branches.last().copied();
+        let mut cursor = from;
+        let first = self.probes.partition_point(|probe| probe.offset < from);
+        for index in first..self.probes.len() {
+            let probe = &self.probes[index];
+            if probe.offset > to {
+                break;
+            }
+            if self.placed[index] {
+                continue;
+            }
+            if let Some(opener) = probe.opener
+                && (!self.placed[opener] || self.placed_in[opener] != branch)
+            {
+                continue;
+            }
+            self.writer.copy(cursor, probe.offset);
+            self.writer.push(&probe.text);
+            cursor = probe.offset;
+            self.placed[index] = true;
+            self.placed_in[index] = branch;
         }
         self.writer.copy(cursor, to);
     }
@@ -172,7 +218,7 @@ impl Emitter<'_, '_> {
             if top {
                 self.copy_top_level(cursor, span.0);
             } else {
-                self.writer.copy(cursor, span.0);
+                self.copy_original(cursor, span.0);
             }
             self.site(node, parent_start);
             cursor = span.1;
@@ -180,7 +226,7 @@ impl Emitter<'_, '_> {
         if top {
             self.copy_top_level(cursor, to);
         } else {
-            self.writer.copy(cursor, to);
+            self.copy_original(cursor, to);
         }
     }
 
@@ -226,7 +272,9 @@ impl Emitter<'_, '_> {
             self.writer.push("true");
         }
         let children = std::mem::take(&mut self.tree.children[node]);
+        self.branches.push(node);
         self.range(start, end, &children, Some(start));
+        self.branches.pop();
         self.writer.push(")))");
     }
 }
@@ -252,7 +300,9 @@ impl Emitter<'_, '_> {
             self.writer.push("; ");
         }
         let children = std::mem::take(&mut self.tree.children[node]);
+        self.branches.push(node);
         self.range(start, end, &children, Some(start));
+        self.branches.pop();
         // A statement range ends at a statement end or before the `}` of its
         // block, so it never ends inside a line comment, and the wrapper adds
         // no line.
@@ -260,18 +310,29 @@ impl Emitter<'_, '_> {
     }
 }
 
-/// Emits the instrumented text and its splice map.
-///
-/// `insertions` go before the first site, in order. `top_level` holds
-/// insertions at offsets outside each site, or at a boundary of a root
-/// site, sorted by offset.
-pub fn emit(
-    source: &str,
-    sites: &[EmitSite],
-    statement_starts: &BTreeSet<u32>,
-    insertions: &[Insertion],
-    top_level: &[Insertion],
-) -> (String, SpliceMap) {
+/// The parts of the instrumented text.
+pub struct EmitInput<'t> {
+    pub sites: &'t [EmitSite],
+    pub statement_starts: &'t BTreeSet<u32>,
+    /// Insertions before the first site, in order.
+    pub insertions: &'t [Insertion],
+    /// Insertions at offsets outside each site, or at a boundary of a root
+    /// site, sorted by offset.
+    pub top_level: &'t [Insertion],
+    /// Entry probes, sorted by offset.
+    pub probes: &'t [Probe],
+}
+
+/// Emits the instrumented text and its splice map. The flag is false when a
+/// probe found no place.
+pub fn emit(source: &str, input: &EmitInput<'_>) -> (String, SpliceMap, bool) {
+    let EmitInput {
+        sites,
+        statement_starts,
+        insertions,
+        top_level,
+        probes,
+    } = *input;
     let tree = build_tree(sites);
     let mut emitter = Emitter {
         writer: Writer {
@@ -284,6 +345,10 @@ pub fn emit(
         statement_starts,
         top_level,
         next_top_level: 0,
+        probes,
+        placed: vec![false; probes.len()],
+        placed_in: vec![None; probes.len()],
+        branches: Vec::new(),
     };
     let mut cursor = 0;
     for insertion in insertions {
@@ -293,6 +358,7 @@ pub fn emit(
     }
     let roots = std::mem::take(&mut emitter.tree.roots);
     emitter.range(cursor, source.len() as u32, &roots, None);
+    let placed = emitter.placed.iter().all(|&placed| placed);
     let Writer { out, segments, .. } = emitter.writer;
-    (out, SpliceMap { segments })
+    (out, SpliceMap { segments }, placed)
 }

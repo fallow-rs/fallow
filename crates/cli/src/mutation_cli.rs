@@ -44,6 +44,18 @@ pub enum RecordArgsFlag {
     Values,
 }
 
+/// The values of `--reach-selection`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum ReachSelectionFlag {
+    /// No reach record and no selection.
+    Off,
+    /// Record the reach, and leave out the test files that the record drops.
+    On,
+    /// Record the reach, dry-run each test file, and report each dropped
+    /// test file that covers a mutant.
+    Check,
+}
+
 #[derive(Subcommand)]
 pub enum MutationSubcommand {
     /// Show one mutant of a saved report against the current file. Runs no code.
@@ -165,6 +177,14 @@ pub struct MutationArgs {
     /// (by key name or by entropy) is not kept.
     #[arg(long, value_name = "MODE", value_enum, help_heading = "Detection")]
     pub record_args: Option<RecordArgsFlag>,
+    /// Select the dry-run test files by recorded function reach (off by
+    /// default). `on` records in the cache which functions each test file
+    /// enters, and leaves a test file out of a later dry run when its record
+    /// proves that it cannot run a mutant. `check` records, dry-runs each
+    /// file, and reports each dropped file that covers a mutant. Needs the
+    /// cache. Overrides `mutation.reachSelection`.
+    #[arg(long, value_name = "MODE", value_enum, help_heading = "Run")]
+    pub reach_selection: Option<ReachSelectionFlag>,
     /// Exit with code 1 when the mutation score is below this percentage.
     #[arg(long, value_name = "0-100", help_heading = "Gates")]
     pub min_score: Option<f64>,
@@ -510,6 +530,7 @@ pub fn run_options(input: &MutationCliInput<'_>) -> Result<MutationRunOptions, P
             Some(RecordArgsFlag::Shapes) => fallow_api::mutation::RecordArgsMode::Shapes,
             Some(RecordArgsFlag::Values) => fallow_api::mutation::RecordArgsMode::Values,
         },
+        reach_selection: reach_selection(input),
     })
 }
 
@@ -529,9 +550,19 @@ fn absolute_output_path(path: &Path) -> PathBuf {
 /// Survivors alone never fail a run. A run with no counted mutant has a
 /// `skipped` entry and passes here; a run in which baseline failures leave
 /// each mutant without a test result exits 2 through
-/// [`baseline_blocked_run_error`] instead.
+/// [`baseline_blocked_run_error`] instead. A `--reach-selection check` run
+/// whose selection dropped a test file that covers a mutant exits 2: the
+/// selection is wrong, so the run found a defect of the tool.
 #[must_use]
 pub fn run_exit_code(report: &MutationReport) -> u8 {
+    let violated = report
+        .cache
+        .as_ref()
+        .and_then(|cache| cache.reach_selection.as_ref())
+        .is_some_and(|reach| !reach.violations.is_empty());
+    if violated {
+        return INPUT_EXIT_CODE;
+    }
     let failed = report
         .gate_outcomes
         .as_ref()
@@ -987,6 +1018,22 @@ fn save_reports(
 /// The `--report` file of a recheck, which the run replaces. The run writes
 /// it after the run, so the worktree check leaves it out, as it does for the
 /// `--output-file`.
+/// The reach selection of the run: the flag, else the config key.
+fn reach_selection(input: &MutationCliInput<'_>) -> fallow_api::mutation::ReachSelectionMode {
+    use fallow_api::mutation::ReachSelectionMode;
+    use fallow_config::MutationReachSelection;
+    match input.args.reach_selection {
+        Some(ReachSelectionFlag::Off) => ReachSelectionMode::Off,
+        Some(ReachSelectionFlag::On) => ReachSelectionMode::On,
+        Some(ReachSelectionFlag::Check) => ReachSelectionMode::Check,
+        None => match input.config.reach_selection {
+            None | Some(MutationReachSelection::Off) => ReachSelectionMode::Off,
+            Some(MutationReachSelection::On) => ReachSelectionMode::On,
+            Some(MutationReachSelection::Check) => ReachSelectionMode::Check,
+        },
+    }
+}
+
 fn recheck_report_file<'a>(input: &'a MutationCliInput<'_>) -> Option<&'a Path> {
     input
         .args

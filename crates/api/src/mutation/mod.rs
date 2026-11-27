@@ -149,6 +149,25 @@ pub enum RecordArgsMode {
     Values,
 }
 
+/// The selection of the dry-run test files by recorded function reach. A run
+/// with reach selection probes each file that a dry-run test file reaches,
+/// keeps the functions that each test file entered in the dry-run cache, and
+/// leaves a test file out of a later dry run when its record proves that it
+/// cannot run a mutant of that run. It needs the cache, so `--no-cache` turns
+/// it off.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReachSelectionMode {
+    /// No probes and no selection.
+    #[default]
+    Off,
+    /// Record the reach and leave out the test files that the record drops.
+    On,
+    /// Record the reach and dry-run each test file. The report gives each
+    /// test file that the record drops and that covers a mutant.
+    Check,
+}
+
 /// Options of [`crate::replay_mutation`]: one export called on the original
 /// and on one mutant.
 #[derive(Debug, Clone, Default)]
@@ -325,4 +344,7 @@ pub struct MutationRunOptions {
     /// Record the arguments of the changed exported functions in a record
     /// pass after the mutant runs. Off by default.
     pub record_args: RecordArgsMode,
+    /// The selection of the dry-run test files by recorded function reach.
+    /// Off by default.
+    pub reach_selection: ReachSelectionMode,
 }

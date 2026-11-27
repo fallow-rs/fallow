@@ -418,6 +418,23 @@ impl ResultCache {
         hex(&hasher.finalize())
     }
 
+    /// The key part of `test_file` without the content of the files that it
+    /// reaches: the shared part of the key, the path and content of the test
+    /// file, and the Bun configs of its folders. The reach record of a test
+    /// file (see `dry_run_cache`) checks the reached files one by one.
+    pub fn test_env_part(&self, test_file: &str) -> String {
+        let mut hasher = Sha256::new();
+        feed(&mut hasher, &self.shared);
+        feed(&mut hasher, test_file);
+        feed(&mut hasher, &self.hash_of(test_file));
+        for dir in package_folders(test_file) {
+            let bunfig = format!("{dir}/{BUNFIG}");
+            feed(&mut hasher, &bunfig);
+            feed(&mut hasher, &self.hash_of(&bunfig));
+        }
+        hex(&hasher.finalize())
+    }
+
     /// The files that `test_file` reaches through static imports, sorted.
     pub fn reach_of(&self, test_file: &str) -> impl Iterator<Item = &str> {
         self.files

@@ -23,6 +23,7 @@ mod database_write;
 mod function_scope;
 mod layout;
 mod plan;
+mod probes;
 mod reach;
 mod sampling;
 mod skipped_tests;
@@ -36,11 +37,12 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 
 pub use fallow_mutation::{
-    FunctionRef, Mutant, MutantChange, MutantId, MutationError, MutationOptions, Operator,
-    RESERVED_PREFIX, SourceKind,
+    FunctionRef, Mutant, MutantChange, MutantId, MutationError, MutationOptions, Operator, Outline,
+    OutlineBody, RESERVED_PREFIX, SourceKind, function_probe, module_probe, outline, probe_key,
 };
 pub use fallow_output::DiffIndex;
 pub use layout::{export_containing, instrument_source, is_component_file};
+pub use probes::{PlanProbes, ProbedFile};
 pub use skipped_tests::{SkipKind, SkippedTest};
 
 use crate::EngineError;
@@ -123,6 +125,10 @@ pub struct MutationPlanRequest {
     /// Wrap each exported function that holds a planned mutant, so that a
     /// recording dry run can record its arguments.
     pub record_exports: bool,
+    /// Add entry probes to the instrumented files and give a probed copy of
+    /// each other script file that a test file reaches (see
+    /// [`MutationPlan::probes`]).
+    pub probes: bool,
 }
 
 impl MutationPlanRequest {
@@ -139,6 +145,7 @@ impl MutationPlanRequest {
             skip_component_files: false,
             mutant_ids: None,
             record_exports: false,
+            probes: false,
         }
     }
 }
@@ -479,6 +486,11 @@ pub struct MutationPlan {
     /// config exports, so that a mutant in such an export or in a module that
     /// only a tool config file imports can be `planned`.
     pub framework_config_checked: bool,
+    /// The probed files, when the request asked for probes. A file with a
+    /// mutant gets its probed instrumented code here, and each other script
+    /// file of `reach_files` a copy with only the probes.
+    #[serde(skip)]
+    pub probes: Option<PlanProbes>,
     /// The selected files that the plan did not instrument, sorted by path.
     pub skipped_files: Vec<SkippedFile>,
     /// The paths of a `Paths` scope that select no source file, sorted by

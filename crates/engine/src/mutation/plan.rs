@@ -122,6 +122,8 @@ struct Context<'a> {
 /// The result for one file.
 struct FileOutcome {
     file: Option<PlannedFile>,
+    /// The probed instrumented code, when the request asked for probes.
+    probed: Option<super::ProbedFile>,
     mutants: Vec<RankEntry>,
     skipped: Option<SkippedFile>,
 }
@@ -189,7 +191,11 @@ pub(super) fn build(
     let mut files = Vec::new();
     let mut mutants = Vec::new();
     let mut skipped_files = Vec::new();
+    let mut probed = std::collections::BTreeMap::new();
     for outcome in outcomes {
+        if let (Some(file), Some(probe)) = (&outcome.file, outcome.probed) {
+            probed.insert(file.path.clone(), probe);
+        }
         files.extend(outcome.file);
         mutants.extend(outcome.mutants);
         skipped_files.extend(outcome.skipped);
@@ -216,7 +222,15 @@ pub(super) fn build(
 
     let test_files: Vec<String> = test_files.into_iter().collect();
     let reach = super::reach::test_reach(graph, inputs.root, &test_files);
+    let probes = request.probes.then(|| {
+        probed.retain(|path, _| runnable.contains(path.as_str()));
+        let planned: FxHashSet<&str> = files.iter().map(|file| file.path.as_str()).collect();
+        let reach_only = super::probes::probe_reach_files(inputs.root, &reach.files, &planned);
+        probed.extend(reach_only);
+        super::PlanProbes { files: probed }
+    });
     MutationPlan {
+        probes,
         files,
         counts: count(&mutants),
         mutants,
@@ -373,6 +387,7 @@ fn in_path(file: &Path, root: &Path, selected: &Path) -> bool {
 fn plan_file(context: &Context<'_>, candidate: &Candidate<'_>) -> FileOutcome {
     let skipped = |reason| FileOutcome {
         file: None,
+        probed: None,
         mutants: Vec::new(),
         skipped: Some(SkippedFile {
             path: candidate.rel.clone(),
@@ -414,10 +429,16 @@ fn plan_file(context: &Context<'_>, candidate: &Candidate<'_>) -> FileOutcome {
         && !context.runner_unreached.contains(&candidate.file_id);
     let facts = FileFacts::new(context, candidate, module, source, covered);
     let mut mutants = assign(candidate, &facts, covered, instrumented.mutants.clone());
-    let instrumented = match without_pruned(candidate, source, options, &mutants, instrumented) {
-        Ok(instrumented) => instrumented,
-        Err(error) => return skipped(skip_reason(&error)),
-    };
+    let (instrumented, options) =
+        match without_pruned(candidate, source, options, &mutants, instrumented) {
+            Ok(result) => result,
+            Err(error) => return skipped(skip_reason(&error)),
+        };
+    let probed = context
+        .request
+        .probes
+        .then(|| super::probes::probe_source(source, &candidate.rel, &options))
+        .flatten();
     if !matches!(candidate.layout, Layout::Component(_)) {
         context
             .constant_parameters
@@ -430,6 +451,7 @@ fn plan_file(context: &Context<'_>, candidate: &Candidate<'_>) -> FileOutcome {
         Vec::new()
     };
     FileOutcome {
+        probed,
         file: Some(planned_file(
             candidate,
             &bytes,
@@ -446,6 +468,8 @@ const fn skip_reason(error: &MutationError) -> SkipReason {
         MutationError::Parse { .. } => SkipReason::Parse,
         MutationError::ReservedName { .. } => SkipReason::ReservedName,
         MutationError::TooLarge => SkipReason::TooLarge,
+        // Only the probe pass gives it, and that pass keeps the plain copy.
+        MutationError::ProbePlacement => SkipReason::Parse,
     }
 }
 
@@ -460,18 +484,19 @@ fn without_pruned(
     mut options: MutationOptions,
     mutants: &[RankEntry],
     instrumented: Instrumented,
-) -> Result<Instrumented, MutationError> {
+) -> Result<(Instrumented, MutationOptions), MutationError> {
     options.excluded = mutants
         .iter()
         .filter(|entry| matches!(entry.planned.disposition, MutantDisposition::Pruned(_)))
         .map(|entry| entry.planned.mutant.id.clone())
         .collect();
     if options.excluded.is_empty() {
-        return Ok(instrumented);
+        return Ok((instrumented, options));
     }
-    candidate
+    let instrumented = candidate
         .layout
-        .instrument(source, &candidate.rel, &options)
+        .instrument(source, &candidate.rel, &options)?;
+    Ok((instrumented, options))
 }
 
 /// Widens the changed-line ranges of `options` to the functions that hold the

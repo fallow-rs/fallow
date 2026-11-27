@@ -21,7 +21,8 @@
 //!
 //! The cache is one file, `<cache dir>/mutation/dry-runs.json`. It keeps one
 //! entry for each test file and drops the least recently used entries above
-//! [`MAX_ENTRIES`].
+//! [`MAX_ENTRIES`]. A run with reach selection also keeps the reach record of
+//! each test file in the same file (see the `reach` module).
 
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
@@ -35,13 +36,18 @@ use sha2::{Digest, Sha256};
 use super::protocol::{InitRequest, Ready};
 use super::result_cache::ResultCache;
 use super::run_dir::RunFile;
-use super::scheduler::{DryRunEntry, DryRunLookup, StoredDryRun};
+use super::scheduler::{
+    DryRunEntry, DryRunLookup, ReachLookup, ReachSelection, ShareProbes, StoredDryRun,
+};
+
+mod reach;
+pub use reach::{KeepReason, ReachFacts};
 
 /// The file name of the cache below `<cache dir>/mutation`.
 pub const DRY_RUN_CACHE_FILE: &str = "dry-runs.json";
 /// The version of the key and of the file format. A change to the key parts
 /// or to the file shape needs a new version.
-const FORMAT_VERSION: u32 = 1;
+const FORMAT_VERSION: u32 = 2;
 /// The most entries that the file keeps.
 pub const MAX_ENTRIES: usize = 20_000;
 
@@ -75,6 +81,8 @@ struct CacheFile {
     format_version: u32,
     generation: u64,
     entries: BTreeMap<String, Entry>,
+    #[serde(default)]
+    reach: reach::ReachStore,
 }
 
 /// The dry-run cache of one run.
@@ -89,6 +97,9 @@ pub struct DryRunCache {
     shared: String,
     state: Mutex<CacheFile>,
     max_entries: usize,
+    /// The facts of the run for the reach selection, when the run selects by
+    /// reach.
+    reach: Option<ReachFacts>,
 }
 
 impl DryRunCache {
@@ -124,7 +135,51 @@ impl DryRunCache {
             shared: shared_part(operators, init),
             state: Mutex::new(state),
             max_entries: MAX_ENTRIES,
+            reach: None,
         }
+    }
+
+    /// The cache with the reach facts of the run, so that it selects the
+    /// dry-run files by reach and records the probes of the dry run.
+    #[must_use]
+    pub fn with_reach(self, facts: ReachFacts) -> Self {
+        Self {
+            reach: Some(facts),
+            ..self
+        }
+    }
+
+    /// The environment part of the reach record of `test_file`.
+    fn reach_env(&self, ready: &Ready, test_file: &str) -> String {
+        let mut hasher = Sha256::new();
+        feed(&mut hasher, &self.shared);
+        feed(&mut hasher, &ready.runner_version);
+        feed(&mut hasher, &ready.runtime_version);
+        feed(&mut hasher, &format!("{:?}", ready.capabilities));
+        feed(&mut hasher, &self.keys.test_env_part(test_file));
+        hex(&hasher.finalize())
+    }
+
+    /// Records the probes of the new dry run of `shares`, and gives the
+    /// number of test files with a record. A runner whose workers keep the
+    /// modules of one test file for the next one gives no record, because
+    /// a test file can then use code that an earlier file ran.
+    pub fn record_reach(&self, ready: &Ready, shares: &[ShareProbes]) -> usize {
+        let Some(facts) = &self.reach else {
+            return 0;
+        };
+        let Ok(mut state) = self.state.lock() else {
+            return 0;
+        };
+        let generation = state.generation + 1;
+        let complete = ready.capabilities.fresh_modules_per_run;
+        state.reach.record(
+            facts,
+            shares,
+            complete,
+            |test_file| self.reach_env(ready, test_file),
+            generation,
+        )
     }
 
     /// Adds `entries` and gives the number of entries that it added or
@@ -171,6 +226,7 @@ impl DryRunCache {
                 state.entries.remove(&file);
             }
         }
+        state.reach.prune(self.max_entries);
         let bytes = serde_json::to_vec(&*state)
             .map_err(|error| format!("cannot serialize the dry-run cache: {error}"))?;
         if let Some(parent) = self.file.parent() {
@@ -219,6 +275,24 @@ fn shared_part(operators: Option<&[String]>, init: &InitRequest) -> String {
         &serde_json::to_string(&options).unwrap_or_default(),
     );
     hex(&hasher.finalize())
+}
+
+impl ReachLookup for DryRunCache {
+    fn select(&self, ready: &Ready, dry_files: &[String]) -> ReachSelection {
+        let (Some(facts), Ok(state)) = (&self.reach, self.state.lock()) else {
+            return ReachSelection::default();
+        };
+        if !ready.capabilities.fresh_modules_per_run {
+            let mut selection = ReachSelection::default();
+            selection
+                .kept
+                .insert(KeepReason::NoRecord.name().to_owned(), dry_files.len());
+            return selection;
+        }
+        state.reach.select(facts, dry_files, |test_file| {
+            self.reach_env(ready, test_file)
+        })
+    }
 }
 
 impl DryRunLookup for DryRunCache {

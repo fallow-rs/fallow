@@ -272,6 +272,7 @@ mod tests {
             counts: MutationPlanCounts::default(),
             no_test_files: false,
             framework_config_checked: false,
+            probes: None,
             skipped_files: Vec::new(),
             unmatched_paths: Vec::new(),
             skipped_tests: Vec::new(),

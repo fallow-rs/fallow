@@ -60,6 +60,7 @@ pub(super) fn store_results(
             "the mutation result cache was not saved: {message}"
         ));
     }
+    let reach_selection = super::mutation_reach::finish(dry_cache, outcome);
     let dry_run_stored = dry_cache.map_or(0, |dry_cache| {
         let stored = dry_cache.record(&outcome.dry_run_entries);
         if let Err(message) = dry_cache.save() {
@@ -84,6 +85,7 @@ pub(super) fn store_results(
         dry_run_misses: outcome.dry_run_missed,
         dry_run_stored,
         not_keyed: NOT_KEYED.iter().map(|&item| item.to_owned()).collect(),
+        reach_selection,
     })
 }
 
@@ -95,12 +97,12 @@ pub(super) fn dry_run_cache(
     instrumented: &[RunFile<'_>],
     operators: Option<&[String]>,
     init: &InitRequest,
-) -> Arc<DryRunCache> {
-    Arc::new(DryRunCache::open(
+) -> DryRunCache {
+    DryRunCache::open(
         mutation_cache,
         Arc::clone(keys),
         instrumented,
         operators,
         init,
-    ))
+    )
 }

@@ -18,6 +18,7 @@
 
 use super::project::{Project, available_runners, vitest_package};
 use super::template::{Runner, Step, apply};
+use crate::mutation::ReachSelectionMode;
 
 /// The seeds of the generated sequences in PR CI. One starts on Vitest and
 /// one on Bun.
@@ -33,6 +34,45 @@ struct Regression {
     runner: Runner,
     steps: &'static [Step],
 }
+
+/// The sequences of the reach selection. The warm run selects the dry-run
+/// files by reach. A test file that stops calling the mutated function gets a
+/// record without it, so a later change of the function body can leave the
+/// file out of the dry run. The helper change is outside each function body
+/// of a file that the test file loads, so it keeps the file.
+const REACH_REGRESSIONS: &[Regression] = &[
+    Regression {
+        name: "reach: a body change after a test stops calling it",
+        runner: Runner::Vitest,
+        steps: &[
+            Step::ToggleHelperCalls,
+            Step::ToggleSourceForm,
+            Step::ToggleSourceForm,
+            Step::ToggleHelperCalls,
+        ],
+    },
+    Regression {
+        name: "reach: a helper change between body changes",
+        runner: Runner::Vitest,
+        steps: &[
+            Step::ToggleSourceForm,
+            Step::ToggleHelperCalls,
+            Step::ToggleSourceForm,
+            Step::ToggleHelperExact,
+        ],
+    },
+    Regression {
+        name: "reach: setup and config changes",
+        runner: Runner::Vitest,
+        steps: &[
+            Step::ToggleHelperCalls,
+            Step::ToggleSetupMode,
+            Step::ToggleSourceForm,
+            Step::ToggleSetupListed,
+            Step::ToggleSourceForm,
+        ],
+    },
+];
 
 const REGRESSIONS: &[Regression] = &[
     Regression {
@@ -100,7 +140,17 @@ fn run_sequence(
     runner: Runner,
     steps: &[Step],
 ) -> Result<(), String> {
-    let project = Project::new(runner, vitest);
+    run_sequence_with(vitest, label, (runner, ReachSelectionMode::Off), steps)
+}
+
+/// [`run_sequence`] with the reach selection `reach` in each warm run.
+fn run_sequence_with(
+    vitest: &std::path::Path,
+    label: &str,
+    (runner, reach): (Runner, ReachSelectionMode),
+    steps: &[Step],
+) -> Result<(), String> {
+    let project = Project::new(runner, vitest).with_reach(reach);
     let mut done: Vec<Step> = Vec::new();
     for step in std::iter::once(None).chain(steps.iter().copied().map(Some)) {
         if let Some(step) = step {
@@ -215,6 +265,21 @@ fn regression_sequences_match_cache_free_runs() {
                 regression.steps,
             )
             .err()
+        })
+        .collect();
+    assert!(failures.is_empty(), "{}", failures.join("\n\n"));
+}
+
+#[test]
+fn reach_selection_sequences_match_cache_free_runs() {
+    let Some(vitest) = vitest_package() else {
+        return;
+    };
+    let failures: Vec<String> = REACH_REGRESSIONS
+        .iter()
+        .filter_map(|regression| {
+            let mode = (regression.runner, ReachSelectionMode::On);
+            run_sequence_with(&vitest, regression.name, mode, regression.steps).err()
         })
         .collect();
     assert!(failures.is_empty(), "{}", failures.join("\n\n"));

@@ -24,6 +24,7 @@ mod exports;
 mod id;
 mod logging_only;
 mod operator;
+mod reach;
 mod record;
 mod regex;
 mod replacements;
@@ -33,6 +34,7 @@ use serde::Serialize;
 pub use blocks::{ScriptBlock, ScriptRole, instrument_blocks};
 pub use exports::export_containing;
 pub use operator::Operator;
+pub use reach::{Outline, OutlineBody, PROBE_FUNCTION, function_probe, module_probe, probe_key};
 
 /// The language of a source text.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -264,6 +266,8 @@ pub enum MutationError {
         /// The declared name.
         name: String,
     },
+    /// An entry probe found no place in the instrumented text.
+    ProbePlacement,
 }
 
 impl std::fmt::Display for MutationError {
@@ -274,6 +278,9 @@ impl std::fmt::Display for MutationError {
             }
             Self::TooLarge => {
                 f.write_str("the source or the instrumented output is larger than 4 GiB")
+            }
+            Self::ProbePlacement => {
+                f.write_str("an entry probe found no place in the instrumented text")
             }
             Self::ReservedName { name } => write!(
                 f,
@@ -334,8 +341,49 @@ pub fn instrument(
         kind: source_type,
         role: None,
         prelude: true,
+        probe: None,
     };
-    instrument_text(&text, options, &mut seen_ids)
+    instrument_text(&text, options, &mut seen_ids).map(|(result, _)| result)
+}
+
+/// [`instrument`] with an entry probe at the start of the module and of each
+/// outer function body (see [`PROBE_FUNCTION`]), and the [`Outline`] of
+/// `source`. The probe ids use the [`probe_key`] of `path`. The mutants and
+/// their ids are the same as without probes.
+pub fn instrument_with_probes(
+    source: &str,
+    path: &str,
+    source_type: SourceKind,
+    options: &MutationOptions,
+) -> Result<(Instrumented, Outline), MutationError> {
+    let mut seen_ids = std::collections::BTreeSet::new();
+    let key = probe_key(path);
+    let text = TextInput {
+        source,
+        path,
+        kind: source_type,
+        role: None,
+        prelude: true,
+        probe: Some(&key),
+    };
+    let (result, outline) = instrument_text(&text, options, &mut seen_ids)?;
+    outline
+        .map(|outline| (result, outline))
+        .ok_or(MutationError::ProbePlacement)
+}
+
+/// The [`Outline`] of `source`.
+pub fn outline(source: &str, source_type: SourceKind) -> Result<Outline, MutationError> {
+    if u32::try_from(source.len()).is_err() {
+        return Err(MutationError::TooLarge);
+    }
+    let allocator = oxc_allocator::Allocator::default();
+    let parsed = oxc_parser::Parser::new(&allocator, source, source_type.source_type()).parse();
+    if parsed.fatal_error || parsed.diagnostics.has_errors() {
+        let messages = parsed.diagnostics.iter().map(ToString::to_string).collect();
+        return Err(MutationError::Parse { messages });
+    }
+    Ok(reach::outline_of(&parsed.program, source))
 }
 
 /// One source text for [`instrument_text`]: a whole file or one script block.
@@ -347,6 +395,8 @@ struct TextInput<'s> {
     pub(crate) role: Option<ScriptRole>,
     /// True when the text gets the prelude.
     pub(crate) prelude: bool,
+    /// The probe key of the text when it gets entry probes.
+    pub(crate) probe: Option<&'s str>,
 }
 
 /// Instruments one text. The spans, lines and columns of the result are
@@ -356,7 +406,7 @@ fn instrument_text(
     input: &TextInput<'_>,
     options: &MutationOptions,
     seen_ids: &mut std::collections::BTreeSet<MutantId>,
-) -> Result<Instrumented, MutationError> {
+) -> Result<(Instrumented, Option<Outline>), MutationError> {
     let source = input.source;
     if u32::try_from(source.len()).is_err() {
         return Err(MutationError::TooLarge);
@@ -367,7 +417,7 @@ fn instrument_text(
         let messages = parsed.diagnostics.iter().map(ToString::to_string).collect();
         return Err(MutationError::Parse { messages });
     }
-    if let Some(name) = reserved_binding(&parsed.program) {
+    if let Some(name) = reserved_binding(&parsed.program, input.probe.is_some()) {
         return Err(MutationError::ReservedName { name });
     }
     let collected = collect::collect(&parsed.program, source);
@@ -377,7 +427,21 @@ fn instrument_text(
         .unwrap_or_default();
     // A component block has no module exports to wrap.
     let record = options.record_exports && input.role.is_none();
-    let insertions = header_insertions(&parsed.program, source, input.prelude, record);
+    let probed = input
+        .probe
+        .map(|key| (reach::probes(&parsed.program, source, key), key));
+    let mut insertions = header_insertions(&parsed.program, source, input.prelude, record);
+    if let Some((_, key)) = probed
+        && input.prelude
+        && let Some(last) = insertions.last_mut()
+    {
+        let at = last
+            .text
+            .strip_suffix('\n')
+            .map_or(last.text.len(), str::len);
+        let probe_prelude = format!("{}{}", reach::PROBE_PRELUDE, reach::module_statement(key));
+        last.text.insert_str(at, &probe_prelude);
+    }
     let line_starts = line_starts(source);
 
     let mut mutants = Vec::new();
@@ -438,41 +502,57 @@ fn instrument_text(
     } else {
         Vec::new()
     };
-    let (code, map) = emit::emit(
+    let probes = probed
+        .as_ref()
+        .map_or(&[][..], |((probes, _), _)| probes.as_slice());
+    let (code, map, placed) = emit::emit(
         source,
-        &emit_sites,
-        &collected.statement_starts,
-        &insertions,
-        &top_level,
+        &emit::EmitInput {
+            sites: &emit_sites,
+            statement_starts: &collected.statement_starts,
+            insertions: &insertions,
+            top_level: &top_level,
+            probes,
+        },
     );
+    if !placed {
+        return Err(MutationError::ProbePlacement);
+    }
     // The splice map holds `u32` offsets. When the output fits, no offset
     // was truncated.
     if u32::try_from(code.len()).is_err() {
         return Err(MutationError::TooLarge);
     }
-    Ok(Instrumented { mutants, code, map })
+    let outline = probed.map(|((_, outline), _)| outline);
+    Ok((Instrumented { mutants, code, map }, outline))
 }
 
 /// The first binding in `program` with the name of a prelude function.
-fn reserved_binding(program: &oxc_ast::ast::Program<'_>) -> Option<String> {
+fn reserved_binding(program: &oxc_ast::ast::Program<'_>, probes: bool) -> Option<String> {
     use oxc_ast_visit::Visit;
 
-    #[derive(Default)]
     struct Finder {
         found: Option<String>,
+        probes: bool,
     }
     impl<'a> Visit<'a> for Finder {
         fn visit_binding_identifier(&mut self, it: &oxc_ast::ast::BindingIdentifier<'a>) {
             let name = it.name.as_str();
             if self.found.is_none()
-                && (name == ACTIVE_FUNCTION || name == HIT_FUNCTION || name == RECORD_FUNCTION)
+                && (name == ACTIVE_FUNCTION
+                    || name == HIT_FUNCTION
+                    || name == RECORD_FUNCTION
+                    || (self.probes && name == PROBE_FUNCTION))
             {
                 self.found = Some(name.to_owned());
             }
         }
     }
 
-    let mut finder = Finder::default();
+    let mut finder = Finder {
+        found: None,
+        probes,
+    };
     finder.visit_program(program);
     finder.found
 }

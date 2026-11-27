@@ -1,0 +1,547 @@
+//! The reach record of each test file, and the rule that leaves a test file
+//! out of the dry run.
+//!
+//! A run with reach selection probes each script file that a dry-run test
+//! file reaches (see `fallow_mutation::instrument_with_probes`). After the dry
+//! run, the record of each test file holds:
+//!
+//! - the environment part of its key: the result cache key without the
+//!   reached files, the runner and runtime versions and capabilities, and the
+//!   shared part of the dry-run key;
+//! - a snapshot of each reached file of the run: the key of its outline, or
+//!   the hash of its content for a file without probes;
+//! - the probe ids that its tests gave, and the probe ids of its dry-run
+//!   share outside each test (a module load, a hook). The probe ids outside
+//!   each test belong to each file of the share.
+//!
+//! A later run leaves test file T out of the dry run only when each of these
+//! holds:
+//!
+//! 1. T has a record and the environment part is equal.
+//! 2. Each file that T reaches now is in the snapshot, and each probe id of
+//!    the record names a file of the snapshot.
+//! 3. For each such file F: F is equal to the snapshot, or F has probes, T
+//!    did not load F, or (the skeleton of F is equal and each body that T
+//!    entered is equal). A file without probes must be equal.
+//! 4. No mutant of the run is in the skeleton of a file that T loaded, in a
+//!    body that T entered, or in a file without probes that T reaches.
+//!
+//! Each other case keeps T. With an equal environment, equal skeletons of
+//! each loaded file and equal bodies of each entered function, T runs the
+//! code of the recorded run until it enters a body that changed. The record
+//! shows that T entered no such body, so T runs no changed code and, by rule
+//! 4, no mutant. The rule assumes that a test gives the same run for the
+//! same inputs, and it has the limits of the result cache: dynamic imports
+//! that the module graph does not resolve, and files that a test reads.
+
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+
+use fallow_engine::mutation::{MutationPlan, Outline, SourceKind, probe_key};
+use rustc_hash::FxHashMap;
+use serde::{Deserialize, Serialize};
+use xxhash_rust::xxh3::{Xxh3, xxh3_64};
+
+use super::super::scheduler::{ReachSelection, ShareProbes};
+
+/// The most snapshots that the store keeps. An entry whose snapshot is gone
+/// has no record.
+const MAX_SNAPSHOTS: usize = 16;
+
+/// Why a test file stays in the dry run. The names are the keys of the
+/// `kept` counts of the report.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum KeepReason {
+    /// The store has no complete record of the test file.
+    NoRecord,
+    /// The test file, its config or the runner changed.
+    Environment,
+    /// The test file reaches a file that the record does not hold.
+    NewReachFile,
+    /// The record names a file that the snapshot does not hold.
+    UnknownLoadedFile,
+    /// A file without probes that the test file reaches changed.
+    ChangedFileWithoutProbes,
+    /// The code outside the function bodies of a loaded file changed.
+    ChangedSkeleton,
+    /// A function body that the test file entered changed.
+    ChangedEnteredFunction,
+    /// A mutant is outside each function body of a loaded file.
+    MutantInLoadedCode,
+    /// A mutant is in a function body that the test file entered.
+    MutantInEnteredFunction,
+    /// A mutant is in a file without probes that the test file reaches.
+    MutantInFileWithoutProbes,
+}
+
+impl KeepReason {
+    /// The report name.
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::NoRecord => "no-record",
+            Self::Environment => "environment",
+            Self::NewReachFile => "new-reach-file",
+            Self::UnknownLoadedFile => "unknown-loaded-file",
+            Self::ChangedFileWithoutProbes => "changed-file-without-probes",
+            Self::ChangedSkeleton => "changed-skeleton",
+            Self::ChangedEnteredFunction => "changed-entered-function",
+            Self::MutantInLoadedCode => "mutant-in-loaded-code",
+            Self::MutantInEnteredFunction => "mutant-in-entered-function",
+            Self::MutantInFileWithoutProbes => "mutant-in-file-without-probes",
+        }
+    }
+}
+
+/// The reached files of one run: path to fact key.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+struct Snapshot {
+    files: BTreeMap<String, String>,
+    generation: u64,
+}
+
+/// The record of one test file.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct ReachEntry {
+    env: String,
+    snapshot: String,
+    statics: String,
+    entered: Vec<String>,
+    generation: u64,
+}
+
+/// The reach records of the store file.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub(super) struct ReachStore {
+    #[serde(default)]
+    snapshots: BTreeMap<String, Snapshot>,
+    /// The outline of each fact key of a file with probes.
+    #[serde(default)]
+    outlines: BTreeMap<String, Outline>,
+    /// The probe ids outside each test of one share, by hash.
+    #[serde(default)]
+    statics: BTreeMap<String, Vec<String>>,
+    #[serde(default)]
+    tests: BTreeMap<String, ReachEntry>,
+}
+
+/// The fact of one file in the current run.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Fact {
+    /// `o<hex>` for a file with probes, `c<hex>` for a file without, `-` for
+    /// a file that does not exist.
+    key: String,
+    outline: Option<Outline>,
+}
+
+fn outline_key(outline: &Outline) -> String {
+    let mut hasher = Xxh3::new();
+    hasher.update(&outline.skeleton.to_le_bytes());
+    hasher.update(&(outline.bodies.len() as u64).to_le_bytes());
+    for body in &outline.bodies {
+        hasher.update(&body.hash.to_le_bytes());
+    }
+    format!("o{:016x}", hasher.digest())
+}
+
+fn hash_ids<'a>(ids: impl Iterator<Item = &'a String>) -> String {
+    let mut hasher = Xxh3::new();
+    for id in ids {
+        hasher.update(&(id.len() as u64).to_le_bytes());
+        hasher.update(id.as_bytes());
+    }
+    format!("{:016x}", hasher.digest())
+}
+
+/// The facts of the current run that the rule reads.
+#[derive(Debug)]
+pub struct ReachFacts {
+    root: PathBuf,
+    /// The outline of each file that the plan probed.
+    probed: FxHashMap<String, Outline>,
+    /// The files that each dry-run test file reaches.
+    reach: FxHashMap<String, Vec<String>>,
+    /// The reached files of each dry-run test file, in one sorted list.
+    reach_files: Vec<String>,
+    /// The spans of the mutants of each file.
+    mutants: FxHashMap<String, Vec<(u32, u32)>>,
+    facts: Mutex<FxHashMap<String, Fact>>,
+}
+
+impl ReachFacts {
+    /// The facts of `plan`, a plan with probes, under `root`.
+    #[must_use]
+    pub fn new(root: &Path, plan: &MutationPlan) -> Self {
+        let probed = plan
+            .probes
+            .as_ref()
+            .map(|probes| {
+                probes
+                    .files
+                    .iter()
+                    .map(|(path, file)| (path.clone(), file.outline.clone()))
+                    .collect()
+            })
+            .unwrap_or_default();
+        let reach = plan
+            .test_files
+            .iter()
+            .map(|test| {
+                let files = plan
+                    .test_file_reach
+                    .get(test)
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|&index| plan.reach_files.get(index as usize).cloned())
+                    .collect();
+                (test.clone(), files)
+            })
+            .collect();
+        let mut mutants: FxHashMap<String, Vec<(u32, u32)>> = FxHashMap::default();
+        for mutant in &plan.mutants {
+            mutants
+                .entry(mutant.file.clone())
+                .or_default()
+                .push(mutant.mutant.span);
+        }
+        Self {
+            root: root.to_path_buf(),
+            probed,
+            reach,
+            reach_files: plan.reach_files.clone(),
+            mutants,
+            facts: Mutex::new(FxHashMap::default()),
+        }
+    }
+
+    /// Facts for a test: the outline of each probed file, the reach of each
+    /// test file, and the mutant spans of each file.
+    #[cfg(test)]
+    pub(crate) fn from_parts(
+        root: &Path,
+        probed: FxHashMap<String, Outline>,
+        reach: FxHashMap<String, Vec<String>>,
+        mutants: FxHashMap<String, Vec<(u32, u32)>>,
+    ) -> Self {
+        let mut reach_files: Vec<String> = reach.values().flatten().cloned().collect();
+        reach_files.sort_unstable();
+        reach_files.dedup();
+        Self {
+            root: root.to_path_buf(),
+            probed,
+            reach,
+            reach_files,
+            mutants,
+            facts: Mutex::new(FxHashMap::default()),
+        }
+    }
+
+    fn fact(&self, path: &str) -> Fact {
+        if let Some(fact) = self
+            .facts
+            .lock()
+            .ok()
+            .and_then(|facts| facts.get(path).cloned())
+        {
+            return fact;
+        }
+        let fact = self.read_fact(path);
+        if let Ok(mut facts) = self.facts.lock() {
+            facts.insert(path.to_owned(), fact.clone());
+        }
+        fact
+    }
+
+    fn read_fact(&self, path: &str) -> Fact {
+        if let Some(outline) = self.probed.get(path) {
+            return Fact {
+                key: outline_key(outline),
+                outline: Some(outline.clone()),
+            };
+        }
+        let Ok(bytes) = std::fs::read(self.root.join(path)) else {
+            return Fact {
+                key: "-".to_owned(),
+                outline: None,
+            };
+        };
+        Fact {
+            key: format!("c{:016x}", xxh3_64(&bytes)),
+            outline: None,
+        }
+    }
+
+    /// The outline of `path` for a file that the run did not probe but that
+    /// a record names. Only a script file has one.
+    fn outline_on_disk(&self, path: &str) -> Option<Outline> {
+        let kind = SourceKind::from_path(path)?;
+        let source = std::fs::read_to_string(self.root.join(path)).ok()?;
+        fallow_engine::mutation::outline(&source, kind).ok()
+    }
+}
+
+/// The probe ids of one file in a record: the module probe and the entered
+/// ordinals.
+#[derive(Debug, Default)]
+struct FileProbes {
+    loaded: bool,
+    entered: BTreeSet<usize>,
+}
+
+fn group_probes<'a>(
+    ids: impl Iterator<Item = &'a String>,
+) -> Option<FxHashMap<&'a str, FileProbes>> {
+    let mut groups: FxHashMap<&str, FileProbes> = FxHashMap::default();
+    for id in ids {
+        let (key, part) = id.strip_prefix('r')?.split_once('.')?;
+        let group = groups.entry(key).or_default();
+        group.loaded = true;
+        if part != "m" {
+            group.entered.insert(part.parse().ok()?);
+        }
+    }
+    Some(groups)
+}
+
+impl ReachStore {
+    /// Decides for `test_file` with the environment part `env`.
+    pub(super) fn decide(
+        &self,
+        facts: &ReachFacts,
+        test_file: &str,
+        env: &str,
+    ) -> Result<(), KeepReason> {
+        let entry = self.tests.get(test_file).ok_or(KeepReason::NoRecord)?;
+        let snapshot = self
+            .snapshots
+            .get(&entry.snapshot)
+            .ok_or(KeepReason::NoRecord)?;
+        let statics = self
+            .statics
+            .get(&entry.statics)
+            .ok_or(KeepReason::NoRecord)?;
+        if entry.env != env {
+            return Err(KeepReason::Environment);
+        }
+        let groups = group_probes(entry.entered.iter().chain(statics))
+            .ok_or(KeepReason::UnknownLoadedFile)?;
+        let by_key: FxHashMap<String, &str> = snapshot
+            .files
+            .keys()
+            .map(|path| (probe_key(path), path.as_str()))
+            .collect();
+        let mut files: BTreeSet<&str> = BTreeSet::new();
+        for key in groups.keys() {
+            files.insert(by_key.get(*key).ok_or(KeepReason::UnknownLoadedFile)?);
+        }
+        let reach = facts
+            .reach
+            .get(test_file)
+            .map(Vec::as_slice)
+            .unwrap_or_default();
+        for path in reach {
+            if !snapshot.files.contains_key(path) {
+                return Err(KeepReason::NewReachFile);
+            }
+            files.insert(path);
+        }
+        for path in files {
+            let probes = groups.get(probe_key(path).as_str());
+            self.check_file(facts, snapshot, path, probes)?;
+        }
+        Ok(())
+    }
+
+    fn check_file(
+        &self,
+        facts: &ReachFacts,
+        snapshot: &Snapshot,
+        path: &str,
+        probes: Option<&FileProbes>,
+    ) -> Result<(), KeepReason> {
+        let Some(old) = snapshot.files.get(path) else {
+            return Err(KeepReason::NewReachFile);
+        };
+        let current = facts.fact(path);
+        let mutants = facts
+            .mutants
+            .get(path)
+            .map(Vec::as_slice)
+            .unwrap_or_default();
+        if !old.starts_with('o') {
+            if *old != current.key {
+                return Err(KeepReason::ChangedFileWithoutProbes);
+            }
+            if !mutants.is_empty() {
+                return Err(KeepReason::MutantInFileWithoutProbes);
+            }
+            return Ok(());
+        }
+        let Some(probes) = probes.filter(|probes| probes.loaded) else {
+            // The test file did not load the file. A change of the file
+            // reaches it only through code that it runs and that changed.
+            return Ok(());
+        };
+        let outline = match current.outline {
+            Some(outline) => outline,
+            None if current.key == *old => self
+                .outlines
+                .get(old)
+                .cloned()
+                .ok_or(KeepReason::NoRecord)?,
+            None => facts
+                .outline_on_disk(path)
+                .ok_or(KeepReason::ChangedFileWithoutProbes)?,
+        };
+        if current.key != *old {
+            let recorded = self.outlines.get(old).ok_or(KeepReason::NoRecord)?;
+            if recorded.skeleton != outline.skeleton
+                || recorded.bodies.len() != outline.bodies.len()
+            {
+                return Err(KeepReason::ChangedSkeleton);
+            }
+            for &ordinal in &probes.entered {
+                let before = recorded.bodies.get(ordinal).map(|body| body.hash);
+                let after = outline.bodies.get(ordinal).map(|body| body.hash);
+                if before.is_none() || before != after {
+                    return Err(KeepReason::ChangedEnteredFunction);
+                }
+            }
+        }
+        for &span in mutants {
+            match outline.body_of(span) {
+                None => return Err(KeepReason::MutantInLoadedCode),
+                Some(ordinal) if probes.entered.contains(&ordinal) => {
+                    return Err(KeepReason::MutantInEnteredFunction);
+                }
+                Some(_) => {}
+            }
+        }
+        Ok(())
+    }
+
+    /// Selects the files of `dry_files` that the dry run can leave out.
+    pub(super) fn select(
+        &self,
+        facts: &ReachFacts,
+        dry_files: &[String],
+        env: impl Fn(&str) -> String,
+    ) -> ReachSelection {
+        let mut selection = ReachSelection::default();
+        for test_file in dry_files {
+            match self.decide(facts, test_file, &env(test_file)) {
+                Ok(()) => selection.dropped.push(test_file.clone()),
+                Err(reason) => {
+                    *selection.kept.entry(reason.name().to_owned()).or_default() += 1;
+                }
+            }
+        }
+        selection.dropped.sort_unstable();
+        selection
+    }
+
+    /// Records the probes of `shares`. A test file of a failed share part, or
+    /// of a run whose workers keep modules between test files, loses its
+    /// record. `complete` is false for such a run.
+    pub(super) fn record(
+        &mut self,
+        facts: &ReachFacts,
+        shares: &[ShareProbes],
+        complete: bool,
+        env: impl Fn(&str) -> String,
+        generation: u64,
+    ) -> usize {
+        let files: BTreeMap<String, String> = facts
+            .reach_files
+            .iter()
+            .map(|path| {
+                let fact = facts.fact(path);
+                if let Some(outline) = &fact.outline {
+                    self.outlines.insert(fact.key.clone(), outline.clone());
+                }
+                (path.clone(), fact.key)
+            })
+            .collect();
+        let snapshot = hash_ids(files.iter().flat_map(|(path, key)| [path, key]));
+        let mut recorded = 0;
+        for share in shares {
+            let statics = hash_ids(share.statics.iter());
+            for test_file in &share.files {
+                if !complete || share.failed.contains(test_file) {
+                    self.tests.remove(test_file);
+                    continue;
+                }
+                let entered = share
+                    .entered
+                    .get(test_file)
+                    .map(|ids| ids.iter().cloned().collect())
+                    .unwrap_or_default();
+                self.tests.insert(
+                    test_file.clone(),
+                    ReachEntry {
+                        env: env(test_file),
+                        snapshot: snapshot.clone(),
+                        statics: statics.clone(),
+                        entered,
+                        generation,
+                    },
+                );
+                recorded += 1;
+            }
+            self.statics
+                .entry(statics)
+                .or_insert_with(|| share.statics.iter().cloned().collect());
+        }
+        if recorded > 0 {
+            self.snapshots
+                .insert(snapshot, Snapshot { files, generation });
+        }
+        recorded
+    }
+
+    /// Drops the records of the oldest entries above `max_entries`, the
+    /// oldest snapshots above [`MAX_SNAPSHOTS`], and each part that no
+    /// entry names.
+    pub(super) fn prune(&mut self, max_entries: usize) {
+        if self.tests.len() > max_entries {
+            let mut by_age: Vec<(u64, String)> = self
+                .tests
+                .iter()
+                .map(|(file, entry)| (entry.generation, file.clone()))
+                .collect();
+            by_age.sort();
+            let surplus = self.tests.len() - max_entries;
+            for (_, file) in by_age.into_iter().take(surplus) {
+                self.tests.remove(&file);
+            }
+        }
+        if self.snapshots.len() > MAX_SNAPSHOTS {
+            let mut by_age: Vec<(u64, String)> = self
+                .snapshots
+                .iter()
+                .map(|(id, snapshot)| (snapshot.generation, id.clone()))
+                .collect();
+            by_age.sort();
+            let surplus = self.snapshots.len() - MAX_SNAPSHOTS;
+            for (_, id) in by_age.into_iter().take(surplus) {
+                self.snapshots.remove(&id);
+            }
+        }
+        let snapshots = &self.snapshots;
+        self.tests
+            .retain(|_, entry| snapshots.contains_key(&entry.snapshot));
+        let named_statics: BTreeSet<&String> =
+            self.tests.values().map(|entry| &entry.statics).collect();
+        self.statics.retain(|id, _| named_statics.contains(id));
+        let named_outlines: BTreeSet<&String> = self
+            .snapshots
+            .values()
+            .flat_map(|snapshot| snapshot.files.values())
+            .collect();
+        self.outlines.retain(|key, _| named_outlines.contains(key));
+    }
+}
+
+#[cfg(test)]
+#[expect(clippy::unwrap_used, reason = "tests unwrap to keep assertions short")]
+mod tests;

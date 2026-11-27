@@ -66,7 +66,7 @@ pub use legacy_glob::{
 pub use markup_extensions::{
     DEFAULT_MARKUP_EXTENSIONS, resolve_markup_extensions, template_markup_extension,
 };
-pub use mutation::{MutationConfig, MutationOperatorName, MutationRunner};
+pub use mutation::{MutationConfig, MutationOperatorName, MutationReachSelection, MutationRunner};
 pub use override_effect::{IneffectiveOverrideRule, project_level_override_rules};
 pub use parsing::{
     CONFIG_FILE_NAMES, ConfigLoadOptions, UNRECOGNIZED_CONFIG_FILE_NAMES, config_file_name,

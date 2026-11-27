@@ -107,6 +107,7 @@ pub fn instrument_blocks(
             kind: block.kind,
             role: Some(block.role),
             prelude: !module_scope || block.role.is_module_scope(),
+            probe: None,
         };
         let local_options = MutationOptions {
             operators: options.operators.clone(),
@@ -117,7 +118,7 @@ pub fn instrument_blocks(
             record_exports: false,
             excluded: options.excluded.clone(),
         };
-        let result = instrument_text(&input, &local_options, &mut seen_ids)?;
+        let (result, _) = instrument_text(&input, &local_options, &mut seen_ids)?;
         append_block(result, start, &starts, &mut output)?;
         cursor = end;
     }

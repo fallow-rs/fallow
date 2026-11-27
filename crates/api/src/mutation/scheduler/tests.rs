@@ -308,6 +308,7 @@ fn config(concurrency: usize) -> ScheduleConfig {
         clock: Arc::new(SystemClock),
         cache: None,
         dry_runs: None,
+        reach: None,
         journal: None,
     }
 }

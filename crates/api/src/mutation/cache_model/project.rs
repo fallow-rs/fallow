@@ -6,7 +6,7 @@ use std::process::Command;
 use fallow_output::{MutantStatus, MutationCompletionStatus, MutationReport};
 
 use super::template::{self, Runner};
-use crate::mutation::{MutationRunOptions, MutationRunScope, Operator};
+use crate::mutation::{MutationRunOptions, MutationRunScope, Operator, ReachSelectionMode};
 use crate::{AnalysisOptions, run_mutation};
 
 /// With this variable set to `1`, a missing runner fails the test instead
@@ -93,6 +93,8 @@ pub struct Run {
 pub struct Project {
     _dir: tempfile::TempDir,
     pub root: PathBuf,
+    /// The reach selection of a cached run. A cache-free run has none.
+    reach: ReachSelectionMode,
 }
 
 impl Project {
@@ -100,7 +102,16 @@ impl Project {
         let dir = tempfile::tempdir().expect("dir");
         let root = dunce::canonicalize(dir.path()).expect("root");
         template::write(&root, runner, vitest);
-        Self { _dir: dir, root }
+        Self {
+            _dir: dir,
+            root,
+            reach: ReachSelectionMode::Off,
+        }
+    }
+
+    /// The project with `reach` for each cached run.
+    pub fn with_reach(self, reach: ReachSelectionMode) -> Self {
+        Self { reach, ..self }
     }
 
     /// One mutation run of the arithmetic operator on [`SOURCE`], with the
@@ -116,6 +127,11 @@ impl Project {
             operators: Some(vec![Operator::ArithmeticOperator]),
             allow_dirty: true,
             concurrency: Some(1),
+            reach_selection: if cached {
+                self.reach
+            } else {
+                ReachSelectionMode::Off
+            },
             ..MutationRunOptions::default()
         };
         let report = run_mutation(&options).expect("the mutation run completes");

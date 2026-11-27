@@ -629,6 +629,43 @@ pub struct MutationCacheOutput {
     /// resolve (`dynamic-imports`), and files that a test reads
     /// (`file-reads`). A change to them does not invalidate a cached result.
     pub not_keyed: Vec<String>,
+    /// The selection of the dry-run test files by recorded function reach.
+    /// Absent when the run does not select by reach.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reach_selection: Option<MutationReachSelectionOutput>,
+}
+
+/// The selection of the dry-run test files by recorded function reach.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct MutationReachSelectionOutput {
+    /// True for a check run: the dry run ran each test file, and
+    /// `violations` compares the covering tests with the dropped files.
+    pub check: bool,
+    /// The test files that the reach record left out of the dry run. In a
+    /// check run, the files that it would leave out.
+    pub dropped: usize,
+    /// The count of test files that stayed in the dry run, for each reason:
+    /// `no-record`, `environment`, `new-reach-file`, `unknown-loaded-file`,
+    /// `changed-file-without-probes`, `changed-skeleton`,
+    /// `changed-entered-function`, `mutant-in-loaded-code`,
+    /// `mutant-in-entered-function` and `mutant-in-file-without-probes`.
+    pub kept: std::collections::BTreeMap<String, usize>,
+    /// The test files whose reach record this run wrote.
+    pub recorded: usize,
+    /// In a check run, each mutant that a dropped test file covers. A
+    /// non-empty list is a defect of the selection.
+    pub violations: Vec<MutationReachViolation>,
+}
+
+/// A mutant that a test file covers although the reach record drops the file.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct MutationReachViolation {
+    /// The dropped test file, relative to the project root.
+    pub test_file: String,
+    /// The mutant that a test of the file covers.
+    pub mutant_id: String,
 }
 
 /// The resume facts of a `--resume` run.

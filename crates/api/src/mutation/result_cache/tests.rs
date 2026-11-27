@@ -285,6 +285,7 @@ fn outcome(results: &[(&str, MutantStatus, bool)], keys: &[(&str, &str)]) -> Sch
         dry_run_reused: 0,
         dry_run_missed: 0,
         dry_run_entries: Vec::new(),
+        reach: None,
         ready: None,
         results: results
             .iter()
@@ -551,6 +552,9 @@ fn each_run_option_has_a_result_key_decision() {
         // Not keyed: they run after the stored results.
         typecheck: _,
         record_args: _,
+        // Not keyed: it selects dry-run files. The covering tests of a mutant
+        // are in the key.
+        reach_selection: _,
         // Not keyed: the journal reads its own header.
         resume: _,
     } = crate::mutation::MutationRunOptions::default();

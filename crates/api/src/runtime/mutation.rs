@@ -433,6 +433,12 @@ pub(super) fn plan_with_wraps(
         mutant_ids: (!options.mutant_ids.is_empty())
             .then(|| options.mutant_ids.iter().cloned().collect()),
         record_exports,
+        probes: !record_exports
+            && super::mutation_reach::enabled(
+                options.reach_selection,
+                options.analysis.no_cache,
+                !options.kill_matrix_targets.is_empty(),
+            ),
     };
     // The runner decision reads the test files of the first plan. A second
     // plan without the component files keeps that decision.
@@ -893,13 +899,7 @@ fn recording_and_witnesses(
 
 /// The instrumented files of `plan` as the run directory takes them.
 pub(super) fn run_files(plan: &MutationPlan) -> Vec<RunFile<'_>> {
-    plan.files
-        .iter()
-        .map(|file| RunFile {
-            path: &file.path,
-            code: &file.instrumented_code,
-        })
-        .collect()
+    super::mutation_reach::run_files(plan)
 }
 
 /// The journal path as the report shows it: relative to the root, with `/`
@@ -1253,6 +1253,8 @@ fn execute(
         let operators = planned.operators.as_deref();
         dry_run_cache(keys, &mutation_cache, &run_files(plan), operators, &init)
     });
+    let dry_cache =
+        dry_cache.map(|cache| Arc::new(super::mutation_reach::with_facts(cache, &root, plan)));
     let config = ScheduleConfig {
         init,
         runner: range.clone(),
@@ -1270,6 +1272,11 @@ fn execute(
             .clone()
             .map(|cache| cache as Arc<dyn DryRunLookup>),
         journal: Some(Arc::clone(&run_journal.journal) as Arc<dyn OutcomeJournal>),
+        reach: super::mutation_reach::schedule_config(
+            options.reach_selection,
+            plan,
+            dry_cache.as_ref(),
+        ),
     };
     let spawner = ProcessSpawner {
         runtime: runtime.path.clone(),
@@ -1728,6 +1735,7 @@ mod tests {
             counts: fallow_engine::mutation::MutationPlanCounts::default(),
             no_test_files: false,
             framework_config_checked: false,
+            probes: None,
             skipped_files: Vec::new(),
             unmatched_paths: Vec::new(),
             skipped_tests: Vec::new(),
@@ -1765,6 +1773,7 @@ mod tests {
             counts: fallow_engine::mutation::MutationPlanCounts::default(),
             no_test_files: false,
             framework_config_checked: false,
+            probes: None,
             skipped_files: Vec::new(),
             unmatched_paths: Vec::new(),
             skipped_tests: Vec::new(),

@@ -475,6 +475,13 @@ pub(super) fn joined_dry_phase(
     outcome.timings.dry_run = config.clock.now().saturating_duration_since(started);
     outcome.dry_run_missed = if keys.is_empty() { 0 } else { run.len() };
     outcome.dry_run_entries = new_entries(plan, universe, &phase, &keys);
+    if let Some(reach) = &mut outcome.reach {
+        reach.shares = phase
+            .shares
+            .iter()
+            .map(|share| share.probes.clone())
+            .collect();
+    }
     Ok(DryPhase {
         result: join(Some(phase.result), &stored, dry_files, universe),
         serial: phase.serial + stored_time,

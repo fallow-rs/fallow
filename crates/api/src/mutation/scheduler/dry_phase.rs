@@ -5,6 +5,7 @@
 //! then starts the mutant phase with the tests of its share, so no companion
 //! dry-runs a file again for a job that its share holds.
 
+use super::reach_select::take_probes;
 use super::*;
 
 /// A companion after its dry run.
@@ -65,15 +66,18 @@ pub(super) struct ShareFacts {
     pub(super) unloaded_paths: Vec<String>,
     /// The wall time of the dry run of the share.
     pub(super) took: Duration,
+    /// The probe ids of the share, in a run with reach selection.
+    pub(super) probes: ShareProbes,
 }
 
 impl ShareFacts {
-    fn of(files: &[String], dry: &DryRunResult, took: Duration) -> Self {
+    fn of(files: &[String], dry: &DryRunResult, took: Duration, probes: ShareProbes) -> Self {
         Self {
             files: files.to_vec(),
             static_hits: dry.static_hits.clone(),
             unloaded_paths: dry.unloaded_paths.clone(),
             took,
+            probes,
         }
     }
 }
@@ -92,7 +96,8 @@ pub(super) struct DryPhase {
     pub(super) shares: Vec<ShareFacts>,
 }
 
-type ShareRun = Result<(Box<dyn CompanionLink>, DryRunResult, Duration), ScheduleError>;
+type ShareRun =
+    Result<(Box<dyn CompanionLink>, DryRunResult, Duration, ShareProbes), ScheduleError>;
 
 /// The dry run of one share on `link`, or on a new companion for `None`.
 fn run_share(
@@ -106,11 +111,17 @@ fn run_share(
         None => start_link(spawner, config)?.0,
     };
     let started = config.clock.now();
-    let dry = first_dry_run(&mut link, files, config)?;
+    let mut dry = first_dry_run(&mut link, files, config)?;
+    let probes = config
+        .reach
+        .as_ref()
+        .map(|reach| take_probes(files, &mut dry, &reach.probe_only))
+        .unwrap_or_default();
     Ok((
         link,
         dry,
         config.clock.now().saturating_duration_since(started),
+        probes,
     ))
 }
 
@@ -127,7 +138,7 @@ pub(super) fn dry_phase(
 ) -> Result<DryPhase, ScheduleError> {
     let shares = share_files(dry_files, config.concurrency);
     if shares.len() == 1 {
-        let (link, result, serial) = run_share(spawner, Some(primary), dry_files, config)?;
+        let (link, result, serial, probes) = run_share(spawner, Some(primary), dry_files, config)?;
         let mut loaded = partial.then(|| dry_files.to_vec());
         if let Some(loaded) = &mut loaded {
             loaded.sort_unstable();
@@ -138,7 +149,7 @@ pub(super) fn dry_phase(
             loaded,
             unproven: FxHashMap::default(),
         }];
-        let shares = vec![ShareFacts::of(dry_files, &result, serial)];
+        let shares = vec![ShareFacts::of(dry_files, &result, serial, probes)];
         return Ok(DryPhase {
             result,
             links,
@@ -174,8 +185,8 @@ pub(super) fn dry_phase(
     let mut error = None;
     for (run, files) in runs.into_iter().zip(shares) {
         match run {
-            Ok((link, dry, took)) => {
-                facts.push(ShareFacts::of(&files, &dry, took));
+            Ok((link, dry, took, probes)) => {
+                facts.push(ShareFacts::of(&files, &dry, took, probes));
                 links.push(WarmLink {
                     link,
                     known: FxHashSet::default(),
@@ -195,16 +206,18 @@ pub(super) fn dry_phase(
         return Err(error);
     }
     let rechecked = match recheck_failures(spawner, config, dry_files, &mut results) {
-        Ok(took) => took,
+        Ok(recheck) => recheck,
         Err(error) => {
             shutdown_all(links);
             return Err(error);
         }
     };
     let result = merge_dry_runs(results, dry_files);
-    if let Some(took) = rechecked {
+    if let Some((took, recheck)) = rechecked {
         serial += took;
-        facts = vec![ShareFacts::of(dry_files, &result, serial)];
+        let shares = facts.into_iter().map(|share| share.probes).collect();
+        let probes = ShareProbes::joined(shares, Some(recheck));
+        facts = vec![ShareFacts::of(dry_files, &result, serial, probes)];
     }
     Ok(DryPhase {
         result,
@@ -225,7 +238,7 @@ fn recheck_failures(
     config: &ScheduleConfig,
     dry_files: &[String],
     results: &mut Vec<DryRunResult>,
-) -> Result<Option<Duration>, ScheduleError> {
+) -> Result<Option<(Duration, ShareProbes)>, ScheduleError> {
     let global = results
         .iter()
         .flat_map(|dry| &dry.unhandled_errors)
@@ -257,13 +270,13 @@ fn recheck_failures(
         .filter(|file| failed.contains(*file))
         .cloned()
         .collect();
-    let (mut link, recheck, took) = run_share(spawner, None, &files, config)?;
+    let (mut link, recheck, took, probes) = run_share(spawner, None, &files, config)?;
     link.shutdown();
     for dry in results.iter_mut() {
         without_files(dry, &failed, global);
     }
     results.push(recheck);
-    Ok(Some(took))
+    Ok(Some((took, probes)))
 }
 
 /// Removes the facts of `files` from a dry run. With `all`, it also removes

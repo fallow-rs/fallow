@@ -2089,6 +2089,116 @@ this rule keeps the result of a warm run equal to the result of a
   `crates/api/src/mutation/scheduler/dry_store.rs`. The key and the file live
   in `crates/api/src/mutation/dry_run_cache`.
 
+## Reach selection
+
+A changed-code run dry-runs each test file that reaches a changed file
+through static imports. Through barrel files, that is most of the suite,
+but only a small part of it runs the changed code. A narrower set by a rule
+such as "direct importers only" gives false survivors, so the selection
+comes from recorded execution facts.
+
+`--reach-selection` (config key `mutation.reachSelection`) selects the mode:
+
+- `off` (the default): no probes and no selection.
+- `on`: the run records which functions each test file enters, and leaves a
+  test file out of the dry run when its record proves that the file cannot
+  run a mutant of the run.
+- `check`: the run records in the same way, dry-runs each test file, and
+  lists each mutant that a test file covers although the record drops the
+  file. A non-empty list exits 2.
+
+The selection needs the dry-run cache, so `--no-cache` turns it off. A run of
+kill matrix targets also turns it off, because a target needs the dry run of
+its file.
+
+### Record
+
+The plan adds an entry probe to the start of each module and to the start of
+the body of each outer function, in each script file that a dry-run test
+file reaches. An outer function is a function that no other function holds.
+A file with a mutant gets the probes in its instrumented code, and each other
+script file a copy with only the probes. The runtime records a probe like a
+mutant hit, so the dry run gives the probes of each test and the probes
+outside each test (for example while a module loads). The probes outside
+each test belong to each test file of the same dry-run share.
+
+The outline of a file is a hash of each outer function body and a hash of
+the skeleton: the text with each outer function body replaced by a marker.
+The skeleton holds the imports, the top-level statements, the class field
+initializers, the static blocks, the decorators, and the name and the
+parameters of each function. Parameters are in the skeleton because code can
+read `fn.length` of a function that never runs.
+
+The record of a test file is in `dry-runs.json`, next to the dry-run facts:
+
+- the environment part of the key: the result cache key without the reached
+  files, the runner and runtime versions and capabilities, and the shared
+  part of the dry-run key;
+- the outline key of each reached file of the run, or the content hash of a
+  file without probes (a JSON file, a component file, a file that does not
+  parse);
+- the probes of the test file and of its share.
+
+A test file with a failed test or an error gets no record. A runner whose
+workers keep the modules of one test file for the next one
+(`isolate: false`) gives no record, because a test file can then use code
+that an earlier file ran.
+
+### Rule
+
+A test file T stays out of the dry run only when each of these holds:
+
+1. T has a record, and the environment part is equal.
+2. Each file that T reaches now is in the record, and each probe of the
+   record names a file of the record.
+3. For each such file: the file is equal to the record; or T did not load
+   it; or its skeleton is equal and each body that T entered is equal. A
+   file without probes must be equal.
+4. No mutant of the run is in the skeleton of a file that T loaded, in a
+   body that T entered, or in a file without probes that T reaches.
+
+Each other case keeps T. With an equal environment, equal skeletons of each
+loaded file and equal bodies of each entered function, T runs the code of
+the recorded run until it enters a body that changed. The record shows that
+T entered no such body, so T runs no changed code and, by rule 4, no mutant.
+A dropped test file keeps its record, because its run is the same.
+
+Limits:
+
+- The rule assumes that a test gives the same run for the same inputs, as
+  the result cache does.
+- The limits of the result cache apply: dynamic imports that the module
+  graph does not resolve, and files that a test reads.
+- Code that reads the text of a function that it never calls
+  (`fn.toString()`), or that runs the text in another realm, is outside the
+  record.
+- A project module that Node loads itself, outside the runner, keeps its
+  state between the test files of one worker process when the pool reuses
+  the process.
+
+### Report
+
+The `cache.reach_selection` object of the JSON report gives `check`,
+`dropped` (the test files that the record left out, or would leave out in a
+check run), `kept` (a count for each reason that kept a file: `no-record`,
+`environment`, `new-reach-file`, `unknown-loaded-file`,
+`changed-file-without-probes`, `changed-skeleton`,
+`changed-entered-function`, `mutant-in-loaded-code`,
+`mutant-in-entered-function`, `mutant-in-file-without-probes`), `recorded`
+(the test files whose record the run wrote), and `violations` (each
+`test_file` and `mutant_id` of a check run where a dropped file covers a
+mutant).
+
+A pull request run gets the record of the base commit from the cache: a run
+on the default branch with `--reach-selection on` writes it, and the CI cache
+of the cache directory gives it to the pull request run, as it gives
+`results.json`.
+
+The probes live in `crates/mutation/src/reach.rs`, the plan part in
+`crates/engine/src/mutation/probes.rs`, the record and the rule in
+`crates/api/src/mutation/dry_run_cache/reach.rs`, and the scheduler part in
+`crates/api/src/mutation/scheduler/reach_select.rs`.
+
 ## Outcome journal and resume
 
 The result cache saves the results only after the last retry. An interrupted
