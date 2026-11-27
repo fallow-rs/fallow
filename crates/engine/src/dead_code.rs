@@ -308,21 +308,19 @@ fn normalized_text(content: &[u8]) -> String {
 /// would prune directories on one machine and not on another. It skips hidden
 /// directories (the fallow cache lives there) and `node_modules`.
 fn fingerprint_walk_builder(root: &Path) -> ignore::WalkBuilder {
-    let mut builder = ignore::WalkBuilder::new(root);
-    builder
-        .hidden(false)
-        .git_ignore(true)
-        .git_global(false)
-        .git_exclude(true)
-        .filter_entry(|entry| {
-            let is_dir = entry.file_type().is_some_and(|kind| kind.is_dir());
-            if !is_dir || entry.depth() == 0 {
-                return true;
-            }
-            let name = entry.file_name().to_string_lossy();
-            !name.starts_with('.') && name != "node_modules"
-        });
-    builder
+    let sources = fallow_config::IgnoreFileSources {
+        git_ignore: true,
+        git_exclude: true,
+        git_global: false,
+    };
+    fallow_config::checked_walk_builder(root, sources, |entry| {
+        let is_dir = entry.file_type().is_some_and(|kind| kind.is_dir());
+        if !is_dir || entry.depth() == 0 {
+            return true;
+        }
+        let name = entry.file_name().to_string_lossy();
+        !name.starts_with('.') && name != "node_modules"
+    })
 }
 
 /// The globs of the non-source files the analysis reads to resolve imports

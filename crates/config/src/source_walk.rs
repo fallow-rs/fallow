@@ -2,28 +2,34 @@
 
 use std::path::{Path, PathBuf};
 
-use ignore::WalkBuilder;
+use ignore::{DirEntry, WalkBuilder};
 
 use crate::WorkspaceInfo;
+use crate::ignore_files::{IgnoreFileSources, checked_walk_builder};
 
 /// Make a directory walker with the ignore-file settings of source discovery.
 ///
 /// The walker reads `.gitignore` files at each level, the global gitignore,
 /// `.git/info/exclude` and `.ignore` files. Gitignore rules apply only inside a
 /// git repository. Hidden entries are not skipped here: each caller filters
-/// them, because source discovery admits some hidden directories.
+/// them in `filter`, because source discovery admits some hidden directories.
+/// Each ignore file is checked before the walk reads it (see
+/// [`checked_walk_builder`]). Do not call [`WalkBuilder::filter_entry`] on the
+/// result: it replaces that check.
 ///
 /// Source discovery and each check that must agree with it start from this
 /// builder, so the two cannot apply different ignore rules.
 #[must_use]
-pub fn source_walk_builder(root: &Path) -> WalkBuilder {
-    let mut builder = WalkBuilder::new(root);
-    builder
-        .hidden(false)
-        .git_ignore(true)
-        .git_global(true)
-        .git_exclude(true);
-    builder
+pub fn source_walk_builder<F>(root: &Path, filter: F) -> WalkBuilder
+where
+    F: Fn(&DirEntry) -> bool + Send + Sync + 'static,
+{
+    let sources = IgnoreFileSources {
+        git_ignore: true,
+        git_exclude: true,
+        git_global: true,
+    };
+    checked_walk_builder(root, sources, filter)
 }
 
 /// The workspaces whose root directory source discovery walks.
@@ -87,10 +93,10 @@ pub fn dirs_reached_by_source_walk(
         .filter_map(|target| target.strip_prefix(canonical_root).ok())
         .map(|relative| relative.components().count())
         .max();
-    let mut builder = source_walk_builder(canonical_root);
-    builder
-        .max_depth(max_depth)
-        .filter_entry(move |entry| entry.depth() == 0 || on_path.contains(entry.path()));
+    let mut builder = source_walk_builder(canonical_root, move |entry| {
+        entry.depth() == 0 || on_path.contains(entry.path())
+    });
+    builder.max_depth(max_depth);
     let targets: rustc_hash::FxHashSet<&Path> = targets.iter().map(PathBuf::as_path).collect();
     for entry in builder.build().flatten() {
         if targets.contains(entry.path()) {
@@ -147,5 +153,155 @@ mod tests {
         assert!(!walked.contains(&"clone".to_string()), "{walked:?}");
         assert!(!walked.contains(&"lib".to_string()), "{walked:?}");
         assert_eq!(walked.len(), all.len() - 2, "{walked:?}");
+    }
+
+    /// The root-relative paths of the files that the walk yields, or `None`
+    /// when the walk does not end within `limit`.
+    #[cfg(unix)]
+    fn walked_files_within(builder: WalkBuilder, root: &Path) -> Option<Vec<String>> {
+        const LIMIT: std::time::Duration = std::time::Duration::from_secs(3);
+        let root = root.to_path_buf();
+        let (sender, receiver) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let mut files: Vec<String> = builder
+                .build()
+                .flatten()
+                .filter(|entry| entry.file_type().is_some_and(|kind| !kind.is_dir()))
+                .filter_map(|entry| {
+                    let relative = entry.path().strip_prefix(&root).ok()?.to_path_buf();
+                    Some(relative.to_string_lossy().replace('\\', "/"))
+                })
+                .collect();
+            files.sort();
+            let _ = sender.send(files);
+        });
+        receiver.recv_timeout(LIMIT).ok()
+    }
+
+    #[cfg(unix)]
+    fn make_fifo(path: &Path) {
+        let status = std::process::Command::new("mkfifo")
+            .arg(path)
+            .status()
+            .expect("run mkfifo");
+        assert!(status.success(), "mkfifo {}", path.display());
+    }
+
+    #[cfg(unix)]
+    fn write_file(path: &Path, contents: &str) {
+        std::fs::create_dir_all(path.parent().expect("parent")).expect("parent directory");
+        std::fs::write(path, contents).expect("write file");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn source_walk_skips_a_fifo_gitignore_in_the_root() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let root = directory.path();
+        std::fs::create_dir_all(root.join(".git")).expect("git directory");
+        write_file(&root.join("src/index.ts"), "");
+        make_fifo(&root.join(".gitignore"));
+
+        let walked = walked_files_within(source_walk_builder(root, |_| true), root)
+            .expect("the walk must end although .gitignore is a FIFO");
+        assert!(walked.contains(&"src/index.ts".to_string()), "{walked:?}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn source_walk_skips_a_nested_ignore_file_that_links_to_a_device() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let root = directory.path();
+        std::fs::create_dir_all(root.join(".git")).expect("git directory");
+        write_file(&root.join("src/index.ts"), "");
+        write_file(&root.join("packages/app/main.ts"), "");
+        std::os::unix::fs::symlink("/dev/zero", root.join("packages/app/.ignore"))
+            .expect("link to /dev/zero");
+
+        let walked = walked_files_within(source_walk_builder(root, |_| true), root)
+            .expect("the walk must end although .ignore links to /dev/zero");
+        assert!(walked.contains(&"src/index.ts".to_string()), "{walked:?}");
+        assert!(
+            !walked.contains(&"packages/app/main.ts".to_string()),
+            "the walk skips the directory of the skipped file: {walked:?}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn source_walk_skips_a_gitignore_that_links_outside_the_project() {
+        let outside = tempfile::tempdir().expect("outside directory");
+        write_file(&outside.path().join("rules"), "hidden.ts\n");
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let root = directory.path();
+        std::fs::create_dir_all(root.join(".git")).expect("git directory");
+        write_file(&root.join("src/hidden.ts"), "");
+        std::os::unix::fs::symlink(outside.path().join("rules"), root.join(".gitignore"))
+            .expect("link outside the project");
+
+        let walked =
+            walked_files_within(source_walk_builder(root, |_| true), root).expect("walk ends");
+        assert!(
+            walked.contains(&"src/hidden.ts".to_string()),
+            "the rules of a link out of the project do not apply: {walked:?}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn source_walk_checks_the_ignore_files_of_parent_directories() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let repository = directory.path();
+        std::fs::create_dir_all(repository.join(".git")).expect("git directory");
+        make_fifo(&repository.join(".gitignore"));
+        let root = repository.join("app");
+        write_file(&root.join("src/index.ts"), "");
+
+        let walked = walked_files_within(source_walk_builder(&root, |_| true), &root)
+            .expect("the walk must end although a parent .gitignore is a FIFO");
+        assert!(walked.contains(&"src/index.ts".to_string()), "{walked:?}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn source_walk_skips_an_ignore_file_above_the_size_cap() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let root = directory.path();
+        std::fs::create_dir_all(root.join(".git")).expect("git directory");
+        write_file(&root.join("src/big.ts"), "");
+        let mut rules = String::from("big.ts\n");
+        rules.push_str(&"#".repeat(2 * 1024 * 1024));
+        write_file(&root.join(".gitignore"), &rules);
+
+        let walked =
+            walked_files_within(source_walk_builder(root, |_| true), root).expect("walk ends");
+        assert!(
+            walked.contains(&"src/big.ts".to_string()),
+            "the rules of a file above the cap do not apply: {walked:?}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn source_walk_reads_regular_and_in_project_linked_ignore_files() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let root = directory.path();
+        std::fs::create_dir_all(root.join(".git")).expect("git directory");
+        write_file(&root.join(".gitignore"), "dist\n");
+        write_file(&root.join("shared-rules"), "generated.ts\n");
+        write_file(&root.join("src/index.ts"), "");
+        write_file(&root.join("src/generated.ts"), "");
+        write_file(&root.join("dist/out.js"), "");
+        std::os::unix::fs::symlink("../shared-rules", root.join("src/.gitignore"))
+            .expect("link inside the project");
+
+        let walked =
+            walked_files_within(source_walk_builder(root, |_| true), root).expect("walk ends");
+        assert!(walked.contains(&"src/index.ts".to_string()), "{walked:?}");
+        assert!(!walked.contains(&"dist/out.js".to_string()), "{walked:?}");
+        assert!(
+            !walked.contains(&"src/generated.ts".to_string()),
+            "{walked:?}"
+        );
     }
 }

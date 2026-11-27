@@ -113,25 +113,24 @@ fn expand_with_limit(base: &Path, pattern: &str, root: &Path, max_visited: usize
     let matcher = glob.compile_matcher();
     let max_depth = (!rest.contains(&"**")).then_some(rest.len());
 
-    let mut builder = fallow_config::source_walk_builder(&walk_root);
+    let mut builder = fallow_config::source_walk_builder(&walk_root, move |entry| {
+        if entry.depth() == 0 || !entry.file_type().is_some_and(|kind| kind.is_dir()) {
+            return true;
+        }
+        if PRUNED_DIRS
+            .iter()
+            .any(|name| entry.file_name() == std::ffi::OsStr::new(name))
+        {
+            return false;
+        }
+        // A real directory below an accepted directory is inside the
+        // root, so only a symlink needs the canonical check.
+        !entry.path_is_symlink() || resolves_inside(entry.path(), &root)
+    });
     builder
         .follow_links(true)
         .max_depth(max_depth)
-        .sort_by_file_name(std::cmp::Ord::cmp)
-        .filter_entry(move |entry| {
-            if entry.depth() == 0 || !entry.file_type().is_some_and(|kind| kind.is_dir()) {
-                return true;
-            }
-            if PRUNED_DIRS
-                .iter()
-                .any(|name| entry.file_name() == std::ffi::OsStr::new(name))
-            {
-                return false;
-            }
-            // A real directory below an accepted directory is inside the
-            // root, so only a symlink needs the canonical check.
-            !entry.path_is_symlink() || resolves_inside(entry.path(), &root)
-        });
+        .sort_by_file_name(std::cmp::Ord::cmp);
     for entry in builder.build().flatten() {
         if entry.depth() == 0 {
             continue;

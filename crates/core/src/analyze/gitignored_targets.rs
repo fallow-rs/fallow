@@ -118,7 +118,7 @@ impl<'a> GitignoredTargets<'a> {
                 continue;
             }
             match self
-                .dir_matcher(dir)
+                .dir_matcher(dir, &repo_root)
                 .matched_path_or_any_parents(target, false)
             {
                 Match::Ignore(_) => return true,
@@ -142,17 +142,22 @@ impl<'a> GitignoredTargets<'a> {
             .clone()
     }
 
-    fn dir_matcher(&mut self, dir: &Path) -> &Gitignore {
+    fn dir_matcher(&mut self, dir: &Path, repo_root: &Path) -> &Gitignore {
         self.dir_matchers
             .entry(dir.to_path_buf())
             .or_insert_with(|| {
-                build_matcher(dir, DIR_IGNORE_FILES.iter().map(|name| dir.join(name)))
+                build_matcher(
+                    dir,
+                    repo_root,
+                    DIR_IGNORE_FILES.iter().map(|name| dir.join(name)),
+                )
             })
     }
 
     fn exclude_matcher(&mut self, repo_root: &Path) -> &Gitignore {
         self.exclude.get_or_insert_with(|| {
             build_matcher(
+                repo_root,
                 repo_root,
                 std::iter::once(repo_root.join(".git").join("info").join("exclude")),
             )
@@ -226,9 +231,11 @@ fn module_file_candidates(target: &Path) -> Vec<Candidate> {
 
 /// Build one matcher rooted at `dir` from the ignore files that exist. A line
 /// that does not parse is skipped, so the other lines of the file still apply.
-fn build_matcher(dir: &Path, files: impl Iterator<Item = PathBuf>) -> Gitignore {
+/// A file that is not a regular file, a link out of `repo_root`, or a file
+/// that is too large is not read.
+fn build_matcher(dir: &Path, repo_root: &Path, files: impl Iterator<Item = PathBuf>) -> Gitignore {
     let mut builder = GitignoreBuilder::new(dir);
-    for file in files.filter(|file| file.is_file()) {
+    for file in files.filter(|file| fallow_config::readable_ignore_file(file, repo_root)) {
         let _partial_error = builder.add(file);
     }
     builder.build().unwrap_or_else(|_| Gitignore::empty())
