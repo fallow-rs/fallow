@@ -76,16 +76,39 @@ pub(crate) fn ignore_cache_dir(cache_dir: &Path) -> std::io::Result<()> {
 /// Fails when a write to the mutation run directories or to the companion
 /// would follow a symlink that leaves the directory that cache writes must
 /// stay in, or that resolves into Git metadata or `node_modules`. This is the
-/// check of the analysis caches, through [`CacheTarget`].
+/// check of the analysis caches, through [`CacheTarget`]. A symlink at
+/// `mutation`, `mutation/runs` or `mutation/companion` also fails, also when
+/// its target stays in the project, because a run writes and removes
+/// directories there.
 ///
 /// # Errors
 ///
-/// Returns the error of [`CacheTarget::check`].
+/// Returns the error of [`CacheTarget::check`], or an error for a symlink at
+/// one of these paths.
 pub(crate) fn check_cache_links(root: &Path, cache_dir: &Path) -> std::io::Result<()> {
     let target = CacheTarget::new(root, cache_dir);
     let mutation = cache_dir.join("mutation");
-    target.check(&mutation.join("runs"))?;
-    target.check(&mutation.join("companion"))
+    let runs = mutation.join("runs");
+    let companion = mutation.join("companion");
+    target.check(&runs)?;
+    target.check(&companion)?;
+    for path in [&mutation, &runs, &companion] {
+        refuse_symlink(path)?;
+    }
+    Ok(())
+}
+
+/// Fails when `path` is a symlink. A path that does not exist passes.
+fn refuse_symlink(path: &Path) -> std::io::Result<()> {
+    match std::fs::symlink_metadata(path) {
+        Ok(meta) if meta.file_type().is_symlink() => Err(std::io::Error::other(format!(
+            "{} is a symlink, so fallow does not write the mutation cache through it. Remove the link",
+            path.display()
+        ))),
+        Ok(_) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error),
+    }
 }
 
 /// The code that a mutation run mutates.

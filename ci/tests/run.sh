@@ -1669,6 +1669,27 @@ else
   fail "GitLab HTTP retry policy" "see the HTTP fixture output"
 fi
 
+for job_script in comment.sh review.sh; do
+  JOB_LINK_WORK=$(mktemp -d)
+  mkdir -p "$JOB_LINK_WORK/job"
+  printf 'keep\n' > "$JOB_LINK_WORK/outside.txt"
+  ln -s ../outside.txt "$JOB_LINK_WORK/job/fallow-skip-reason.txt"
+  JOB_LINK_STATUS=0
+  (
+    cd "$JOB_LINK_WORK/job" &&
+      GITLAB_TOKEN=token CI_API_V4_URL=https://example.test/api/v4 CI_PROJECT_ID=1 \
+        CI_MERGE_REQUEST_IID=1 CI_COMMIT_SHA=a CI_MERGE_REQUEST_DIFF_BASE_SHA=b \
+        FALLOW_COMMAND=dead-code bash "$SCRIPTS_DIR/$job_script"
+  ) > /dev/null 2>&1 || JOB_LINK_STATUS=$?
+  if [ "$JOB_LINK_STATUS" -eq 2 ] && [ "$(cat "$JOB_LINK_WORK/outside.txt")" = "keep" ]; then
+    pass "$job_script refuses a job file that is a symlink"
+  else
+    fail "$job_script refuses a job file that is a symlink" \
+      "exit $JOB_LINK_STATUS, target now: $(cat "$JOB_LINK_WORK/outside.txt")"
+  fi
+  rm -rf "$JOB_LINK_WORK"
+done
+
 TMP_CLEANUP_WORK=$(mktemp -d)
 TMP_CLEANUP_REGISTRY="$TMP_CLEANUP_WORK/registry"
 {

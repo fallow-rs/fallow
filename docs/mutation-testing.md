@@ -464,11 +464,12 @@ or relational mutant, so it adds little test-strength signal for its run time.
   a cache directory would hide the writes of the tests from the check.
 - The run also refuses a symlink on the way to `<cache>/mutation/runs` or
   `<cache>/mutation/companion` that resolves outside the project, or into Git
-  metadata or `node_modules` (`FALLOW_MUTATION_UNSAFE_CACHE_DIR`). It does not
-  write or remove run directories through a symlink at `<cache>/mutation` or
-  `<cache>/mutation/runs`, and it stops with
-  `FALLOW_MUTATION_CACHE_WRITE_FAILED` instead. The removal of old run
-  directories skips each symlink.
+  metadata or `node_modules` (`FALLOW_MUTATION_UNSAFE_CACHE_DIR`). A symlink
+  at `<cache>/mutation`, `<cache>/mutation/runs` or
+  `<cache>/mutation/companion` stops the run with the same code before the
+  first write, also when its target is inside the project. The removal of old
+  run directories skips each symlink, and the run does not open a lock file
+  through a symlink.
 - Mutants in a function whose own body calls a file system, process, network or
   database sink are pruned (`side-effect-sink`). A mutant in top-level code is
   pruned when the module calls a sink at the top level. The pruning does not

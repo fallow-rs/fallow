@@ -68,3 +68,38 @@ fn a_plain_cache_dir_and_a_cache_link_inside_the_root_pass() {
     symlink(f.root.join("cache-store"), f.root.join(".fallow")).expect("link");
     assert!(guard_cache_dir(&f.root, &f.root.join(".fallow")).is_ok());
 }
+
+#[test]
+fn a_mutation_link_inside_the_root_is_refused_before_any_write() {
+    let f = fixture();
+    std::fs::create_dir_all(f.root.join("inner")).expect("inner");
+    std::fs::create_dir_all(f.root.join(".fallow")).expect("cache");
+    symlink("../inner", f.root.join(".fallow/mutation")).expect("link");
+    assert_refused(&f, &f.root.join(".fallow"));
+    assert_eq!(
+        std::fs::read_dir(f.root.join("inner"))
+            .expect("inner")
+            .count(),
+        0
+    );
+}
+
+#[test]
+fn a_companion_link_inside_the_root_is_refused() {
+    let f = fixture();
+    std::fs::create_dir_all(f.root.join("inner")).expect("inner");
+    let mutation = f.root.join(".fallow/mutation");
+    std::fs::create_dir_all(&mutation).expect("mutation");
+    symlink("../../inner", mutation.join("companion")).expect("link");
+    assert_refused(&f, &f.root.join(".fallow"));
+}
+
+#[test]
+fn a_runs_link_inside_the_root_is_refused() {
+    let f = fixture();
+    std::fs::create_dir_all(f.root.join("inner")).expect("inner");
+    let mutation = f.root.join(".fallow/mutation");
+    std::fs::create_dir_all(&mutation).expect("mutation");
+    symlink("../../inner", mutation.join("runs")).expect("link");
+    assert_refused(&f, &f.root.join(".fallow"));
+}

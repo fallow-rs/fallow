@@ -220,16 +220,29 @@ fn install(runs: &Path, dir: &Path, expected: &[(String, Content<'_>)]) -> std::
     }
     // The lock is best effort: a file system without lock support, such as
     // some network mounts, publishes without it, as before the lock.
-    let lock = fs::OpenOptions::new()
-        .create(true)
-        .truncate(false)
-        .write(true)
-        .open(publication_lock_path(dir))
-        .and_then(|file| file.lock().map(|()| file))
-        .ok();
+    let lock = open_publication_lock(&publication_lock_path(dir));
     let result = publish(runs, dir, &staging, &unique, expected);
     drop(lock);
     result
+}
+
+/// Opens and locks the publication lock file. A symlink at `path` is never
+/// followed: the run then publishes without the lock.
+fn open_publication_lock(path: &Path) -> Option<fs::File> {
+    if fs::symlink_metadata(path).is_ok_and(|meta| meta.file_type().is_symlink()) {
+        return None;
+    }
+    let mut options = fs::OpenOptions::new();
+    options.create(true).truncate(false).write(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        options.custom_flags(libc::O_NOFOLLOW);
+    }
+    options
+        .open(path)
+        .and_then(|file| file.lock().map(|()| file))
+        .ok()
 }
 
 /// Moves `staging` to `dir` under the publication lock of `dir`.
@@ -248,7 +261,7 @@ fn publish(
             let _ = fs::remove_dir_all(staging);
             return Ok(());
         }
-        if dir.exists() {
+        if fs::symlink_metadata(dir).is_ok() {
             // Move the directory with other content aside in one step, so a
             // reader never sees a mix of old and new files.
             let stale = runs.join(format!("{STAGING_PREFIX}stale-{unique}-{attempt}"));
@@ -717,6 +730,42 @@ mod tests {
             assert!(dir.is_dir(), "{} stays", dir.display());
         }
         assert_eq!(fs::read_dir(&shared).expect("shared").count(), dirs.len());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_linked_publication_lock_is_not_followed() {
+        let base = tempfile::tempdir().expect("dir");
+        let cache = base.path().join("cache");
+        let outside = base.path().join("outside");
+        fs::create_dir_all(cache.join("runs")).expect("runs");
+        fs::create_dir_all(&outside).expect("outside");
+        let files = [RunFile {
+            path: "src/a.ts",
+            code: "a",
+        }];
+        let dir = cache.join("runs").join(content_hash(&files));
+        std::os::unix::fs::symlink(outside.join("created"), publication_lock_path(&dir))
+            .expect("link");
+        write_run_dir(&cache, &files, None).expect("run dir");
+        assert!(!outside.join("created").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_dangling_run_dir_link_is_replaced_by_a_real_one() {
+        let base = tempfile::tempdir().expect("dir");
+        let cache = base.path().join("cache");
+        fs::create_dir_all(cache.join("runs")).expect("runs");
+        let files = [RunFile {
+            path: "src/a.ts",
+            code: "a",
+        }];
+        let dir = cache.join("runs").join(content_hash(&files));
+        std::os::unix::fs::symlink(base.path().join("missing"), &dir).expect("link");
+        write_run_dir(&cache, &files, None).expect("run dir");
+        let meta = fs::symlink_metadata(&dir).expect("dir");
+        assert!(meta.is_dir() && !meta.file_type().is_symlink());
     }
 
     #[cfg(unix)]
