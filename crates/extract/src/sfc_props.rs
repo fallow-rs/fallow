@@ -164,9 +164,7 @@ fn finalize_define_props(
     // Whole-object use of the props binding (`toRefs(props)`, `{ ...props }`,
     // `someFn(props)`, `return props`) consumes every prop opaquely, the
     // script-side analog of `v-bind="props"`. Abstain on the whole file.
-    if props_used_whole {
-        harvest.has_props_attrs_fallthrough = true;
-    }
+    harvest.has_props_attrs_fallthrough |= props_used_whole;
 
     for (name, span_start) in scan.prop_names {
         // A renamed prop (`const { name: alias } = defineProps()`) is read through
@@ -895,6 +893,8 @@ pub struct DefineEmitsHarvest {
     /// used by the template scanner to credit `<emit>('<name>')` calls in the
     /// template. `None` when no harvestable bound emit exists.
     pub emit_binding: Option<String>,
+    /// VueUse model refs with the `update:` events of their setters.
+    pub model_refs: Vec<(String, Vec<String>)>,
 }
 
 /// Harvest `defineEmits` declared event names, abstain flags, and per-event
@@ -999,15 +999,17 @@ fn finalize_define_emits(
         used_whole: false,
     };
     oxc_ast_visit::Visit::visit_program(&mut visitor, program);
-    if visitor.has_dynamic_emit {
-        harvest.has_dynamic_emit = true;
-    }
-    if visitor.used_whole {
-        harvest.has_emit_whole_object_use = true;
-    }
+    harvest.has_dynamic_emit |= visitor.has_dynamic_emit;
+    harvest.has_emit_whole_object_use |= visitor.used_whole;
+    let model_refs = crate::sfc_use_vmodel::harvest_model_refs(
+        program,
+        emit_names.iter().map(|(name, _)| name.as_str()),
+    );
+    harvest.has_dynamic_emit |= model_refs.dynamic;
+    harvest.model_refs = model_refs.refs;
 
     for (name, span_start) in emit_names {
-        let used = visitor.emitted.contains(&name);
+        let used = visitor.emitted.contains(&name) || model_refs.written.contains(&name);
         harvest.emits.push(ComponentEmit {
             name,
             span_start,
@@ -1310,9 +1312,7 @@ pub fn harvest_options_api_props(program: &Program<'_>) -> DefinePropsHarvest {
     // `setup()` body that reads its `props` param is handled separately by the
     // caller (whole-object props use).
     let usage = collect_this_member_usage(program);
-    if usage.has_dynamic_this {
-        harvest.has_props_attrs_fallthrough = true;
-    }
+    harvest.has_props_attrs_fallthrough |= usage.has_dynamic_this;
 
     for (name, span_start) in prop_names {
         let used_in_script = usage.read.contains(&name);
@@ -1422,9 +1422,7 @@ pub fn harvest_options_api_emits(program: &Program<'_>) -> DefineEmitsHarvest {
     }
 
     let usage = collect_this_member_usage(program);
-    if usage.has_dynamic_emit {
-        harvest.has_dynamic_emit = true;
-    }
+    harvest.has_dynamic_emit |= usage.has_dynamic_emit;
 
     for (name, span_start) in emit_names {
         let used = usage.emitted.contains(&name);

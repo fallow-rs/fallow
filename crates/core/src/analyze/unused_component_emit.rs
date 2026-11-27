@@ -9,6 +9,10 @@
 //! it, applies the dep gate and the whole-file abstain ladder, and emits one
 //! finding per genuinely-unused event.
 //!
+//! A write of a VueUse `useVModel` / `useVModels` ref also marks its
+//! `update:<key>` event as used, because the ref setter emits the event (see
+//! `sfc_use_vmodel` in the extract crate).
+//!
 //! Abstain ladder (each abstains the WHOLE file's emit findings):
 //! - not `<script setup>`: no `component_emits` harvested (the field is empty).
 //! - `has_unharvestable_emits`: a type-reference `defineEmits<MyEmits>()` arg, a
