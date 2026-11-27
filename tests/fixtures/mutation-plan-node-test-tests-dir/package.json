@@ -1,0 +1,12 @@
+{
+  "name": "mutation-plan-node-test-tests-dir",
+  "private": true,
+  "type": "module",
+  "main": "src/sum.js",
+  "scripts": {
+    "test": "node --test src/__tests__/test-sum.js"
+  },
+  "devDependencies": {
+    "vitest": "^4.1.11"
+  }
+}

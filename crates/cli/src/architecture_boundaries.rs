@@ -1436,8 +1436,8 @@ fn core_backend_fallow_core_calls_are_explicitly_allowlisted() {
         "fallow_core::plugins::AggregatedPluginResult",
         "fallow_core::plugins::PluginRegistry",
         "fallow_core::plugins::manifest_entries",
-        // Plugin used-export rules have one compiler, in fallow-core, so the
-        // mutation plan and the unused-export check agree on them.
+        // Plugin path rules have one compiler, in fallow-core, for the mutation plan too.
+        "fallow_core::plugins::TestIncludes",
         "fallow_core::plugins::UsedExportNames",
         // The built-in plugin roster has one source, in fallow-core: a copy drifted.
         "fallow_core::plugins::registry::builtin_config_", // `_lookup`, `_patterns`

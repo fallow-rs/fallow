@@ -1,0 +1,9 @@
+{
+  "name": "mutation-plan-vitest-helpers",
+  "private": true,
+  "type": "module",
+  "main": "src/sum.js",
+  "devDependencies": {
+    "vitest": "^4.1.11"
+  }
+}

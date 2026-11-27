@@ -23,9 +23,16 @@ const SCRIPT_CONFIG_BINARIES: &[&str] = &["vitest"];
 
 const ENTRY_PATTERNS: &[&str] = &[
     VITEST_DEFAULT_INCLUDE,
-    "**/__tests__/**/*.{js,jsx,ts,tsx,mjs,cjs,mts,cts}",
+    VITEST_TESTS_DIR_CONVENTION,
     VITEST_DEFAULT_BENCH_INCLUDE,
 ];
+
+/// The files below a `__tests__` directory. The Vitest default include does
+/// not select a file without a test marker there, but the pattern keeps the
+/// helper modules of a Jest-style layout used. The mutation plan does not
+/// read it as a runner include.
+pub(super) const VITEST_TESTS_DIR_CONVENTION: &str =
+    "**/__tests__/**/*.{js,jsx,ts,tsx,mjs,cjs,mts,cts}";
 
 const CONFIG_PATTERNS: &[&str] = &[
     "**/vitest.config.{ts,js,mts,mjs,cts,cjs}",

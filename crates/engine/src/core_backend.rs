@@ -508,6 +508,14 @@ impl BackendAggregatedPluginResult {
             .collect()
     }
 
+    /// The test entry patterns that a test runner reads, compiled for path
+    /// lookups.
+    pub fn test_includes(&self) -> BackendTestIncludes {
+        BackendTestIncludes {
+            inner: self.inner.test_includes(),
+        }
+    }
+
     /// The plugin used-export rules, compiled for path lookups.
     pub fn used_export_names(&self) -> BackendUsedExportNames {
         BackendUsedExportNames {
@@ -524,6 +532,19 @@ impl BackendAggregatedPluginResult {
             .cloned()
             .map(|diagnostic| diagnostic.into_workspace_diagnostic(root))
             .collect()
+    }
+}
+
+/// The test entry patterns of one plugin run, compiled for path lookups.
+pub struct BackendTestIncludes {
+    inner: fallow_core::plugins::TestIncludes,
+}
+
+impl BackendTestIncludes {
+    /// True when a test pattern selects the project-root-relative
+    /// `rel_path`.
+    pub fn selects(&self, rel_path: &str) -> bool {
+        self.inner.selects(rel_path)
     }
 }
 

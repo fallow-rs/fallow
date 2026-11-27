@@ -44,6 +44,7 @@ fn plans(
         framework_config_exports: exports,
         setup_files: &[],
         ignore_patterns: Some(&session.config().ignore_patterns),
+        test_includes: None,
     };
     requests
         .iter()
@@ -460,6 +461,50 @@ fn a_test_helper_module_and_a_bench_file_are_not_static_test_files() {
         dispositions(&plan).get("src/fast.js"),
         Some(&set(&[NO_COVERAGE])),
         "only the bench file reaches it"
+    );
+}
+
+/// The static test files of `file` in a plan from the session path, which
+/// reads the test include globs of the plugins.
+fn session_static_tests(root: &Path, file: &str) -> Vec<String> {
+    let request = MutationPlanRequest::new(MutationScope::All);
+    let plan = plan_mutations_for_session_with(&session(root), &request, |_| false)
+        .expect("plan succeeds");
+    plan.files
+        .iter()
+        .find(|planned| planned.path == file)
+        .unwrap_or_else(|| panic!("{file} is planned"))
+        .static_test_files
+        .clone()
+}
+
+#[test]
+fn a_vitest_tests_dir_helper_is_not_a_static_test_file() {
+    assert_eq!(
+        session_static_tests(&fixture("mutation-plan-vitest-helpers"), "src/sum.js"),
+        vec!["src/__tests__/sum.test.js"],
+        "a test- prefix and a file with no importer do not make a test"
+    );
+    assert_eq!(
+        session_static_tests(&fixture("mutation-plan-test-helpers"), "src/add.js"),
+        vec!["src/__tests__/add.test.js"],
+        "an imported helper stays out"
+    );
+}
+
+#[test]
+fn a_tests_dir_file_that_a_configured_include_selects_is_a_static_test_file() {
+    assert_eq!(
+        session_static_tests(&fixture("mutation-plan-vitest-tests-include"), "src/sum.js"),
+        vec!["src/__tests__/sum-check.js"]
+    );
+}
+
+#[test]
+fn a_tests_dir_file_that_node_test_runs_is_a_static_test_file() {
+    assert_eq!(
+        session_static_tests(&fixture("mutation-plan-node-test-tests-dir"), "src/sum.js"),
+        vec!["src/__tests__/test-sum.js"]
     );
 }
 
@@ -1143,6 +1188,7 @@ fn a_graph_file_without_module_facts_is_skipped_with_a_reason() {
         framework_config_exports: None,
         setup_files: &[],
         ignore_patterns: None,
+        test_includes: None,
     };
     let plan = plan_mutations(&inputs, &MutationPlanRequest::new(MutationScope::All));
     assert!(plan.skipped_files.contains(&SkippedFile {
@@ -1613,6 +1659,7 @@ fn a_runner_setup_file_and_its_imports_are_support_files() {
         framework_config_exports: None,
         setup_files: &setup_files,
         ignore_patterns: None,
+        test_includes: None,
     };
     let plan = plan_mutations(&inputs, &MutationPlanRequest::new(MutationScope::All));
     assert_eq!(
