@@ -1,6 +1,6 @@
 // Generated from tools/mutation-runner/src/adapters/bun-test.mjs. Do not edit.
 import { existsSync, readFileSync, rmSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { join, posix, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { CompanionError } from "../protocol.mjs";
@@ -43,6 +43,9 @@ const BUN_DEFAULT_TIMEOUT_MS = 5000;
  * gets the Bun default times `DRY_RUN_TIMEOUT_FACTOR`.
  */
 const DRY_RUN_TIMEOUT_MS = dryRunTimeout(BUN_DEFAULT_TIMEOUT_MS);
+
+/** The config file that `bun test` reads from its working folder. */
+const BUNFIG = "bunfig.toml";
 
 /** A `bunfig.toml` line that runs the tests in a random order. */
 const RANDOMIZE = /^\s*randomize\s*=\s*true\b/mu;
@@ -165,10 +168,10 @@ const readLines = (path) =>
     : [];
 
 /** Starts one `bun test` process and waits for it. */
-const spawnBun = (args, { root, env }) =>
+const spawnBun = (args, { cwd, env }) =>
   new Promise((resolveExit, rejectExit) => {
     const { child, stderr } = spawnWithStderrTail(process.execPath, args, {
-      cwd: root,
+      cwd,
       env,
       tailBytes: STDERR_TAIL_BYTES,
     });
@@ -229,7 +232,7 @@ const joinHits = (tests, rows, randomized) => {
 
 const optionalArgs = (condition, args) => (condition ? args : []);
 
-/** The arguments of one `bun test` process. */
+/** The arguments of one `bun test` process. `file` is relative to its folder. */
 const bunArgs = (file, junit, { timeoutMs = DRY_RUN_TIMEOUT_MS, pattern, bail }) => [
   "test",
   "--preload",
@@ -250,9 +253,41 @@ const childEnv = (workDir, hits, mutantId) => {
   return env;
 };
 
-const isRandomized = (root) => {
-  const bunfig = join(root, "bunfig.toml");
+const isRandomized = (dir) => {
+  const bunfig = join(dir, BUNFIG);
   return existsSync(bunfig) && RANDOMIZE.test(readFileSync(bunfig, "utf8"));
+};
+
+/**
+ * The folder of the nearest `bunfig.toml` from the test file up to the root,
+ * relative to the root, or `.` for the root. Bun reads the project
+ * `bunfig.toml` only from its working folder and does not search the parent
+ * folders. A workspace package with its own file therefore runs its tests
+ * from that folder, as `cd <package> && bun test` does (issue #5286). A file
+ * above the root never applies.
+ */
+const bunfigFolder = (root, file) => {
+  for (let dir = posix.dirname(file); dir !== "."; dir = posix.dirname(dir)) {
+    if (existsSync(join(root, dir, BUNFIG))) return dir;
+  }
+  return ".";
+};
+
+/**
+ * Gives the working folder of each test file, with the file path relative
+ * to that folder and the random-order setting of its `bunfig.toml`.
+ */
+const runFolders = (root) => {
+  const randomized = new Map();
+  return (file) => {
+    const dir = bunfigFolder(root, file);
+    if (!randomized.has(dir)) randomized.set(dir, isRandomized(join(root, dir)));
+    return {
+      cwd: join(root, dir),
+      file: posix.relative(dir, file),
+      randomized: randomized.get(dir),
+    };
+  };
 };
 
 /** Reads the result of one finished `bun test` process. */
@@ -287,7 +322,7 @@ export const createAdapter = async (init) => {
   const root = resolve(init.root);
   const overlay = buildOverlay(root, init.run_dir, init.path_map);
   const testFiles = initTestFiles(root, init, TEST_FILE_PATTERNS);
-  const randomized = isRandomized(root);
+  const folderOf = runFolders(root);
   const workDir = createWorkDir("fallow-mutation-bun-", overlay);
   Object.assign(process.env, init.options?.env ?? {});
   let processCount = 0;
@@ -296,14 +331,22 @@ export const createAdapter = async (init) => {
     processCount += 1;
     const junit = join(workDir.dir, `junit-${processCount}.xml`);
     const hits = join(workDir.dir, `hits-${processCount}.jsonl`);
+    const folder = folderOf(file);
     const started = performance.now();
     try {
-      const exit = await spawnBun(bunArgs(file, junit, options), {
-        root,
+      const exit = await spawnBun(bunArgs(folder.file, junit, options), {
+        cwd: folder.cwd,
         env: childEnv(workDir, hits, options.mutantId),
       });
       const durationMs = performance.now() - started;
-      return fileResult({ file, exit, junit, hits, randomized, durationMs });
+      return fileResult({
+        file,
+        exit,
+        junit,
+        hits,
+        randomized: folder.randomized,
+        durationMs,
+      });
     } finally {
       rmSync(junit, { force: true });
       rmSync(hits, { force: true });
