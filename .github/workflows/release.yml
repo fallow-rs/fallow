@@ -799,7 +799,7 @@ jobs:
       - name: Build Rust release binaries
         if: matrix.target != 'aarch64-unknown-linux-musl'
         shell: bash
-        run: cargo build --release --target ${{ matrix.target }} -p fallow-cli -p fallow-lsp -p fallow-mcp -p fallow-multicall --config target/pgo-profile/pgo.toml 2>&1 | tee target/pgo-profile/build.log
+        run: cargo build --release --target ${{ matrix.target }} -p fallow-cli -p fallow-lsp -p fallow-mcp -p fallow-multicall --config target/pgo-profile/pgo.toml 2>&1 | node .github/scripts/pgo-build-log.mjs target/pgo-profile/build.log
         env:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
 

@@ -12,6 +12,7 @@ export const PGO_PATHS = Object.freeze([
   "scripts/pgo-train.sh",
   ".github/scripts/pgo-compare.mjs",
   ".github/scripts/pgo-profile-match.mjs",
+  ".github/scripts/pgo-build-log.mjs",
   "benchmarks/download-fixtures.mjs",
   ".github/actions/setup-rust/**",
   ".cargo/config.toml",

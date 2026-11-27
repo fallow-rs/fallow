@@ -2627,7 +2627,10 @@ test("release trains one PGO profile per PGO target and can build without it", (
   assert.match(resolve, /No PGO profile for/u);
   assert.ok(combined, "one step builds the four Rust binaries");
   assert.match(combined, /shell: bash/u);
-  assert.match(combined, /\| tee target\/pgo-profile\/build\.log/u);
+  assert.match(
+    combined,
+    /\| node \.github\/scripts\/pgo-build-log\.mjs target\/pgo-profile\/build\.log/u,
+  );
   assert.ok(match, "the build job must check that the profile matches the build");
   assert.match(match, /if: needs\.pgo-profile\.outputs\.enabled == 'true' && matrix\.pgo_profile/u);
   assert.match(match, /pgo-profile-match\.mjs/u);
@@ -2676,6 +2679,7 @@ test("pgo-validate gates PGO on the held-out fixtures for the PGO paths", async 
     "scripts/pgo-train.sh",
     ".github/scripts/pgo-compare.mjs",
     ".github/scripts/pgo-profile-match.mjs",
+    ".github/scripts/pgo-build-log.mjs",
     "benchmarks/download-fixtures.mjs",
     ".github/actions/setup-rust/**",
     ".cargo/config.toml",
