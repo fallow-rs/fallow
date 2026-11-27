@@ -1,0 +1,7 @@
+{
+  "name": "nx-run-commands-extensionless",
+  "private": true,
+  "main": "src/index.ts",
+  "workspaces": ["packages/*"],
+  "devDependencies": { "nx": "21.0.0", "tsx": "4.0.0", "vitest": "3.0.0" }
+}

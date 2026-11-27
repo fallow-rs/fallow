@@ -1,0 +1,6 @@
+on: push
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - run: node scripts/ci-check

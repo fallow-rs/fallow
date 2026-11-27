@@ -44,3 +44,54 @@ fn run_commands_targets_credit_script_files_and_jest_configs() {
         "a file that no target reaches stays unused, got: {unused:?}"
     );
 }
+
+/// Issue #5325: a command file argument without an extension resolves like a
+/// package.json script argument, in a root target, a workspace target and a
+/// CI workflow.
+#[test]
+fn run_commands_targets_credit_extensionless_script_files() {
+    let unused = unused_files("nx-run-commands-extensionless");
+    for credited in [
+        "scripts/noext.js",
+        "scripts/tsnoext.ts",
+        "scripts/ci-check.mjs",
+        "packages/app/tools/run.cjs",
+    ] {
+        assert!(
+            !unused.iter().any(|path| path.ends_with(credited)),
+            "{credited} is run without its extension, got unused: {unused:?}"
+        );
+    }
+    for unrun in ["src/orphan.ts", "scripts/deploy.ts"] {
+        assert!(
+            unused.iter().any(|path| path.ends_with(unrun)),
+            "{unrun} is run by no command (`bash scripts/deploy.sh` names a shell file that is not on disk), got: {unused:?}"
+        );
+    }
+}
+
+/// A directory argument such as `vitest run src/lib/` is a filter, not a
+/// module that the command runs, so the index file of the directory does not
+/// become an entry.
+#[test]
+fn run_commands_directory_argument_is_not_an_index_entry() {
+    let output = run_fallow(
+        "dead-code",
+        "nx-run-commands-extensionless",
+        &["--format", "json", "--quiet", "--no-cache"],
+    );
+    let json = parse_json(&output);
+    let unused_exports: Vec<&str> = json["unused_exports"]
+        .as_array()
+        .map(|exports| {
+            exports
+                .iter()
+                .filter_map(|export| export["export_name"].as_str())
+                .collect()
+        })
+        .unwrap_or_default();
+    assert!(
+        unused_exports.contains(&"unusedHelper"),
+        "src/lib/index.ts stays a plain module, got: {unused_exports:?}"
+    );
+}

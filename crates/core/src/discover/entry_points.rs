@@ -1,6 +1,6 @@
 use std::path::{Component, Path, PathBuf};
 
-use super::{project_read, walk::SOURCE_EXTENSIONS};
+use super::{project_read, source_probe::probe_source_file, walk::SOURCE_EXTENSIONS};
 use fallow_config::{PackageJson, ResolvedConfig, TsconfigOutputMap, TsconfigOutputResolution};
 use fallow_graph::resolve::{OUTPUT_DIRS, directory_index_entry, output_entry_to_source_path};
 use fallow_types::discover::{DiscoveredFile, EntryPoint, EntryPointSource};
@@ -410,33 +410,11 @@ fn resolve_entry_via_filesystem_probe(
     mut skipped_entries: Option<&mut FxHashMap<String, usize>>,
 ) -> Option<EntryPoint> {
     let resolved = base.join(entry);
-
-    if resolved.is_file() {
+    if let Some(file) =
+        probe_source_file(&resolved).or_else(|| directory_index_entry(&resolved, SOURCE_EXTENSIONS))
+    {
         return validated_entry_point(
-            &resolved,
-            canonical_root,
-            entry,
-            source,
-            skipped_entries.as_deref_mut(),
-        );
-    }
-
-    for ext in SOURCE_EXTENSIONS {
-        let with_ext = resolved.with_extension(ext);
-        if with_ext.is_file() {
-            return validated_entry_point(
-                &with_ext,
-                canonical_root,
-                entry,
-                source,
-                skipped_entries.as_deref_mut(),
-            );
-        }
-    }
-
-    if let Some(index_entry) = directory_index_entry(&resolved, SOURCE_EXTENSIONS) {
-        return validated_entry_point(
-            &index_entry,
+            &file,
             canonical_root,
             entry,
             source,
@@ -1366,6 +1344,7 @@ pub fn discover_dynamically_loaded_entry_points(
 #[cfg(test)]
 mod tests {
     use super::*;
+
     use fallow_config::{EntryPointRole, FallowConfig, OutputFormat, RulesConfig};
     use fallow_types::discover::FileId;
     use proptest::prelude::*;

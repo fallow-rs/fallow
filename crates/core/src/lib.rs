@@ -1753,7 +1753,7 @@ fn analyze_all_scripts(
 
     analyze_root_scripts(config, root_pkg, &deps, plugin_result);
     analyze_workspace_scripts(config, workspace_pkgs, &deps, plugin_result);
-    analyze_ci_scripts(config, &bin_map, &all_dep_set, &all_scripts, plugin_result);
+    script_entries::analyze_ci_scripts(config, &bin_map, &all_dep_set, &all_scripts, plugin_result);
     analyze_hook_scripts(
         config,
         workspaces,
@@ -1881,6 +1881,7 @@ fn analyze_root_scripts(
     }
     script_entries::push_script_entry_patterns(
         &mut plugin_result.entry_patterns,
+        &config.root,
         "",
         &script_analysis.entry_files,
         &script_analysis.test_entry_files,
@@ -1974,6 +1975,7 @@ fn analyze_one_workspace_scripts(
     }
     script_entries::push_script_entry_patterns(
         &mut entry_patterns,
+        &config.root,
         &ws_prefix,
         &ws_analysis.entry_files,
         &ws_analysis.test_entry_files,
@@ -1985,33 +1987,6 @@ fn analyze_one_workspace_scripts(
         entry_patterns,
         config_result,
     )
-}
-
-/// Analyze CI config files for binary invocations and merge the results.
-fn analyze_ci_scripts(
-    config: &ResolvedConfig,
-    bin_map: &rustc_hash::FxHashMap<String, String>,
-    all_dep_set: &FxHashSet<String>,
-    all_scripts: &scripts::ScriptCatalog,
-    plugin_result: &mut plugins::AggregatedPluginResult,
-) {
-    let ci_analysis = scripts::ci::analyze_ci_files(
-        &config.root,
-        bin_map,
-        all_dep_set,
-        all_scripts,
-        scripts::IgnoredCommandEntries::new(&config.ignore_command_entries),
-    );
-    plugin_result
-        .script_used_packages
-        .extend(ci_analysis.used_packages);
-    script_entries::push_script_entry_patterns(
-        &mut plugin_result.entry_patterns,
-        "",
-        &ci_analysis.entry_files,
-        &ci_analysis.test_entry_files,
-        Some(&ci_analysis.entry_file_sources),
-    );
 }
 
 /// Analyze git hook, staged-file and agent hook commands for binary
