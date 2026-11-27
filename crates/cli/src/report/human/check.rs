@@ -2250,8 +2250,8 @@ fn format_unused_load_data_key(
         "{} {} {}",
         format!(":{}", k.line).dimmed(),
         k.key_name.bold(),
-        "is returned from load() but no consumer reads it (sibling +page.svelte data.<key> or \
-         project-wide page.data.<key>)"
+        "is returned from a route load() or loader but no consumer reads it (no data.<key>, \
+         page.data.<key> or useLoaderData() read)"
             .dimmed(),
     )
 }

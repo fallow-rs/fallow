@@ -2187,3 +2187,19 @@ fn summary_counts_policy_violations() {
             .any(|(name, count, _)| *name == "Policy violations" && *count == 1)
     );
 }
+
+#[test]
+fn unused_load_data_key_line_names_every_route_data_consumer() {
+    let finding =
+        fallow_types::output_dead_code::UnusedLoadDataKeyFinding::with_actions(UnusedLoadDataKey {
+            path: PathBuf::from("/project/app/routes/home.tsx"),
+            key_name: "draftCount".to_string(),
+            line: 7,
+            col: 4,
+            route_dir: None,
+        });
+    let line = strip_ansi(&format_unused_load_data_key(&finding));
+    assert!(line.contains("draftCount"), "{line}");
+    assert!(line.contains("load() or loader"), "{line}");
+    assert!(line.contains("useLoaderData()"), "{line}");
+}
