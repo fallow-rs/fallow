@@ -276,7 +276,7 @@ pub fn coverage_analyze_meta() -> Value {
             "runtime_coverage.blast_radius[]": "First-class blast-radius entries with stable fallow:blast IDs, static caller count, traffic-weighted caller reach, optional cloud deploy touch count, and low/medium/high risk band.",
             "runtime_coverage.importance[]": "First-class production-importance entries with stable fallow:importance IDs, invocations, cyclomatic complexity, owner count, 0-100 importance score, and templated reason. importance ranks the risk of a change; use hot_paths[].optimization_target to rank speed work.",
             "runtime_coverage.hot_paths[].optimization_target": "Speed-work inputs for a hot function: cost_score (invocations multiplied by the per-call cost, uncapped), cost_basis (inner_iterations when V8 block counts exist, else cognitive), cognitive, cyclomatic, line_count, and inner_iterations_per_call (peak block executions per call, block-coverage dumps only). Omitted when the hot path has no stable_id or no static counterpart. cognitive is a static proxy for the work per call, not a measurement.",
-            "runtime_coverage.warnings[].code": "Stable warning identifier. cloud_functions_unmatched flags entries dropped because no AST/static counterpart was found locally. optimization_target_unmatched counts hot paths without an optimization_target: the hot path has no stable_id, or no static function matches its stable_id."
+            "runtime_coverage.warnings[].code": "Stable warning identifier. cloud_functions_unmatched flags entries dropped because no AST/static counterpart was found locally. cloud_local_join_incomplete flags a join where under 80% of the cloud functions matched the local AST, so safe_to_delete is capped at review_required. optimization_target_unmatched counts hot paths without an optimization_target: the hot path has no stable_id, or no static function matches its stable_id."
         },
         "enums": {
             "data_source": ["local", "cloud"],
@@ -291,7 +291,8 @@ pub fn coverage_analyze_meta() -> Value {
         },
         "warnings": {
             "no_runtime_data": "Cloud returned an empty runtime window. Either the period is too narrow or no traces have been ingested yet.",
-            "cloud_functions_unmatched": "One or more cloud-side functions could not be matched against the local AST/static index and were dropped from findings. Common causes: stale runtime data after a rename/move, file path mismatch between deploy and repo, or analysis run on the wrong commit."
+            "cloud_functions_unmatched": "One or more cloud-side functions could not be matched against the local AST/static index and were dropped from findings. Common causes: stale runtime data after a rename/move, file path mismatch between deploy and repo, or analysis run on the wrong commit.",
+            "cloud_local_join_incomplete": "Under 80% of the cloud runtime functions matched the local AST. The local static answer is then not complete enough for safe_to_delete, so each such finding is review_required with medium confidence. Run the analysis on the deployed commit, or check the path prefix of the runtime paths."
         }
     })
 }

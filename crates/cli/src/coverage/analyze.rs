@@ -19,6 +19,9 @@ use crate::coverage::cloud_client::{
     CloudError, CloudNeverCalledSource, CloudRequest, CloudRuntimeContext, CloudRuntimeFunction,
     CloudRuntimeProvenance, CloudRuntimeWarning, CloudTrackingState, fetch_runtime_context,
 };
+use crate::coverage::cloud_join::{
+    CloudMergeEntries, UnmatchedCloudFunction, cap_for_incomplete_join, collect_cloud_merge_entries,
+};
 use crate::coverage::cloud_rows;
 use crate::coverage::upload_common::parse_git_remote_to_project_id;
 use crate::coverage::upload_inventory::extension_supported;
@@ -432,45 +435,45 @@ pub(super) fn emit_cloud_error(err: &CloudError, output: OutputFormat) -> ExitCo
 }
 
 #[derive(Debug, Clone)]
-struct StaticFunctionInfo {
-    path: PathBuf,
-    name: String,
-    start_line: u32,
-    end_line: u32,
-    static_used: bool,
+pub(super) struct StaticFunctionInfo {
+    pub(super) path: PathBuf,
+    pub(super) name: String,
+    pub(super) start_line: u32,
+    pub(super) end_line: u32,
+    pub(super) static_used: bool,
     /// `Some(true)` when production mode dropped the only files that reference
     /// this function, so `static_used` reads `false` purely because the test,
     /// story, or fixture side of the tree is missing from the graph.
     /// `Some(false)` when both graphs were built and no such reference exists,
     /// `None` when the run was not filtered and there is no second answer.
-    test_only_reference: Option<bool>,
-    test_covered: bool,
-    cyclomatic: u32,
+    pub(super) test_only_reference: Option<bool>,
+    pub(super) test_covered: bool,
+    pub(super) cyclomatic: u32,
     /// Static cost inputs for the hot-path optimization target. `None` when
     /// the source inventory carried no complexity for the function.
-    cost: Option<StaticCost>,
-    caller_count: u32,
-    owner_count: Option<u32>,
+    pub(super) cost: Option<StaticCost>,
+    pub(super) caller_count: u32,
+    pub(super) owner_count: Option<u32>,
     /// Cross-surface join key (`fallow:fn:<hash>`) computed over the
     /// repo-relative `path`. Agrees with the static-inventory producer's
     /// `stable_id` for the same function, so a cloud function carrying a
     /// `stable_id` joins here directly.
-    stable_id: String,
+    pub(super) stable_id: String,
     /// Content digest of the function's full-span source slice
     /// (`FunctionComplexity.source_hash`). Stable across line moves, so a
     /// finding built from this function carries a line-move-immune key for
     /// baseline suppression.
-    source_hash: Option<String>,
+    pub(super) source_hash: Option<String>,
     /// Whether `name` is the callee this function was passed to
     /// (`arr.map(cb)` -> `map`) rather than a declared or bound name. The
     /// runtime instrumenter names callbacks that way, so the join key reads
     /// like a declaration while the source has no declaration to point at;
     /// the verdict copy says "callback passed to X" instead.
-    is_callback: bool,
+    pub(super) is_callback: bool,
 }
 
 #[derive(Default)]
-struct StaticIndex {
+pub(super) struct StaticIndex {
     by_key: FxHashMap<(String, String, u32), StaticFunctionInfo>,
     by_path_name: FxHashMap<(String, String), Vec<StaticFunctionInfo>>,
     /// Stable-id join tier: the strongest match, tried before
@@ -787,7 +790,7 @@ fn static_function_info(
 }
 
 /// Insert a function's static info into every lookup tier of the index.
-fn index_static_function(out: &mut StaticIndex, rel: &str, info: StaticFunctionInfo) {
+pub(super) fn index_static_function(out: &mut StaticIndex, rel: &str, info: StaticFunctionInfo) {
     out.by_key.insert(
         (rel.to_string(), info.name.clone(), info.start_line),
         info.clone(),
@@ -816,12 +819,12 @@ fn path_file_name(path: &str) -> &str {
 
 /// The merged report plus the runtime functions that found no local
 /// counterpart, kept alongside the report so `--debug-unmatched` can list them.
-struct CloudMergeOutput {
-    report: RuntimeCoverageReport,
+pub(super) struct CloudMergeOutput {
+    pub(super) report: RuntimeCoverageReport,
     unmatched: Vec<UnmatchedCloudFunction>,
 }
 
-fn merge_cloud_snapshot(
+pub(super) fn merge_cloud_snapshot(
     snapshot: &CloudRuntimeContext,
     static_index: &StaticIndex,
     min_invocations_hot: u64,
@@ -832,14 +835,27 @@ fn merge_cloud_snapshot(
         synthesized_blast_radius,
         synthesized_importance,
         unmatched_cloud_functions,
+        local_structure,
+        join,
+        capped_findings,
     } = collect_cloud_merge_entries(snapshot, static_index, min_invocations_hot);
 
     sort_cloud_runtime_entries(&mut findings, &mut hot_paths);
-    let blast_radius = cloud_rows::cloud_blast_radius_entries(snapshot, synthesized_blast_radius);
-    let importance =
-        cloud_rows::cloud_importance_entries(snapshot, rank_importance(synthesized_importance));
+    let blast_radius = cloud_rows::cloud_blast_radius_entries(
+        snapshot,
+        synthesized_blast_radius,
+        &local_structure,
+    );
+    let importance = cloud_rows::cloud_importance_entries(
+        snapshot,
+        rank_importance(synthesized_importance),
+        &local_structure,
+    );
 
-    let warnings = cloud_warnings(snapshot, unmatched_cloud_functions.len());
+    let mut warnings = cloud_warnings(snapshot, unmatched_cloud_functions.len());
+    if let Some(warning) = join.warning(capped_findings) {
+        warnings.push(warning);
+    }
     let trust_output = cloud_runtime_trust_output(snapshot);
 
     let report = RuntimeCoverageReport {
@@ -971,69 +987,6 @@ fn runtime_untracked_ratio(functions_tracked: usize, functions_untracked: usize)
     }
 }
 
-struct CloudMergeEntries {
-    findings: Vec<RuntimeCoverageFinding>,
-    hot_paths: Vec<RuntimeCoverageHotPath>,
-    synthesized_blast_radius: Vec<fallow_output::RuntimeCoverageBlastRadiusEntry>,
-    synthesized_importance: Vec<(fallow_output::RuntimeCoverageImportanceEntry, Option<u32>)>,
-    unmatched_cloud_functions: Vec<UnmatchedCloudFunction>,
-}
-
-/// One cloud runtime function with no local counterpart, kept so the drop is
-/// inspectable instead of only counted.
-#[derive(Debug, Clone)]
-pub struct UnmatchedCloudFunction {
-    pub path: String,
-    pub name: String,
-    pub line: Option<u32>,
-    pub invocations: u64,
-}
-
-fn collect_cloud_merge_entries(
-    snapshot: &CloudRuntimeContext,
-    static_index: &StaticIndex,
-    min_invocations_hot: u64,
-) -> CloudMergeEntries {
-    let mut entries = CloudMergeEntries {
-        findings: Vec::new(),
-        hot_paths: Vec::new(),
-        synthesized_blast_radius: Vec::new(),
-        synthesized_importance: Vec::new(),
-        unmatched_cloud_functions: Vec::new(),
-    };
-    for function in &snapshot.functions {
-        let Some(local) = match_cloud_function(function, static_index) else {
-            let line = function.start_line.or(function.line_number);
-            tracing::debug!(
-                path = %function.file_path,
-                function = %function.function_name,
-                line = ?line,
-                invocations = function.hit_count.unwrap_or(0),
-                "cloud runtime function has no local counterpart; omitted from findings"
-            );
-            entries
-                .unmatched_cloud_functions
-                .push(UnmatchedCloudFunction {
-                    path: function.file_path.clone(),
-                    name: function.function_name.clone(),
-                    line,
-                    invocations: function.hit_count.unwrap_or(0),
-                });
-            continue;
-        };
-        if matches!(function.tracking_state, CloudTrackingState::Called) {
-            collect_called_cloud_function(&mut entries, function, &local, min_invocations_hot);
-        } else {
-            entries.findings.push(cloud_finding(
-                function,
-                &local,
-                cloud_observation_days(snapshot, function),
-            ));
-        }
-    }
-    entries
-}
-
 /// Days of runtime evidence behind one cloud function state.
 ///
 /// `tracking_state` covers only the current deployment. When the cloud sends
@@ -1041,7 +994,10 @@ fn collect_cloud_merge_entries(
 /// few hours inside a 30-day window. The nominal period applies only when the
 /// cloud states the period-wide state (`period_tracking_state`), or when it is
 /// an older cloud that sends no evidence window.
-fn cloud_observation_days(snapshot: &CloudRuntimeContext, function: &CloudRuntimeFunction) -> u32 {
+pub(super) fn cloud_observation_days(
+    snapshot: &CloudRuntimeContext,
+    function: &CloudRuntimeFunction,
+) -> u32 {
     if function.period_tracking_state.is_some() {
         return snapshot.window.period_days;
     }
@@ -1061,7 +1017,7 @@ fn cloud_observation_days(snapshot: &CloudRuntimeContext, function: &CloudRuntim
         })
 }
 
-fn collect_called_cloud_function(
+pub(super) fn collect_called_cloud_function(
     entries: &mut CloudMergeEntries,
     function: &CloudRuntimeFunction,
     local: &StaticFunctionInfo,
@@ -1148,12 +1104,14 @@ fn cloud_importance(
     )
 }
 
-fn cloud_finding(
+pub(super) fn cloud_finding(
     function: &CloudRuntimeFunction,
     local: &StaticFunctionInfo,
     observation_days: u32,
+    join_incomplete: bool,
 ) -> RuntimeCoverageFinding {
-    let (verdict, confidence, invocations) = cloud_finding_decision(function, local);
+    let (verdict, confidence, invocations) =
+        cap_for_incomplete_join(cloud_finding_decision(function, local), join_incomplete);
     RuntimeCoverageFinding {
         id: stable_runtime_id("prod", &local.path, &local.name, local.start_line),
         stable_id: Some(local.stable_id.clone()),
@@ -1254,7 +1212,7 @@ fn importance_reason(invocations: u64, cyclomatic: u32, owner_count: Option<u32>
     format!("{traffic}, {complexity}, {ownership}")
 }
 
-fn blast_radius_risk_band(caller_count: u32, weighted: u64) -> RuntimeCoverageRiskBand {
+pub(super) fn blast_radius_risk_band(caller_count: u32, weighted: u64) -> RuntimeCoverageRiskBand {
     if caller_count >= 20 || weighted >= 1_000_000 {
         RuntimeCoverageRiskBand::High
     } else if caller_count >= 5 || weighted >= 50_000 {
@@ -1264,7 +1222,7 @@ fn blast_radius_risk_band(caller_count: u32, weighted: u64) -> RuntimeCoverageRi
     }
 }
 
-fn cloud_finding_decision(
+pub(super) fn cloud_finding_decision(
     function: &CloudRuntimeFunction,
     local: &StaticFunctionInfo,
 ) -> (
@@ -1407,7 +1365,7 @@ fn cloud_capture_quality(snapshot: &CloudRuntimeContext) -> Option<RuntimeCovera
     })
 }
 
-fn match_cloud_function(
+pub(super) fn match_cloud_function(
     function: &CloudRuntimeFunction,
     static_index: &StaticIndex,
 ) -> Option<StaticFunctionInfo> {
@@ -1908,7 +1866,7 @@ fn print_runtime_importance(report: &RuntimeCoverageReport, display_limit: usize
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use super::*;
     use fallow_output::RuntimeCoverageReportVerdict;
     use fallow_output::{
@@ -2098,10 +2056,7 @@ mod tests {
         let mut matched = cloud_function("src/a.ts", "oldFlow", Some(10), Some(10), Some(20));
         matched.never_called_source = CloudNeverCalledSource::RuntimeObserved;
         matched.deployments_observed = 2;
-        let mut unmatched =
-            cloud_function("src/missing.ts", "missingInAst", Some(1), Some(1), Some(3));
-        unmatched.deployments_observed = 2;
-        snapshot.functions = vec![matched, unmatched];
+        snapshot.functions = vec![matched];
         let report = merge_cloud_snapshot(&snapshot, &static_index, 100).report;
         assert_eq!(report.findings.len(), 1);
         assert_eq!(
@@ -2127,10 +2082,7 @@ mod tests {
             report.findings[0].actions.first().map(|a| a.kind.as_str()),
             Some("delete-cold-code")
         );
-        assert_eq!(
-            report.warnings.first().map(|warning| warning.code.as_str()),
-            Some("cloud_functions_unmatched")
-        );
+        assert!(report.warnings.is_empty());
     }
 
     #[test]
@@ -3181,7 +3133,12 @@ export const createStore = (rows: string[]) => {
         }
     }
 
-    fn static_info(path: &str, name: &str, start_line: u32, end_line: u32) -> StaticFunctionInfo {
+    pub fn static_info(
+        path: &str,
+        name: &str,
+        start_line: u32,
+        end_line: u32,
+    ) -> StaticFunctionInfo {
         let rel = normalize_runtime_path(Path::new(path));
         StaticFunctionInfo {
             path: PathBuf::from(path),
@@ -3201,7 +3158,7 @@ export const createStore = (rows: string[]) => {
         }
     }
 
-    fn static_index_with(functions: Vec<StaticFunctionInfo>) -> StaticIndex {
+    pub fn static_index_with(functions: Vec<StaticFunctionInfo>) -> StaticIndex {
         let mut static_index = StaticIndex::default();
         for function in functions {
             let path = normalize_runtime_path(&function.path);
@@ -3210,7 +3167,7 @@ export const createStore = (rows: string[]) => {
         static_index
     }
 
-    fn cloud_function(
+    pub fn cloud_function(
         path: &str,
         name: &str,
         line_number: Option<u32>,
@@ -3235,7 +3192,10 @@ export const createStore = (rows: string[]) => {
         }
     }
 
-    fn cloud_context(functions_tracked: usize, functions_untracked: usize) -> CloudRuntimeContext {
+    pub fn cloud_context(
+        functions_tracked: usize,
+        functions_untracked: usize,
+    ) -> CloudRuntimeContext {
         CloudRuntimeContext {
             capture_policy: None,
             repo: "acme/web".to_owned(),
