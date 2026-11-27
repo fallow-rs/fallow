@@ -3,9 +3,8 @@
 
 use std::process::ExitCode;
 
-// musl malloc is slow when many threads allocate. mimalloc makes the
-// parallel analysis several times faster on musl. Only binaries set this.
-#[cfg(target_env = "musl")]
+// The parallel analysis makes many small allocations. mimalloc handles
+// them faster than the system allocators. Only binaries set this.
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 

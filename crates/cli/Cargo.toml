@@ -121,8 +121,6 @@ schemars = { workspace = true, optional = true }
 chrono = { version = "0.4", default-features = false, features = ["alloc", "now", "serde", "std"] }
 hashbrown = { version = "0.17", features = ["default"] }
 httparse = { version = "1", features = ["std"] }
-
-[target.'cfg(target_env = "musl")'.dependencies]
 mimalloc = { workspace = true }
 
 [target.'cfg(unix)'.dependencies]
