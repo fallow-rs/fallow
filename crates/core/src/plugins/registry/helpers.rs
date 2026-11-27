@@ -346,6 +346,11 @@ pub fn process_external_plugins(
 /// in production mode does not use this index or the walk's traversal rules.
 pub struct ConfigCandidateIndex {
     dirs: FxHashMap<PathBuf, FxHashSet<OsString>>,
+    /// The keys of `dirs` in `Path` order, built on the first descendant query.
+    /// `Path` orders by component, so the folders at or below a root form one
+    /// range in this list. A query for a workspace root then compares only the
+    /// folders of that workspace, not every folder of the project.
+    sorted_dirs: std::sync::OnceLock<Vec<PathBuf>>,
 }
 
 impl ConfigCandidateIndex {
@@ -362,7 +367,30 @@ impl ConfigCandidateIndex {
                     .insert(name.to_os_string());
             }
         }
-        Self { dirs }
+        Self {
+            dirs,
+            sorted_dirs: std::sync::OnceLock::new(),
+        }
+    }
+
+    /// The folders at or below `root`, with the file names of each.
+    fn dirs_under<'a>(
+        &'a self,
+        root: &'a Path,
+    ) -> impl Iterator<Item = &'a FxHashSet<OsString>> + 'a {
+        let sorted = self.sorted_dirs.get_or_init(|| {
+            let mut sorted: Vec<PathBuf> = self.dirs.keys().cloned().collect();
+            sorted.sort_unstable();
+            sorted
+        });
+        let start = sorted.partition_point(|dir| dir.as_path() < root);
+        sorted[start..]
+            .iter()
+            .take_while(move |dir| {
+                count_dir_check();
+                dir.starts_with(root)
+            })
+            .filter_map(|dir| self.dirs.get(dir))
     }
 
     /// Whether the discovery walk collected the file at `path`.
@@ -388,9 +416,7 @@ impl ConfigCandidateIndex {
     /// workspace subdirectory) without a recursive filesystem walk.
     #[must_use]
     pub(crate) fn any_descendant_contains(&self, root: &Path, name: &OsStr) -> bool {
-        self.dirs
-            .iter()
-            .any(|(dir, names)| dir.starts_with(root) && names.contains(name))
+        self.dirs_under(root).any(|names| names.contains(name))
     }
 
     /// Whether any directory at or below `root` contains a file whose name
@@ -404,9 +430,8 @@ impl ConfigCandidateIndex {
         root: &Path,
         matcher: &globset::GlobMatcher,
     ) -> bool {
-        self.dirs.iter().any(|(dir, names)| {
-            dir.starts_with(root) && names.iter().any(|name| matcher.is_match(Path::new(name)))
-        })
+        self.dirs_under(root)
+            .any(|names| names.iter().any(|name| matcher.is_match(Path::new(name))))
     }
 
     /// The file names that the discovery walk collected in the directory `dir`.
@@ -427,6 +452,19 @@ impl ConfigCandidateIndex {
                 .collect()
         })
     }
+}
+
+#[cfg(test)]
+std::thread_local! {
+    static DIR_CHECKS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// Count one folder that a descendant query of [`ConfigCandidateIndex`]
+/// compares with its root, for tests that bound the work of a query.
+#[cfg_attr(not(test), inline(always))]
+fn count_dir_check() {
+    #[cfg(test)]
+    DIR_CHECKS.with(|checks| checks.set(checks.get() + 1));
 }
 
 /// Discover config files for plugins that were not matched against the
@@ -1143,6 +1181,42 @@ mod tests {
         );
         // A pattern present in no indexed directory yields nothing.
         assert!(match_pattern_in_index(root, "missing.json", &index).is_empty());
+    }
+
+    #[test]
+    fn descendant_queries_check_only_folders_that_hold_the_name() {
+        let mut paths: Vec<PathBuf> = (0..200)
+            .map(|i| PathBuf::from(format!("/project/packages/p{i}/src/index.ts")))
+            .collect();
+        paths.push(PathBuf::from("/project/packages/p7/mkdocs.yml"));
+        paths.push(PathBuf::from("/project/packages/p9/tsconfig.app.json"));
+        paths.push(PathBuf::from("/project/packages/p1-docs/mkdocs.yml"));
+        let index = ConfigCandidateIndex::build(paths.iter().map(PathBuf::as_path));
+        let matcher = globset::Glob::new("tsconfig.*.json")
+            .expect("valid glob")
+            .compile_matcher();
+
+        let p7 = Path::new("/project/packages/p7");
+        let p8 = Path::new("/project/packages/p8");
+        let p9 = Path::new("/project/packages/p9");
+        let before = DIR_CHECKS.with(std::cell::Cell::get);
+        assert!(index.any_descendant_contains(p7, OsStr::new("mkdocs.yml")));
+        assert!(!index.any_descendant_contains(p8, OsStr::new("mkdocs.yml")));
+        assert!(index.any_descendant_matches(p9, &matcher));
+        assert!(!index.any_descendant_matches(p7, &matcher));
+        let checks = DIR_CHECKS.with(std::cell::Cell::get) - before;
+        assert!(
+            checks <= 12,
+            "four workspace queries compared {checks} folders; each workspace has two"
+        );
+
+        assert!(index.any_descendant_contains(Path::new("/project"), OsStr::new("mkdocs.yml")));
+        assert!(!index.any_descendant_contains(Path::new("/project"), OsStr::new("missing.yml")));
+        assert!(index.any_descendant_matches(Path::new("/project"), &matcher));
+        // A sibling whose name starts with the root name is not below the root.
+        let p1 = Path::new("/project/packages/p1");
+        assert!(index.any_descendant_contains(p1, OsStr::new("index.ts")));
+        assert!(!index.any_descendant_contains(p1, OsStr::new("mkdocs.yml")));
     }
 
     #[test]
