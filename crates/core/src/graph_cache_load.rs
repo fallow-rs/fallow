@@ -50,6 +50,10 @@ pub fn try_load_analysis_graph_cache(
         let mut graph = store.graph;
         let bins = &input.plugin_result.dependency_binaries;
         credit_bin_path_references(&mut graph, modules, bins, &excluded);
+        crate::graph_build::import_elision_configs::read_decorator_metadata_options(
+            &mut graph,
+            &input.config.root,
+        );
 
         return Ok(GraphCacheHit {
             graph,

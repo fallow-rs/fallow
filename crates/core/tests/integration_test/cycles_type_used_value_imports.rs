@@ -2,8 +2,8 @@
 //! a runtime edge, because TypeScript removes it (issue #5309). Such an edge
 //! cannot close a cycle. The edge stays when the importer reads the binding
 //! as a value, when an unread binding in a `.tsx` file can be the JSX
-//! factory, and when `emitDecoratorMetadata` turns a type annotation in a
-//! decorated file into a runtime reference.
+//! factory, and when `emitDecoratorMetadata` turns a type annotation of a
+//! decorated member into a runtime reference (issue #5362).
 
 use super::common::{create_config, fixture_path};
 
@@ -38,6 +38,7 @@ fn imports_that_typescript_removes_close_no_cycle() {
         "src/unused",
         "src/decorators",
         "src/metadata-no-decorators",
+        "src/metadata-not-emitted",
     ] {
         assert!(
             !groups.iter().any(|reported| reported == group),

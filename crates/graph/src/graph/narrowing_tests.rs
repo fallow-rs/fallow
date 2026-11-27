@@ -252,6 +252,7 @@ fn mark_all_exports_referenced_deduplicates() {
             kind: ReferenceKind::NamedImport,
             namespace: ExportNamespace::Value,
             import_span: oxc_span::Span::new(0, 10),
+            decorator_metadata: None,
         }],
         reference_paths: vec![reference_paths.direct(TARGET, ModuleLoadMechanism::EsModule)],
         members: Vec::new(),
@@ -357,6 +358,7 @@ fn attach_reference_dedup_seeds_from_existing_references() {
                 kind: ReferenceKind::NamedImport,
                 namespace: ExportNamespace::Value,
                 import_span: oxc_span::Span::new(0, 10),
+                decorator_metadata: None,
             })
             .collect(),
         reference_paths: Vec::new(),
@@ -1412,6 +1414,7 @@ fn mark_member_exports_referenced_deduplicates() {
             kind: ReferenceKind::NamedImport,
             namespace: ExportNamespace::Value,
             import_span: oxc_span::Span::new(0, 10),
+            decorator_metadata: None,
         }],
         reference_paths: vec![reference_paths.direct(TARGET, ModuleLoadMechanism::EsModule)],
         members: Vec::new(),

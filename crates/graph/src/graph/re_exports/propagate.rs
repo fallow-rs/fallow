@@ -398,6 +398,9 @@ fn named_refs_for_edge(
                         kind: ReferenceKind::NamedImport,
                         namespace,
                         import_span: symbol.import_span,
+                        decorator_metadata: symbol
+                            .decorator_metadata()
+                            .filter(|_| namespace == ExportNamespace::Type),
                     },
                     path,
                 },
@@ -1152,6 +1155,7 @@ fn propagate_entry_point_star(input: EntryPointStarPropagation<'_>) -> bool {
                         kind: ReferenceKind::ReExport,
                         namespace,
                         import_span: oxc_span::Span::new(0, 0),
+                        decorator_metadata: None,
                     },
                     path,
                 );
@@ -1650,6 +1654,7 @@ fn propagate_entry_point_named_namespace(input: EntryPointNamedPropagation<'_>) 
                 kind: ReferenceKind::ReExport,
                 namespace,
                 import_span: oxc_span::Span::new(0, 0),
+                decorator_metadata: None,
             },
             path: None,
         }];
@@ -1681,6 +1686,7 @@ fn propagate_entry_point_named_namespace(input: EntryPointNamedPropagation<'_>) 
                     kind: ReferenceKind::ReExport,
                     namespace,
                     import_span: oxc_span::Span::new(0, 0),
+                    decorator_metadata: None,
                 },
                 synthetic_path,
             );

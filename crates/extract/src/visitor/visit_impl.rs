@@ -208,11 +208,6 @@ fn is_css_module_import_source(source: &str) -> bool {
 }
 
 impl<'a> Visit<'a> for ModuleInfoExtractor {
-    fn visit_decorator(&mut self, decorator: &Decorator<'a>) {
-        self.record_decorator();
-        walk::walk_decorator(self, decorator);
-    }
-
     fn visit_program(&mut self, program: &Program<'a>) {
         // An SFC or Astro file visits each script with one extractor, and its
         // spans can repeat, so a mark must not reach the next program.
@@ -1674,6 +1669,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             self.push_class_type_scope(class.id.as_ref(), class.type_parameters.as_deref());
         self.record_lit_custom_element(class);
         self.record_worker_env_bodies(class);
+        self.record_decorator_metadata(class);
 
         if let Some(meta) = extract_angular_component_metadata(class).filter(|_| !self.sfc_script) {
             self.record_angular_selector(class, &meta);

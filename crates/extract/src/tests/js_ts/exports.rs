@@ -122,18 +122,120 @@ fn default_export_of_an_interface_is_type_only() {
     assert!(!is_type_only_export(&class, &ExportName::Default));
 }
 
+/// The decorator metadata names of `source`, sorted, with `?` after a name
+/// that TypeScript emits only without `strictNullChecks`.
+fn metadata_names(source: &str) -> Vec<String> {
+    let mut names: Vec<String> = parse_source(source)
+        .semantic_facts
+        .iter()
+        .filter_map(|fact| match fact {
+            fallow_types::extract::SemanticFact::DecoratorMetadataReference(fact) => {
+                Some(if fact.without_strict_null_checks {
+                    format!("{}?", fact.local)
+                } else {
+                    fact.local.clone()
+                })
+            }
+            _ => None,
+        })
+        .collect();
+    names.sort_unstable();
+    names
+}
+
 #[test]
-fn a_decorator_records_the_decorator_fact_once() {
-    let has_fact = |info: &fallow_types::extract::ModuleInfo| {
-        info.semantic_facts
-            .iter()
-            .filter(|fact| matches!(fact, fallow_types::extract::SemanticFact::HasDecorators))
-            .count()
-    };
-    let decorated = parse_source(
-        "const d = (_t: object, _k: string): void => {};\nexport class A { @d a = 1; @d b = 2; }",
+fn decorated_members_emit_metadata_names() {
+    let source = "
+        @C() export class A {
+            @P() property: Property;
+            @P() accessor auto: Auto;
+            constructor(ctor: Ctor) {}
+            @M() method(this: This, param: Param, ...rest: Rest[]): Return { return x; }
+            @M() generic(...items: Array<Item>): Promise<Hidden> { return x; }
+            // A parameter decorator also emits the return type of its method.
+            withParam(@P() decorated: Decorated, other: Other): ParamReturn { return x; }
+            @P() get getter(): Getter { return x; }
+            @P() set setter(value: Setter) {}
+            @P() set paired(value) {}
+            get paired(): Paired { return x; }
+            @P() qualified: ns.Inner;
+        }
+    ";
+    assert_eq!(
+        metadata_names(source),
+        [
+            "Auto",
+            "Ctor",
+            "Decorated",
+            "Getter",
+            "Item",
+            "Other",
+            "Paired",
+            "Param",
+            "ParamReturn",
+            "Promise",
+            "Property",
+            "Rest",
+            "Return",
+            "Setter",
+            "This",
+            "ns",
+        ]
     );
-    assert_eq!(has_fact(&decorated), 1);
-    let plain = parse_source("export class A { a = 1; }");
-    assert_eq!(has_fact(&plain), 0);
+}
+
+#[test]
+fn undecorated_and_non_emitted_positions_emit_no_metadata_names() {
+    // A generic type emits only its outer name, so `Promise<Hidden[]>`
+    // emits `Promise` and never `Hidden`.
+    let source = "
+        export class Plain {
+            constructor(ctor: Ctor) {}
+            method(param: Param): Return { return x; }
+            property: Property;
+        }
+        export class Members {
+            constructor(ctor: Ctor) {}
+            @M() list(): Promise<Hidden[]> { return x; }
+            @M() array(items: Hidden[], fn: () => Hidden, text: string): Hidden[] { return x; }
+            @M() overload(a: Hidden): void;
+            @P() mixed: First | Second;
+            @P() qualifiedUnion: ns.Inner | ns.Inner;
+            @P() withKeyword: Hidden | string;
+            @P() unknown: unknown;
+        }
+        const Expression = @C() class { constructor(ctor: Ctor) {} };
+        declare class Ambient { @P() property: Property; }
+    ";
+    assert_eq!(metadata_names(source), ["Promise"]);
+}
+
+#[test]
+fn unions_emit_one_shared_name() {
+    let source = "
+        export class A {
+            @P() same: Same | Same;
+            @P() never: Never | never;
+            @P() nullable: Nullable | null;
+            @P() optional: (Optional | undefined);
+            @P() nested: (Nested | null) | Nested;
+            @P() conditional: T extends U ? Branch : Branch;
+            @P() qualifiedNullable: ns.Inner | null;
+            @P() both: Both | null;
+            @P() strictBoth: Both;
+        }
+    ";
+    assert_eq!(
+        metadata_names(source),
+        [
+            "Both",
+            "Branch",
+            "Nested?",
+            "Never",
+            "Nullable?",
+            "Optional?",
+            "Same",
+            "ns?",
+        ]
+    );
 }

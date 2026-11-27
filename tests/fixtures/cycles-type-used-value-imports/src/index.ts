@@ -5,5 +5,6 @@ export * as reexported from './reexported/a';
 export * as decorators from './decorators/a';
 export * as metadata from './metadata/a';
 export * as metadataNoDecorators from './metadata-no-decorators/a';
+export * as metadataNotEmitted from './metadata-not-emitted/a';
 export * as generatedExtends from './generated-extends/a';
 export * as typeOnlyTsx from './type-only-tsx/a';

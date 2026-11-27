@@ -1,6 +1,7 @@
 //! The module graph build of an analysis run, with the entry files that
 //! `includeEntryExports` covers.
 
+pub mod import_elision_configs;
 mod visibility_scope;
 
 use std::path::Path;
@@ -166,5 +167,6 @@ pub fn build_module_graph(
         unseeded_declaration_files,
     );
     graph.set_fixture_entries(&fixtures);
+    import_elision_configs::read_decorator_metadata_options(&mut graph, &config.root);
     graph
 }

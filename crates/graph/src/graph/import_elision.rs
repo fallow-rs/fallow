@@ -1,5 +1,5 @@
-//! The imports that TypeScript removes from its output (issues #5262 and
-//! #5309).
+//! The imports that TypeScript removes from its output (issues #5262,
+//! #5309 and #5362).
 //!
 //! TypeScript removes a plain `import { X }` when the file never reads `X`
 //! as a value: `X` names only a type in the target, or the file uses `X`
@@ -7,11 +7,15 @@
 //! target at runtime, so cycle detection must not count it. Some compiler
 //! options keep the import. The caller reads them per importer and gives an
 //! [`ImportElision`].
+//!
+//! Under `emitDecoratorMetadata`, the metadata of a decorated class member
+//! reads some of its type annotations at runtime. An import that such a
+//! position names stays, and its target export runs when the importer runs.
 
 use std::path::Path;
 
 use fallow_types::discover::FileId;
-use fallow_types::extract::{ImportLoadKind, ImportedName, ModuleLoadMechanism};
+use fallow_types::extract::{ImportLoadKind, ImportedName, ModuleLoadMechanism, SemanticFact};
 use rustc_hash::FxHashSet;
 
 use super::types::ModuleNode;
@@ -20,19 +24,63 @@ use super::{EffectiveExportResolution, ExportNamespace, ImportedSymbol, ModuleGr
 /// The file extensions of the modules that TypeScript compiles.
 const TYPESCRIPT_EXTENSIONS: [&str; 4] = ["ts", "tsx", "mts", "cts"];
 
-/// Which plain imports TypeScript removes from the output of one importer.
+/// Which plain imports TypeScript removes from the output of one importer,
+/// and whether its decorator metadata reads imports.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ImportElision {
     /// The compiler options keep each import: `verbatimModuleSyntax`,
     /// `preserveValueImports`, or `importsNotUsedAsValues` with `preserve`
     /// or `error`.
-    Keep,
-    /// `emitDecoratorMetadata` is on. In a file with a decorator, a type
-    /// annotation can become a runtime reference, so only an import of names
-    /// that are types in the target goes away there.
-    KeepDecoratedTypes,
-    /// TypeScript removes each import that the file never reads as a value.
-    RemoveUnread,
+    Keep(DecoratorMetadata),
+    /// TypeScript removes each import that the file never reads as a value,
+    /// except an import that the decorator metadata of the file reads.
+    RemoveUnread(DecoratorMetadata),
+}
+
+/// The `emitDecoratorMetadata` options of one importer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DecoratorMetadata {
+    /// No metadata, or the options are not known.
+    Off,
+    /// `emitDecoratorMetadata` is on.
+    On {
+        /// `strictNullChecks` is on, so a union with `null` or `undefined`
+        /// emits `Object` and reads no import.
+        strict_null_checks: bool,
+    },
+}
+
+impl ImportElision {
+    /// The [`DecoratorMetadata`] options of the importer.
+    #[must_use]
+    pub const fn decorator_metadata(self) -> DecoratorMetadata {
+        match self {
+            Self::Keep(metadata) | Self::RemoveUnread(metadata) => metadata,
+        }
+    }
+
+    /// Whether the decorator metadata of the importer reads a binding that
+    /// it emits as `emit`. The import of such a binding stays in the output,
+    /// and the importer reads the export when its class loads.
+    #[must_use]
+    pub(crate) const fn reads_decorator_metadata(self, emit: MetadataEmit) -> bool {
+        match self.decorator_metadata() {
+            DecoratorMetadata::On { strict_null_checks } => {
+                !strict_null_checks || matches!(emit, MetadataEmit::Always)
+            }
+            DecoratorMetadata::Off => false,
+        }
+    }
+}
+
+/// When TypeScript emits a binding in decorator metadata.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum MetadataEmit {
+    /// With and without `strictNullChecks`.
+    Always,
+    /// Only without `strictNullChecks`: a union of the name with `null` or
+    /// `undefined`.
+    WithoutStrictNullChecks,
 }
 
 /// How the importer uses the local binding of an import.
@@ -42,6 +90,9 @@ pub(super) enum BindingUse {
     Value,
     /// The file uses the binding only in type positions.
     TypeOnly,
+    /// The file uses the binding only in type positions, and decorator
+    /// metadata emits it.
+    DecoratorMetadata(MetadataEmit),
     /// The file never uses the binding.
     Unread,
 }
@@ -51,6 +102,7 @@ pub(super) struct BindingUses<'a> {
     value: &'a [String],
     type_only: &'a [String],
     unread: &'a FxHashSet<String>,
+    metadata: &'a [SemanticFact],
 }
 
 impl<'a> BindingUses<'a> {
@@ -60,6 +112,7 @@ impl<'a> BindingUses<'a> {
             value: &module.value_referenced_import_bindings,
             type_only: &module.type_referenced_import_bindings,
             unread: &module.unused_import_bindings,
+            metadata: &module.semantic_facts,
         }
     }
 
@@ -70,6 +123,7 @@ impl<'a> BindingUses<'a> {
             value: &[],
             type_only: &[],
             unread,
+            metadata: &[],
         }
     }
 
@@ -85,10 +139,27 @@ impl<'a> BindingUses<'a> {
         } else if self.unread.contains(local) {
             BindingUse::Unread
         } else if in_sorted(self.type_only) {
-            BindingUse::TypeOnly
+            self.metadata_emit(local)
+                .map_or(BindingUse::TypeOnly, BindingUse::DecoratorMetadata)
         } else {
             BindingUse::Value
         }
+    }
+}
+
+impl BindingUses<'_> {
+    /// How the decorator metadata of the file emits `local`, if it does.
+    fn metadata_emit(&self, local: &str) -> Option<MetadataEmit> {
+        self.metadata.iter().find_map(|fact| match fact {
+            SemanticFact::DecoratorMetadataReference(fact) if fact.local == local => {
+                Some(if fact.without_strict_null_checks {
+                    MetadataEmit::WithoutStrictNullChecks
+                } else {
+                    MetadataEmit::Always
+                })
+            }
+            _ => None,
+        })
     }
 }
 
@@ -123,7 +194,7 @@ impl ImporterElision {
         elision_of: &mut dyn FnMut(&Path) -> ImportElision,
     ) -> ImportElision {
         match *self {
-            Self::NotTypeScript => ImportElision::Keep,
+            Self::NotTypeScript => ImportElision::Keep(DecoratorMetadata::Off),
             Self::Known(elision) => elision,
             Self::Unknown => {
                 let elision = elision_of(path);
@@ -146,9 +217,9 @@ impl ModuleGraph {
     /// - an import of a name that resolves in the type namespace of the
     ///   target and not in its value namespace goes away;
     /// - an import that the file uses only in type positions or not at all
-    ///   goes away, except in a `.tsx` file and under
-    ///   [`ImportElision::KeepDecoratedTypes`] in a file with a decorator. In
-    ///   a `.tsx` file the binding can be the JSX factory of the classic
+    ///   goes away, except in a `.tsx` file and when the decorator metadata
+    ///   of the file reads it (see [`ImportElision::reads_decorator_metadata`]).
+    ///   In a `.tsx` file the binding can be the JSX factory of the classic
     ///   runtime, which TypeScript keeps whatever the file does with it.
     pub(super) fn is_removed_import(
         &self,
@@ -157,7 +228,7 @@ impl ModuleGraph {
         importer: &ModuleNode,
         elision: ImportElision,
     ) -> bool {
-        if elision == ImportElision::Keep
+        if matches!(elision, ImportElision::Keep(_))
             || symbol.binding_use == BindingUse::Value
             || symbol.mechanism != ModuleLoadMechanism::EsModule
             || symbol.load_kind != ImportLoadKind::Static
@@ -176,7 +247,10 @@ impl ModuleGraph {
             .path
             .extension()
             .is_some_and(|extension| extension == "tsx");
-        !is_tsx && (elision == ImportElision::RemoveUnread || !importer.has_decorators())
+        let reads_metadata = symbol
+            .decorator_metadata()
+            .is_some_and(|emit| elision.reads_decorator_metadata(emit));
+        !is_tsx && !reads_metadata
     }
 
     /// Whether `name` resolves in the type namespace of `target` and not in

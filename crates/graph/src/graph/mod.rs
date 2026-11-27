@@ -61,7 +61,7 @@ pub use fan_io::{FocusFileFacts, FocusFileFactsPaths};
 pub use impact_closure::{
     CoordinationGap, CoordinationGapPaths, ImpactClosure, ImpactClosurePaths,
 };
-pub use import_elision::ImportElision;
+pub use import_elision::{DecoratorMetadata, ImportElision, MetadataEmit};
 pub use namespace_escapes::{NamespaceEscape, NamespaceEscapeReason};
 pub use partition_order::{PartitionOrder, PartitionOrderPaths, ReviewUnit, ReviewUnitPaths};
 pub use public_exports::PublicExportOrigin;
@@ -232,6 +232,12 @@ pub struct ModuleGraph {
     pub namespace_escapes: Vec<NamespaceEscape>,
     /// Canonical direct and transitive export binding resolution.
     effective_exports: effective_exports::EffectiveExportIndex,
+    /// The [`ImportElision`] of each module whose decorator metadata emits an
+    /// import binding. The persisted graph does not track `tsconfig.json`, so
+    /// the caller reads the options after each build or cache load with
+    /// [`ModuleGraph::read_decorator_metadata_options`].
+    #[serde(skip, default)]
+    decorator_metadata_elision: FxHashMap<FileId, ImportElision>,
 }
 
 /// An edge in the module graph.
@@ -331,6 +337,16 @@ pub struct ImportedSymbol {
 }
 
 impl ImportedSymbol {
+    /// How the decorator metadata of the importer emits this binding, when
+    /// the importer uses it only in type positions. TypeScript always erases
+    /// an `import type`, so its binding never reaches the metadata.
+    pub(crate) const fn decorator_metadata(&self) -> Option<MetadataEmit> {
+        match self.binding_use {
+            import_elision::BindingUse::DecoratorMetadata(emit) if !self.is_type_only => Some(emit),
+            _ => None,
+        }
+    }
+
     /// When the target of this symbol edge loads, relative to the importer.
     #[must_use]
     pub const fn load_kind(&self) -> ImportLoadKind {
@@ -991,15 +1007,14 @@ impl ModuleGraph {
     /// hop target; CommonJS hops remain active because Vitest replacement mocks
     /// do not intercept `require()`.
     ///
-    /// Only a value reference can give coverage. A type reference never runs
-    /// the export, so it never gives coverage. This includes `import type` and
-    /// a plain import that the test uses only in type positions.
+    /// Only a reference that runs the export can give coverage (see
+    /// [`ModuleGraph::reference_runs_export`]).
     #[must_use]
     fn is_test_reference_covered(&self, export: &ExportSymbol, reference_index: usize) -> bool {
         let Some(reference) = export.references.get(reference_index) else {
             return false;
         };
-        if reference.namespace != ExportNamespace::Value {
+        if !self.reference_runs_export(reference) {
             return false;
         }
         if self.test_reachability_index.profile_count == 0 {
@@ -1016,6 +1031,40 @@ impl ModuleGraph {
             &self.reference_paths,
             &self.reference_routes,
         )
+    }
+
+    /// Whether `reference` reads the export at runtime. A value reference
+    /// does. A type reference does not, which includes `import type` and a
+    /// plain import that the file uses only in type positions. The exception
+    /// is a type position that the decorator metadata of the file reads
+    /// (issue #5362).
+    fn reference_runs_export(&self, reference: &SymbolReference) -> bool {
+        reference.namespace == ExportNamespace::Value
+            || reference.decorator_metadata.is_some_and(|emit| {
+                self.decorator_metadata_elision
+                    .get(&reference.from_file)
+                    .is_some_and(|elision| elision.reads_decorator_metadata(emit))
+            })
+    }
+
+    /// Read the [`ImportElision`] of each module whose decorator metadata
+    /// emits an import binding. `elision_of` gets the path of each such
+    /// TypeScript module. Call it after each build or cache load, before a
+    /// test coverage query.
+    pub fn read_decorator_metadata_options(
+        &mut self,
+        elision_of: &mut dyn FnMut(&Path) -> ImportElision,
+    ) {
+        self.decorator_metadata_elision = self
+            .modules
+            .iter()
+            .filter(|module| module.has_decorator_metadata())
+            .map(|module| {
+                let elision = import_elision::ImporterElision::new(&module.path)
+                    .get(&module.path, elision_of);
+                (module.file_id, elision)
+            })
+            .collect();
     }
 
     /// Return whether any reference on `export` is covered by a test-root

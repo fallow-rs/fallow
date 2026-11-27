@@ -7,11 +7,8 @@ use crate::discover::FileId;
 use fallow_config::ResolvedConfig;
 use rustc_hash::FxHashMap;
 
-#[path = "cycle_import_elision.rs"]
-mod import_elision;
-
 use crate::graph::{CycleOptions, MAX_CYCLE_LENGTH, ModuleGraph};
-use import_elision::ImportElisionConfigs;
+use crate::graph_build::import_elision_configs::ImportElisionConfigs;
 
 /// The cycles of `graph` that no `circularDependencies.allow` entry accepts.
 /// Records which entries had an effect, for the unmatched-entry diagnostic.
