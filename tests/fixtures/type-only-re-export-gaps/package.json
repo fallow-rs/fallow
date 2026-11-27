@@ -1,0 +1,12 @@
+{
+  "name": "type-only-re-export-gaps",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "dependencies": {
+    "missing-lib": "^1.0.0"
+  },
+  "devDependencies": {
+    "vitest": "^3.2.4"
+  }
+}

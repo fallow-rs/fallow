@@ -4745,6 +4745,122 @@ fn assert_type_only_test_reach_gaps(coverage: &serde_json::Value) {
 }
 
 #[test]
+fn health_coverage_gaps_skip_re_exports_that_resolve_to_types() {
+    let output = run_fallow(
+        "health",
+        "type-only-re-export-gaps",
+        &[
+            "--coverage-gaps",
+            "--format",
+            "json",
+            "--quiet",
+            "--no-cache",
+        ],
+    );
+    assert_eq!(
+        output.code, 0,
+        "coverage gaps default to warn severity: {}",
+        output.stderr
+    );
+    assert_type_only_re_export_gaps(&parse_json(&output)["coverage_gaps"]);
+}
+
+#[test]
+fn health_coverage_gaps_type_only_re_exports_are_stable_on_a_warm_cache() {
+    let dir = tempdir().expect("create temp dir");
+    super::common::copy_fixture_tree(&fixture_path("type-only-re-export-gaps"), dir.path());
+    let args = ["--coverage-gaps", "--format", "json", "--quiet"];
+
+    let cold = run_fallow_in_root("health", dir.path(), &args);
+    let warm = run_fallow_in_root("health", dir.path(), &args);
+    assert!(
+        dir.path().join(".fallow").exists(),
+        "the cold run should write a cache"
+    );
+
+    for output in [&cold, &warm] {
+        assert_eq!(
+            output.code, 0,
+            "coverage gaps default to warn: {}",
+            output.stderr
+        );
+        assert_type_only_re_export_gaps(&parse_json(output)["coverage_gaps"]);
+    }
+}
+
+/// The coverage gaps of the `type-only-re-export-gaps` fixture.
+///
+/// `src/index.ts` re-exports types without the `type` keyword: directly, through
+/// `chain.ts`, as a local forward of an import, as a default interface, and as
+/// a class that `hidden-class.ts` re-exports with `export type`. None of these
+/// is a runtime export, and `chain.ts` declares only types. A class, an enum,
+/// a `const` with a type of the same name, a function, and a re-export from an
+/// unresolved package stay runtime exports. `external-only.ts` has only such a
+/// re-export, so it stays a runtime file.
+fn assert_type_only_re_export_gaps(coverage: &serde_json::Value) {
+    let mut exports: Vec<_> = coverage["exports"]
+        .as_array()
+        .expect("coverage_gaps.exports should be an array")
+        .iter()
+        .map(|item| {
+            format!(
+                "{}:{}",
+                item["path"].as_str().unwrap_or_default().replace('\\', "/"),
+                item["export_name"].as_str().unwrap_or_default()
+            )
+        })
+        .collect();
+    exports.sort_unstable();
+    assert_eq!(
+        exports,
+        [
+            "src/both.ts:Both",
+            "src/enum.ts:Mode",
+            "src/external-only.ts:other",
+            "src/index.ts:Both",
+            "src/index.ts:Klass",
+            "src/index.ts:Mode",
+            "src/index.ts:external",
+            "src/index.ts:other",
+            "src/index.ts:plainValue",
+            "src/klass.ts:Klass",
+            "src/mixed.ts:runMixed",
+            "src/value.ts:plainValue",
+        ],
+        "a re-export that resolves only to a type is not a runtime export"
+    );
+
+    let mut files: Vec<_> = coverage["files"]
+        .as_array()
+        .expect("coverage_gaps.files should be an array")
+        .iter()
+        .map(|item| {
+            (
+                item["path"].as_str().unwrap_or_default().replace('\\', "/"),
+                item["value_export_count"].as_u64(),
+            )
+        })
+        .collect();
+    files.sort_unstable();
+    let expected: Vec<_> = [
+        ("src/both.ts", 1),
+        ("src/enum.ts", 1),
+        ("src/external-only.ts", 1),
+        ("src/index.ts", 6),
+        ("src/klass.ts", 1),
+        ("src/mixed.ts", 1),
+        ("src/value.ts", 1),
+    ]
+    .into_iter()
+    .map(|(path, count)| (path.to_string(), Some(count)))
+    .collect();
+    assert_eq!(
+        files, expected,
+        "a file that re-exports only types is not a runtime file"
+    );
+}
+
+#[test]
 fn health_coverage_gaps_type_only_test_reach_is_stable_on_a_warm_cache() {
     let dir = tempdir().expect("create temp dir");
     super::common::copy_fixture_tree(&fixture_path("type-only-test-reach"), dir.path());

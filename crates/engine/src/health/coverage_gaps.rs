@@ -1,7 +1,10 @@
 use crate::{discover::FileId, source::ModuleInfo, suppress};
-use fallow_graph::graph::{ModuleGraph, ModuleNode, is_declaration_file_path};
+use fallow_graph::graph::{
+    EffectiveExportResolution, ExportNamespace, ExportSymbol, ModuleGraph, ModuleNode,
+    is_declaration_file_path,
+};
 use fallow_output::{CoverageGapSummary, CoverageGaps, UntestedExport, UntestedFile};
-use fallow_types::extract::{ImportedName, SemanticFact};
+use fallow_types::extract::{ExportName, ImportedName, SemanticFact};
 
 use crate::module_graph::StaticTestCoverage;
 
@@ -51,21 +54,25 @@ fn module_is_coverage_suppressed(module: Option<&ModuleInfo>) -> bool {
 /// Whether a module declares no runtime code, so no test can run it.
 ///
 /// A declaration file qualifies. Other modules qualify when they export at
-/// least one name, every export and re-export is type-only, and they have no
-/// runtime statement or declaration, function, CommonJS export, side-effect
-/// import, dynamic import, or `require()` call. A module with no exports can
-/// run side effects, so it does not qualify.
-fn declares_only_types(node: &ModuleNode, module: &ModuleInfo) -> bool {
+/// least one name, no export is a value export (see [`is_value_export`]), every
+/// star re-export is type-only, and they have no runtime statement or
+/// declaration, function, CommonJS export, side-effect import, dynamic import,
+/// or `require()` call. A module with no exports can run side effects, so it
+/// does not qualify. Each named re-export also has an entry in `node.exports`.
+fn declares_only_types(graph: &ModuleGraph, node: &ModuleNode, module: &ModuleInfo) -> bool {
     if is_declaration_file_path(&node.path) {
         return true;
     }
     let exports_something = !node.exports.is_empty() || !node.re_exports.is_empty();
     exports_something
-        && node.exports.iter().all(|export| export.is_type_only)
+        && node
+            .exports
+            .iter()
+            .all(|export| !is_value_export(graph, node.file_id, export))
         && node
             .re_exports
             .iter()
-            .all(|re_export| re_export.is_type_only)
+            .all(|re_export| re_export.is_type_only || re_export.exported_name != "*")
         && !module.has_cjs_exports
         && !module
             .semantic_facts
@@ -80,33 +87,55 @@ fn declares_only_types(node: &ModuleNode, module: &ModuleInfo) -> bool {
             .all(|import| !matches!(import.imported_name, ImportedName::SideEffect))
 }
 
-/// Append untested value exports of one node (those with no test-reachable
-/// reference and not already flagged unused) to `exports`. The flag marks an
-/// export that only tests which mock its module reference.
-fn collect_untested_exports(
-    exports: &mut Vec<(UntestedExport, bool)>,
+/// Whether an export can carry runtime code.
+///
+/// A re-export without the `type` keyword is not type-only in the graph, but
+/// TypeScript erases it when its name resolves only to a type alias or an
+/// interface (issue #5361). Such an export has a type binding and no value
+/// binding. An export with no binding in either namespace, for example a
+/// re-export from an unresolved package, stays a value export.
+fn is_value_export(graph: &ModuleGraph, file_id: FileId, export: &ExportSymbol) -> bool {
+    if export.is_type_only {
+        return false;
+    }
+    let name = match &export.name {
+        ExportName::Named(name) => name.as_str(),
+        ExportName::Default => "default",
+    };
+    let resolves_in = |namespace| {
+        !matches!(
+            graph.resolve_export(file_id, name, namespace),
+            EffectiveExportResolution::Missing
+        )
+    };
+    resolves_in(ExportNamespace::Value) || !resolves_in(ExportNamespace::Type)
+}
+
+/// Untested value exports of one module: those with no test-reachable
+/// reference and not already flagged unused. The flag marks an export that
+/// only tests which mock its module reference.
+fn untested_exports(
     test_coverage: StaticTestCoverage<'_>,
-    node: &ModuleNode,
+    file_id: FileId,
+    value_exports: &[&ExportSymbol],
     module: &ModuleInfo,
     path: &std::path::Path,
     unused_exports: &rustc_hash::FxHashSet<(&std::path::Path, String)>,
-) {
-    for export in &node.exports {
-        if export.is_type_only {
-            continue;
-        }
+) -> Vec<(UntestedExport, bool)> {
+    let mut exports = Vec::new();
+    for &export in value_exports {
         if unused_exports.contains(&(path, export.name.to_string())) {
             continue;
         }
 
-        let has_test_dependency = test_coverage.covers_any_reference(node.file_id, export);
+        let has_test_dependency = test_coverage.covers_any_reference(file_id, export);
         if has_test_dependency {
             continue;
         }
 
         let (line, col) =
             fallow_types::extract::byte_offset_to_line_col(&module.line_offsets, export.span.start);
-        let mocked_only = test_coverage.is_mocked_only(node.file_id, export);
+        let mocked_only = test_coverage.is_mocked_only(file_id, export);
         exports.push((
             UntestedExport {
                 path: path.to_path_buf(),
@@ -117,6 +146,7 @@ fn collect_untested_exports(
             mocked_only,
         ));
     }
+    exports
 }
 
 /// Accumulated coverage-gap scan results before sorting and wrapping.
@@ -161,11 +191,16 @@ fn scan_runtime_files(
         if module_is_coverage_suppressed(module) {
             continue;
         }
-        if module.is_some_and(|module| declares_only_types(node, module)) {
+        if module.is_some_and(|module| declares_only_types(graph, node, module)) {
             continue;
         }
 
         scan.runtime_paths.push((*path).clone());
+        let value_exports: Vec<&ExportSymbol> = node
+            .exports
+            .iter()
+            .filter(|export| is_value_export(graph, node.file_id, export))
+            .collect();
 
         scan.runtime_files += 1;
         if test_coverage.covers_file(node.file_id) {
@@ -173,7 +208,7 @@ fn scan_runtime_files(
         } else {
             scan.files.push(UntestedFile {
                 path: (*path).clone(),
-                value_export_count: node.exports.iter().filter(|e| !e.is_type_only).count(),
+                value_export_count: value_exports.len(),
             });
         }
 
@@ -181,14 +216,14 @@ fn scan_runtime_files(
             continue;
         };
 
-        collect_untested_exports(
-            &mut scan.exports,
+        scan.exports.extend(untested_exports(
             test_coverage,
-            node,
+            node.file_id,
+            &value_exports,
             module,
             path,
             unused_exports,
-        );
+        ));
     }
 
     scan
