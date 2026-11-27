@@ -62,6 +62,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   Projects that do not emit declarations can see more `unused-type` findings after the upgrade. To not report a type that its own file uses, set `"ignoreExportsUsedInFile": { "type": true, "interface": true }`. `fallow dead-code --trace <file>:<Type>` now gives the same verdict as the report. When fallow keeps such a type, the trace names the backing exports and the reason, and the JSON has a new `kept_by_signature` object.
   (Closes [#5280](https://github.com/fallow-rs/fallow/issues/5280))
+  Thanks [@vethman](https://github.com/vethman) for the report.
 
 - **The configuration reference of the fallow skill now says that a scoped `usedClassMembers` rule skips the named class.** A rule with `"extends": "Base"` applies to the subclasses of `Base`, not to `Base` itself. To keep all members of one class, put `// fallow-ignore-file unused-class-member` in its file.
   (Refs [#5233](https://github.com/fallow-rs/fallow/issues/5233))
@@ -75,6 +76,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The `undeclared-workspace` hint also names `workspaces.patterns` in the fallow config**, for a folder that does not belong in `package.json` or `pnpm-workspace.yaml`.
 - **VS Code: an auto-fix run that applies no fix now shows why.** The warning shows the reason that held back the most fixes, with its next step.
   (Closes [#5127](https://github.com/fallow-rs/fallow/issues/5127))
+  Thanks [@VariableVince](https://github.com/VariableVince) for the report.
 
 - **Windows: a folder of another user above the project no longer widens the read scope.** A `.git` entry or a workspace manifest in a folder above the analysis root, such as `C:\Users\Public` or the root of a shared drive, gave the shared configs of that folder to every project below it. Now such a folder counts only when the current user or the owner of the analysis root owns it. This is the owner rule that Fallow already uses on Linux and macOS.
 
@@ -120,6 +122,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **The VS Code status bar and sidebar show the same total.** The language server now decides type-aware analysis as the CLI does: the `fallow.typeAware.enabled` setting, then `typeAware.enabled` of the config. A type-aware session also turns the opt-in `private-type-leaks` rule on at `warn`, as the CLI does, unless the config sets the rule. Before, the status bar left out every private type leak, and a project that turned type-aware analysis on only in its config got no type-aware editor diagnostics. `fallow watch` and `fallow inspect` now apply the same rule default.
   (Closes [#5321](https://github.com/fallow-rs/fallow/issues/5321))
+  Thanks [@VariableVince](https://github.com/VariableVince) for the report.
 - **The VS Code sidebar follows each save.** After a language server run, a loaded and visible Fallow sidebar refreshes in the background, with no notification. Before, a save changed the status bar count and left the sidebar on its last count until a manual Analyze.
 - **VS Code counts each finding once.** A sidebar category label counts findings, not rows: an unlisted dependency that four files import counts once, as in the total. The prop drilling, thin wrapper and duplicate prop shape categories show `advisory`, because the total does not count them. The status bar hover now lists each category that the total counts.
 - **The VS Code sidebar ignores the shell variables that the language server ignores.** `FALLOW_PRODUCTION`, `FALLOW_DIFF_FILE` and `FALLOW_TYPE_AWARE` in the environment of VS Code no longer change the sidebar run. The `fallow.production` and `fallow.typeAware` settings decide for both. `fallow.typeAware.timeoutSeconds` now also reaches the language server.
@@ -158,6 +161,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **The GitHub Action and the GitLab template run the fallow command that npm installed, also when the npm global bin folder is not on `PATH`.** Node from `pnpm/setup` puts only the pnpm folders on `PATH`. The install step then reported "unknown version", and the next step failed with `fallow: command not found`. The install step now puts the npm global bin folder first on `PATH` for the later steps when `fallow` is missing from `PATH` or is a different file. When npm installed no fallow command, the install step fails with an error that names the folder.
   (Closes [#5242](https://github.com/fallow-rs/fallow/issues/5242))
+  Thanks [@SarcevicAntonio](https://github.com/SarcevicAntonio) for the report.
 
 - **`circular-dependency` no longer reports a cycle that closes only through imports that a file uses as types or not at all.** TypeScript removes a plain `import { X }` when the file never reads `X` as a value, also when `X` is a class. Such an import does not load the target at runtime, so it no longer closes a cycle. The import still counts in three cases: when the file reads the binding as a value, when the importer is a `.tsx` file (the binding can be the JSX factory), and in a file with a decorator when the tsconfig sets `emitDecoratorMetadata`. The tsconfig options that keep each import (`verbatimModuleSyntax`, `preserveValueImports`) still apply.
   (Closes [#5309](https://github.com/fallow-rs/fallow/issues/5309))
@@ -169,11 +173,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`fallow dead-code` no longer reports the members of a singleton class that other code calls through an exported instance.** For `export const sm = SceneManager.getInstance()`, a call `sm.createScene()` in another module now counts as a use of `SceneManager.createScene`. This works when the class is in the same file or is imported, and when a local constant is exported with `export { sm }`. A static getter without a return type annotation also counts as a factory when it returns the instance that a static field holds: `return SceneManager.instance`, `return this.#instance!`, `return SceneManager.instance ?? (SceneManager.instance = new SceneManager())`, or `return (SceneManager.#instance ??= new SceneManager())`. A static method that returns another value, or the class itself (`return this`), still credits no instance member. When two different factory calls in one file give values to the same name, the export credits no class. The cache version changes, so the first run after the update parses every file again.
   (Closes [#5233](https://github.com/fallow-rs/fallow/issues/5233))
+  Thanks [@crystalfp](https://github.com/crystalfp) for the report.
 
 - **`fallow mutation` runs `bun test` with the `bunfig.toml` of a workspace package.** Bun reads `bunfig.toml` only from its working folder. Fallow ran each test file from the project root, so the `[test] preload` of a package never ran and the baseline failed. Fallow now starts each test file in the folder of the nearest `bunfig.toml` between the test file and the root, as `cd <package> && bun test` does. For the tests of such a package, `process.cwd()` is the package folder, and Bun loads the `.env` files of the package folder. A project with only a root `bunfig.toml` runs as before. (#5286)
 
 - **A file that an Nx target or a CI command runs without its extension is no longer reported as unused.** `node scripts/build` in a `project.json` `nx:run-commands` target, a Vite+ task or a CI workflow step now credits `scripts/build.js` (and `scripts/build.prod` credits `scripts/build.prod.js`), and `tsx scripts/seed` credits `scripts/seed.ts`. These commands now resolve a file argument without an extension, as `package.json` scripts already did. Only `.js`, `.ts` and their module variants are tried, so `bash scripts/deploy.sh` does not credit `scripts/deploy.ts`, and `node scripts/theme` does not credit `scripts/theme.css`. A directory argument, such as `vitest run src/lib/`, is a filter and does not make the index file of the directory an entry.
   (Closes [#5325](https://github.com/fallow-rs/fallow/issues/5325))
+  Thanks [@Bertie690](https://github.com/Bertie690) for the report.
 
 - **The human and Markdown lines of `unused-load-data-key` now name React Router and Remix loaders.** Each line says that the key is returned from a route `load()` or `loader`, and names the `data.<key>`, `page.data.<key>` and `useLoaderData()` reads. The line no longer describes a SvelteKit-only rule.
   (Refs [#5264](https://github.com/fallow-rs/fallow/issues/5264))
