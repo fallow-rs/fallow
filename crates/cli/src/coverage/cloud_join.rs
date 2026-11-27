@@ -109,12 +109,7 @@ pub(super) fn collect_cloud_merge_entries(
         .iter()
         .map(|function| (function, match_cloud_function(function, static_index)))
         .collect();
-    // The cloud counts same-name functions over every function of the read,
-    // so the resolver counts every matched function, not only the called.
-    let mut ids = ContextIdResolver::default();
-    for local in matches.iter().filter_map(|(_, local)| local.as_ref()) {
-        ids.record(&local.path, &local.name);
-    }
+    let ids = ContextIdResolver::from_index(static_index);
     let join = CloudJoin {
         total: matches.len(),
         matched: matches.iter().filter(|(_, local)| local.is_some()).count(),

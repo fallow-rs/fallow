@@ -2,6 +2,7 @@
 //! `coverage analyze --cloud` (fallow-rs/fallow-cloud#328).
 
 use fallow_output::{RuntimeCoverageConfidence, RuntimeCoverageRiskBand, RuntimeCoverageVerdict};
+use sha2::Digest as _;
 
 use crate::coverage::analyze::tests::{
     cloud_context, cloud_function, static_index_with, static_info,
@@ -315,4 +316,49 @@ fn cloud_join_ids_survive_a_line_move() {
         Some(fallow_cov_protocol::hot_path_id("src/api.ts", "handler", 10).as_str())
     );
     assert_ne!(legacy_after, legacy_before);
+}
+
+/// The cloud sends `legacy_id` on its rows (fallow-cloud#322). The report
+/// keeps it, so a reference on the old file+line id still resolves.
+#[test]
+fn cloud_rows_keep_the_cloud_legacy_id() {
+    let row: crate::coverage::cloud_client::CloudRuntimeBlastRadiusEntry = serde_json::from_str(
+        r#"{"id":"fallow:blast:new00001","legacy_id":"fallow:blast:old00001","file":"src/api.ts","function":"handler","line":10,"risk_band":"low"}"#,
+    )
+    .expect("cloud row should parse");
+    let (static_index, snapshot) = called_handler_snapshot(row);
+
+    let report = merge_cloud_snapshot(&snapshot, &static_index, 100).report;
+
+    assert_eq!(report.blast_radius[0].id, "fallow:blast:new00001");
+    assert_eq!(
+        report.blast_radius[0].legacy_id.as_deref(),
+        Some("fallow:blast:old00001")
+    );
+}
+
+/// The file has two `map` functions and only one of them ran. The id still
+/// comes from the `stable_id`, because the local AST has both, so the other
+/// `map` cannot take over the id in a later period.
+#[test]
+fn cloud_join_ids_count_same_name_functions_that_did_not_run() {
+    let ran = static_info("src/list.ts", "map", 3, 5);
+    let stable_id = ran.stable_id.clone();
+    let static_index = static_index_with(vec![ran, static_info("src/list.ts", "map", 9, 11)]);
+    let mut function = cloud_function("src/list.ts", "map", Some(3), Some(3), Some(5));
+    function.tracking_state = CloudTrackingState::Called;
+    function.hit_count = Some(500);
+    function.stable_id = Some(stable_id.clone());
+    let mut snapshot = cloud_context(1, 0);
+    snapshot.functions = vec![function];
+
+    let report = merge_cloud_snapshot(&snapshot, &static_index, 1).report;
+
+    let digest = sha2::Sha256::digest(format!("hot\0stable\0{stable_id}").as_bytes());
+    let expected: String = digest.iter().take(4).fold(String::new(), |mut hex, byte| {
+        use std::fmt::Write as _;
+        let _ = write!(hex, "{byte:02x}");
+        hex
+    });
+    assert_eq!(report.hot_paths[0].id, format!("fallow:hot:{expected}"));
 }

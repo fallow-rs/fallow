@@ -475,7 +475,7 @@ pub(super) struct StaticFunctionInfo {
 #[derive(Default)]
 pub(super) struct StaticIndex {
     by_key: FxHashMap<(String, String, u32), StaticFunctionInfo>,
-    by_path_name: FxHashMap<(String, String), Vec<StaticFunctionInfo>>,
+    pub(super) by_path_name: FxHashMap<(String, String), Vec<StaticFunctionInfo>>,
     /// Stable-id join tier: the strongest match, tried before
     /// `(path, name, line)` and the fuzzy line fallback.
     by_stable_id: FxHashMap<String, StaticFunctionInfo>,

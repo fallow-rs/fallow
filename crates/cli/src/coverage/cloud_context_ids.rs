@@ -1,33 +1,49 @@
 //! Line-independent IDs for the hot-path, blast-radius and importance entries
-//! that `coverage analyze --cloud` builds from the local AST. The recipe is
-//! the one of the Fallow Cloud runtime-context rows, so an edit above a
-//! function does not change the ID of that function.
+//! that `coverage analyze --cloud` builds from the local AST, so an edit above
+//! a function does not change the ID of that function. The hash recipe is the
+//! one of the Fallow Cloud runtime-context rows. The inputs are the local
+//! repo-relative path and the local name, so the ID equals the cloud ID only
+//! when the cloud row has the same path and name (a proven path prefix and no
+//! runtime rename, such as a `get ` prefix or a callee-named callback).
 
 use std::fmt::Write as _;
 use std::path::Path;
 
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 use sha2::{Digest, Sha256};
 
+use super::analyze::StaticIndex;
 use super::cloud_join::CloudMergeEntries;
 
 /// Hex characters of the hash part of an ID, the length of the cloud IDs.
 const ID_HEX_LENGTH: usize = 8;
 
-/// Counts the functions of one read per (repo-relative file, name), because
-/// the name key is unique only when the file has one function of that name.
+/// Counts the local functions per (repo-relative file, name), because the
+/// name key is unique only when the file has one function of that name.
 #[derive(Debug, Default)]
 pub(super) struct ContextIdResolver {
     group_sizes: FxHashMap<(String, String), usize>,
 }
 
 impl ContextIdResolver {
-    /// Counts one matched function of the read.
-    pub(super) fn record(&mut self, path: &Path, name: &str) {
-        *self
-            .group_sizes
-            .entry((normalized(path), name.to_owned()))
-            .or_default() += 1;
+    /// Counts the distinct functions of each (file, name) of the local AST.
+    /// The local AST has every function of a file, also the functions that
+    /// did not run. A count over the cloud rows only would see one `map`
+    /// when only one of two `map` functions ran, and the other one could
+    /// then take over its ID in a later period.
+    pub(super) fn from_index(index: &StaticIndex) -> Self {
+        let group_sizes = index
+            .by_path_name
+            .iter()
+            .map(|((path, name), functions)| {
+                let distinct: FxHashSet<&str> = functions
+                    .iter()
+                    .map(|function| function.stable_id.as_str())
+                    .collect();
+                ((normalized(Path::new(path)), name.clone()), distinct.len())
+            })
+            .collect();
+        Self { group_sizes }
     }
 
     /// The ID of one function. The name key (file and name) when the read has
@@ -96,13 +112,15 @@ fn normalized(path: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::coverage::analyze::tests::{static_index_with, static_info};
 
     fn resolver(functions: &[(&str, &str)]) -> ContextIdResolver {
-        let mut resolver = ContextIdResolver::default();
-        for (path, name) in functions {
-            resolver.record(Path::new(path), name);
-        }
-        resolver
+        let infos = functions
+            .iter()
+            .enumerate()
+            .map(|(line, (path, name))| static_info(path, name, line as u32 + 1, line as u32 + 2))
+            .collect();
+        ContextIdResolver::from_index(&static_index_with(infos))
     }
 
     #[test]
