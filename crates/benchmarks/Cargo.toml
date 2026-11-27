@@ -4,7 +4,6 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-homepage.workspace = true
 documentation.workspace = true
 publish = false
 description = "CodSpeed benchmark suites for fallow"

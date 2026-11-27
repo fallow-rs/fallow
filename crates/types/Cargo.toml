@@ -5,7 +5,6 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-homepage.workspace = true
 documentation = "https://fallow.tools/docs/"
 keywords.workspace = true
 categories.workspace = true
