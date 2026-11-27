@@ -1,6 +1,7 @@
 //! Vite+ toolchain plugin.
 //!
 //! Vite+ (`vite-plus`) keeps the config of its tools in `vite.config.*`. The
+//! Vite plugin reads the Vite options, such as `build` and `resolve`. The
 //! Vitest plugin reads the `test` block. This plugin reads the `pack` block,
 //! which is a tsdown config, and the `lint` block, which is an Oxlint config.
 //! The `fmt` block holds formatter options only. The script layer reads the

@@ -575,6 +575,8 @@ mod issue_4942_svelte_markup_dispatch;
 mod issue_5233_exported_singleton_instance;
 #[path = "integration_test/issue_5385_vite_rolldown_options_input.rs"]
 mod issue_5385_vite_rolldown_options_input;
+#[path = "integration_test/issue_5386_vite_plus_build_inputs.rs"]
+mod issue_5386_vite_plus_build_inputs;
 #[path = "integration_test/issue_604_vite_rollup_path_helpers.rs"]
 mod issue_604_vite_rollup_path_helpers;
 #[path = "integration_test/issue_605_new_class_member.rs"]
