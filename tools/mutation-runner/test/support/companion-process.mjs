@@ -25,6 +25,8 @@ process.on("exit", () => {
   for (const dir of companionTempDirs) removeTempDir(dir);
 });
 
+const MUTATION_ENV_PREFIX = "FALLOW_MUTATION_";
+
 /**
  * Starts the companion as a child process with a new session token, and
  * reads its stdout as the API does: a line that starts with the token is a
@@ -37,6 +39,10 @@ process.on("exit", () => {
  * get. `setEnv` gives the companion more variables, as a shell environment
  * does. `setEnv` applies after `unsetEnv`. The companion gets a private temp
  * directory in `TMPDIR`, `TMP` and `TEMP`, and `setEnv` can replace it.
+ * The companion never gets a `FALLOW_MUTATION_` variable of this process, for
+ * example `FALLOW_MUTATION_E2E_REQUIRED` of a developer shell: the tests
+ * check that no such variable reaches a test process. Only `setEnv` can give
+ * one.
  */
 export const startCompanion = ({
   token = randomBytes(16).toString("hex"),
@@ -46,6 +52,9 @@ export const startCompanion = ({
   setEnv = {},
 } = {}) => {
   const env = { ...process.env };
+  for (const name of Object.keys(env)) {
+    if (name.startsWith(MUTATION_ENV_PREFIX)) delete env[name];
+  }
   for (const name of unsetEnv) delete env[name];
   const tempDir = mkdtempSync(join(tmpdir(), "fallow-mtt-"));
   companionTempDirs.add(tempDir);
