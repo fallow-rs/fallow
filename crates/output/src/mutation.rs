@@ -740,7 +740,8 @@ pub struct MutationBaselineFailure {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
     /// The mutants that ran without this test, because the test did not pass
-    /// in the dry run of a restarted companion. Each of them ran with its
+    /// in a restarted companion: in its dry run, or in the control run of a
+    /// test that it took from the first dry run. Each of them ran with its
     /// other covering tests. Absent for a failure of the first dry run.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub mutant_ids: Vec<String>,

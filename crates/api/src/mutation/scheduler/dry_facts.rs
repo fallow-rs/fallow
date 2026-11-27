@@ -183,6 +183,7 @@ pub(super) fn record_dry_run(outcome: &mut ScheduleOutcome, dry: &DryRunResult) 
         .map(|test| (test.test_id.clone(), test.file.clone()))
         .collect();
     outcome.duplicate_test_ids = reported_duplicates(dry);
+    outcome.unloaded_paths.clone_from(&dry.unloaded_paths);
     outcome
         .issues
         .extend(duplicate_test_ids_issue(&outcome.duplicate_test_ids));

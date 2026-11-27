@@ -119,6 +119,29 @@ export const validateDryRun = (request) => {
   expectRequest(isOptional(request.test_files, isStringList), "test_files must be a list of paths");
 };
 
+const isAdoptedTest = (test) =>
+  isPlainObject(test) &&
+  typeof test.test_id === "string" &&
+  test.test_id.length > 0 &&
+  isPlainObject(test.index);
+
+const isWorkerMode = (mode) =>
+  isPlainObject(mode) &&
+  isStringList(mode.files) &&
+  (mode.reused === undefined || typeof mode.reused === "boolean");
+
+/** Checks an `adopt` request: the taken tests and the worker modes of their files. */
+export const validateAdopt = (request) => {
+  expectRequest(
+    Array.isArray(request.tests) && request.tests.every(isAdoptedTest),
+    "tests must be a list of objects with a test_id and an index object",
+  );
+  expectRequest(
+    Array.isArray(request.worker_modes) && request.worker_modes.every(isWorkerMode),
+    "worker_modes must be a list of objects with a files list and an optional reused flag",
+  );
+};
+
 /** Checks a `record` request: the optional test files, as for a dry run. */
 export const validateRecord = validateDryRun;
 

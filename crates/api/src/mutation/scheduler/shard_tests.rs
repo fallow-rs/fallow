@@ -4,6 +4,7 @@ const FILES: [&str; 3] = ["test/a.test.ts", "test/b.test.ts", "test/c.test.ts"];
 
 fn file_test(file: &str, id: &str, status: TestStatus) -> DryTest {
     DryTest {
+        index: None,
         test_id: format!("{file}::{id}"),
         file: file.to_owned(),
         duration_ms: Some(5.0),
@@ -18,6 +19,7 @@ fn file_test(file: &str, id: &str, status: TestStatus) -> DryTest {
 /// load, so a path that no file loads stays in each report.
 fn dry_of(files: &[String], failing: Option<&str>) -> DryRunResult {
     let mut dry = DryRunResult {
+        worker_mode: None,
         tests: Vec::new(),
         hits: BTreeMap::new(),
         static_hits: Vec::new(),
@@ -65,7 +67,7 @@ fn shard_spawner(failing: Option<&'static str>) -> FakeSpawner {
         Request::Reload => Ok(Response::Reloaded(Reloaded {
             method: ReloadMethod::Noop,
         })),
-        Request::Shutdown | Request::Replay(_) | Request::Record { .. } => {
+        Request::Shutdown | Request::Replay(_) | Request::Record { .. } | Request::Adopt(_) => {
             Err(LinkFault::Protocol("no response".to_owned()))
         }
     })

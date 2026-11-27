@@ -134,6 +134,11 @@ pub(super) const CONFIRMATION_RUN_FAILURE: &str = "the test fails with no active
 pub(super) const RESTARTED_DRY_RUN_FAILURE: &str =
     "the test did not pass in the dry run of a restarted companion";
 
+/// The message of a covering test that a restarted companion took from the
+/// first dry run, and that did not pass there in a control run with no
+/// active mutant.
+pub(super) const ADOPTED_TEST_FAILURE: &str = "the test did not pass in a control run of a restarted companion that took it from the first dry run";
+
 const PARALLEL_STATE_HINT: &str = "; try --concurrency 1 or set mutation.concurrency to 1; parallel companions may share files or a database";
 
 pub(super) const fn parallel_state_hint(workers: usize) -> &'static str {
@@ -150,6 +155,7 @@ pub fn split_control_run_failure(message: &str) -> Option<(&str, &str)> {
         CONTROL_RUN_FAILURE,
         CONFIRMATION_RUN_FAILURE,
         RESTARTED_DRY_RUN_FAILURE,
+        ADOPTED_TEST_FAILURE,
     ]
     .into_iter()
     .find_map(|reason| {
@@ -218,14 +224,17 @@ pub(super) type ControlCell = Arc<Mutex<Option<ControlVerdict>>>;
 /// same tests runs the control again. The memo also keeps the tests
 /// that failed in a control run, each with the message of its baseline
 /// failure: each later mutant run leaves them out. It also keeps the first
-/// error of each test that failed in the dry run of a restarted companion,
-/// for the baseline failure of that test.
+/// failure of each test that did not pass in a restarted companion, with its
+/// reason and its error, for the baseline failure of that test.
 #[derive(Default)]
 pub(super) struct ControlMemo {
     entries: Mutex<FxHashMap<Vec<String>, ControlCell>>,
     pub(super) failed_tests: Mutex<BTreeMap<String, String>>,
-    restarted_dry_run_errors: Mutex<BTreeMap<String, String>>,
+    restarted_failures: Mutex<BTreeMap<String, RestartedFailure>>,
 }
+
+/// Why a test did not pass in a restarted companion, and its first error.
+pub(super) type RestartedFailure = (&'static str, Option<String>);
 
 impl ControlMemo {
     /// The cell of `tests`. A thread that holds the lock of the cell runs
@@ -263,22 +272,29 @@ impl ControlMemo {
             .is_ok_and(|failed| failed.contains_key(test))
     }
 
-    /// Keeps the error of `test` from the dry run of a restarted companion.
-    /// The first error of a test stays.
-    pub(super) fn note_restarted_dry_run_error(&self, test: &str, error: &str) {
-        if let Ok(mut errors) = self.restarted_dry_run_errors.lock()
-            && !errors.contains_key(test)
+    /// Keeps why `test` did not pass in a restarted companion, with its
+    /// error. The first failure of a test stays.
+    pub(super) fn note_restarted_failure(
+        &self,
+        test: &str,
+        reason: &'static str,
+        error: Option<&str>,
+    ) {
+        if let Ok(mut failures) = self.restarted_failures.lock()
+            && !failures.contains_key(test)
         {
-            errors.insert(test.to_owned(), error.to_owned());
+            failures.insert(test.to_owned(), (reason, error.map(str::to_owned)));
         }
     }
 
-    /// The first error of `test` from the dry run of a restarted companion.
-    pub(super) fn restarted_dry_run_error(&self, test: &str) -> Option<String> {
-        self.restarted_dry_run_errors
+    /// The first failure of `test` in a restarted companion. A test with no
+    /// noted failure did not pass in the dry run of a restarted companion.
+    pub(super) fn restarted_failure(&self, test: &str) -> RestartedFailure {
+        self.restarted_failures
             .lock()
             .ok()
-            .and_then(|errors| errors.get(test).cloned())
+            .and_then(|failures| failures.get(test).cloned())
+            .unwrap_or((RESTARTED_DRY_RUN_FAILURE, None))
     }
 
     /// Each failed test with the message of its baseline failure.
@@ -292,8 +308,8 @@ impl ControlMemo {
 
 /// Records `test` as a baseline failure of a restarted companion that
 /// affected `mutant_id`. The mutant ran with its other covering tests. The
-/// message keeps the first error of the test from the dry run of a
-/// restarted companion, when the companion sent one.
+/// message keeps the reason and the first error of the first failure of the
+/// test in a restarted companion, when the companion sent one.
 pub(super) fn note_restarted_baseline_failure(
     workers: usize,
     outcome: &mut ScheduleOutcome,
@@ -310,17 +326,15 @@ pub(super) fn note_restarted_baseline_failure(
         failure.mutant_ids.push(mutant_id.to_owned());
         return;
     }
+    let (reason, error) = memo.restarted_failure(&test);
     outcome.baseline_failures.push(BaselineFailure {
         file: facts.passing.get(&test).map(|(file, _)| file.clone()),
         message: Some(
             FailedTest {
-                error: memo.restarted_dry_run_error(&test),
+                error,
                 test_id: test.clone(),
             }
-            .message(&format!(
-                "{RESTARTED_DRY_RUN_FAILURE}{}",
-                parallel_state_hint(workers)
-            )),
+            .message(&format!("{reason}{}", parallel_state_hint(workers))),
         ),
         test_id: Some(test),
         mutant_ids: vec![mutant_id.to_owned()],
@@ -366,6 +380,7 @@ mod tests {
             CONTROL_RUN_FAILURE,
             CONFIRMATION_RUN_FAILURE,
             RESTARTED_DRY_RUN_FAILURE,
+            ADOPTED_TEST_FAILURE,
         ] {
             let message = test.message(reason);
             assert_eq!(split_control_run_failure(&message), Some((reason, error)));

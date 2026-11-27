@@ -6,6 +6,7 @@
   "request_types": [
     "init",
     "dry_run",
+    "adopt",
     "run",
     "reload",
     "replay",
@@ -15,6 +16,7 @@
   "response_types": [
     "ready",
     "dry_run_result",
+    "adopted",
     "run_result",
     "reloaded",
     "replay_result",
@@ -62,7 +64,8 @@
     "fresh_modules_per_run",
     "batch_mutants",
     "replay",
-    "record"
+    "record",
+    "adopt"
   ],
   "isolation_modes": [
     "process",

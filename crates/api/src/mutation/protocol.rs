@@ -76,6 +76,32 @@ pub struct ReplayRequest {
     pub seed: i64,
 }
 
+/// One test of an `adopt` request: its id and the index entry that its
+/// dry run gave.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct AdoptedTest {
+    pub test_id: String,
+    pub index: serde_json::Value,
+}
+
+/// The worker mode that the dry run of one companion proved for its test
+/// files: these files can share one worker in a mutant or control run, and
+/// with `reused`, a mutant run can keep that worker process.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkerMode {
+    pub files: Vec<String>,
+    #[serde(default)]
+    pub reused: bool,
+}
+
+/// The body of an `adopt` request: the tests that the companion can run
+/// without a dry run of its own, and the worker modes of their files.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct AdoptRequest {
+    pub tests: Vec<AdoptedTest>,
+    pub worker_modes: Vec<WorkerMode>,
+}
+
 /// One request.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Request {
@@ -89,6 +115,9 @@ pub enum Request {
     Record {
         test_files: Vec<String>,
     },
+    /// Gives the companion index entries of tests from the dry run of
+    /// another companion, so that it can run them with no dry run.
+    Adopt(AdoptRequest),
     Run(RunRequest),
     Reload,
     Replay(ReplayRequest),
@@ -100,6 +129,7 @@ impl Request {
         match self {
             Self::Init(_) => "init",
             Self::DryRun { .. } => "dry_run",
+            Self::Adopt(_) => "adopt",
             Self::Run(_) => "run",
             Self::Reload => "reload",
             Self::Replay(_) => "replay",
@@ -113,6 +143,7 @@ impl Request {
         match self {
             Self::Init(_) => Some("ready"),
             Self::DryRun { .. } => Some("dry_run_result"),
+            Self::Adopt(_) => Some("adopted"),
             Self::Run(_) => Some("run_result"),
             Self::Reload => Some("reloaded"),
             Self::Replay(_) => Some("replay_result"),
@@ -132,6 +163,7 @@ impl Request {
             Self::DryRun { test_files } | Self::Record { test_files } => {
                 Ok(serde_json::json!({ "test_files": test_files }))
             }
+            Self::Adopt(body) => serde_json::to_value(body),
             Self::Run(body) => serde_json::to_value(body),
             Self::Replay(body) => serde_json::to_value(body),
             Self::Reload | Self::Shutdown => Ok(serde_json::Value::Null),
@@ -158,6 +190,9 @@ pub struct Capabilities {
     pub replay: bool,
     /// The adapter answers a `record` request.
     pub record: bool,
+    /// The adapter answers an `adopt` request: a companion can run a test
+    /// from the dry run of another companion of the same run.
+    pub adopt: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -197,6 +232,11 @@ pub struct DryTest {
     /// [`RunTest::message`]. An older companion leaves it out.
     #[serde(default)]
     pub message: Option<String>,
+    /// The entry of the test in the test index of the companion, opaque to
+    /// the API. An `adopt` request gives it to another companion of the run.
+    /// Only an adapter with the `adopt` capability sends it.
+    #[serde(default)]
+    pub index: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -229,6 +269,17 @@ pub struct DryRunResult {
     /// these ids is not reliable. An older companion leaves it out.
     #[serde(default)]
     pub duplicate_test_ids: Vec<String>,
+    /// The test files that the dry run proved can share a worker, when it
+    /// proved any. An adapter with the `adopt` capability sends it.
+    #[serde(default)]
+    pub worker_mode: Option<WorkerMode>,
+}
+
+/// The body of an `adopted` response.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+pub struct Adopted {
+    /// The count of tests that the companion added to its index.
+    pub tests: usize,
 }
 
 /// The body of a `record_result` response.
@@ -373,6 +424,7 @@ pub struct ReplayResult {
 pub enum Response {
     Ready(Ready),
     DryRun(DryRunResult),
+    Adopted(Adopted),
     Run(RunResult),
     Reloaded(Reloaded),
     Replay(ReplayResult),
@@ -481,6 +533,7 @@ pub fn decode_response(
     Ok(match expected_type {
         "ready" => Response::Ready(serde_json::from_value(value).map_err(body)?),
         "dry_run_result" => Response::DryRun(serde_json::from_value(value).map_err(body)?),
+        "adopted" => Response::Adopted(serde_json::from_value(value).map_err(body)?),
         "run_result" => Response::Run(serde_json::from_value(value).map_err(body)?),
         "reloaded" => Response::Reloaded(serde_json::from_value(value).map_err(body)?),
         "replay_result" => Response::Replay(serde_json::from_value(value).map_err(body)?),

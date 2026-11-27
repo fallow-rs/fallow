@@ -26,6 +26,7 @@ fn dry() -> DryRunResult {
         }
     }
     DryRunResult {
+        worker_mode: None,
         tests: vec![
             test(TARGET, 5.0, TestStatus::Pass),
             test("o1", 1.0, TestStatus::Pass),

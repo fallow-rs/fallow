@@ -1280,6 +1280,19 @@ mutant. Their results decide no mutant status.
   the human footer splits it in the same way. A test that passes in the
   first dry run and fails after a restart can depend on state outside the
   test, for example a file or the process id of the runner.
+- A runner with the `adopt` capability (Vitest) does no dry run in a
+  restarted companion. The first dry run gives an index entry for each test,
+  and a new companion takes the entries of the test files of its jobs with
+  an `adopt` request. The passing tests and the shared-worker modes also
+  come from the first dry run. A companion that took a test has not shown
+  that the test passes in it. So a kill or a timeout by a taken test counts
+  only after a control run, with no active mutant, of the taken tests of the
+  test files of the killing tests. A test that fails in that control run is
+  a baseline failure of that companion, as above, and the mutant runs again
+  with its other covering tests. The message then says that the test did
+  not pass in a control run of a restarted companion that took it from the
+  first dry run. `node:test` and `bun test` keep the dry run of each
+  restarted companion.
 - Parallel companions use the same project root and can share files or a
   database. Vitest's `fileParallelism: false` serializes tests inside each
   companion, but several companions can still run at once. Each Vitest
