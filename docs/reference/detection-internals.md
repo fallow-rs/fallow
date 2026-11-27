@@ -264,6 +264,20 @@ error by suppressing a downstream detector.
   `includeEntryExports` covers. A workspace entry outside `publicPackages` is
   internal, so fallow reports the unused members of the enums that it
   re-exports.
+- A workspace package outside `publicPackages` that is not
+  `"private": true`, that has an `exports`, `main` or `module` field, and
+  that has findings on its entry surface gets one `public-package-candidate`
+  workspace diagnostic (issue #5335). The entry surface is the same set that
+  `publicPackages` uses: the entry files of the package and each declaration
+  that an entry exports or re-exports. The dead-code pass records the entry
+  after its detectors run. It counts each finding on the surface whose rule
+  is not `off` for its file and that `ignoreFindings` does not cover. A
+  baseline applies later, so it does not change the count. A workspace scope
+  keeps only the entries of packages inside the scope, and a change, diff or
+  file scope drops every entry (`apply_scope` in the engine). The entry
+  changes no finding. A package whose entry publishes no
+  declaration with a finding, for example an `export {}` entry, gets no
+  entry.
 - A Pinia state key read through the `$state` object of a known store is a
   read of that store member: `store.$state.key`, `store.$state['key']` and
   `const { key } = store.$state`. Any other use of a store `$state` value (a

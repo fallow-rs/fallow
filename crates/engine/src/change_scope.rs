@@ -326,6 +326,13 @@ impl ChangeScope {
         })
     }
 
+    /// Whether the scope keeps every finding: no changed-file set and no
+    /// package baselines narrow the run.
+    #[must_use]
+    pub(crate) const fn is_full(&self) -> bool {
+        matches!(self.kind, ChangeScopeKind::Full)
+    }
+
     /// Whether a finding owned by `path` is in scope.
     #[must_use]
     pub fn contains(&self, path: &Path) -> bool {

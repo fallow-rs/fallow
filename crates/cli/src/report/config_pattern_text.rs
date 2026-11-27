@@ -4,8 +4,9 @@
 //! `health.ignore`), the
 //! redundant entries (`entry`, `ignoreDependencies`, `ignorePatterns`), the
 //! `overrides` rules that cannot change a result, the `overrides[].files`
-//! globs that matched no file, and the requested checks that did not run
-//! because their rule is off.
+//! globs that matched no file, the requested checks that did not run
+//! because their rule is off, and the workspace packages that look published
+//! but that `publicPackages` does not list.
 //!
 //! Every output reads the same `workspace_diagnostics[]` entries, and each
 //! format carries them in exactly one place:
@@ -114,7 +115,8 @@ pub fn print_section_stderr_notes(
 /// setting with redundant entries, in the order `entry`,
 /// `ignoreDependencies`, `ignorePatterns`, then one note line per `overrides`
 /// rule that had no effect, then one note line per `overrides[].files` glob
-/// that matched no file, then one note line per requested rule that is off.
+/// that matched no file, then one note line per requested rule that is off,
+/// then one note line for the packages that look published.
 #[must_use]
 pub fn stderr_notes(diagnostics: &[WorkspaceDiagnostic]) -> Vec<String> {
     let patterns_of = |kind: &str| -> Vec<String> {
@@ -226,6 +228,25 @@ pub fn stderr_notes(diagnostics: &[WorkspaceDiagnostic]) -> Vec<String> {
             single_line(flag),
         ))
     });
+    let candidates: Vec<String> = diagnostics
+        .iter()
+        .filter_map(|diagnostic| {
+            let (package, findings) = diagnostic.kind.public_package_candidate()?;
+            let noun = if findings == 1 { "finding" } else { "findings" };
+            Some(format!(
+                "{} ({findings} {noun} on the exports or members of its entry)",
+                single_line(package)
+            ))
+        })
+        .collect();
+    let candidate_note = (!candidates.is_empty()).then(|| {
+        format!(
+            "Note: these workspace packages look published, but publicPackages does not list \
+             them: {}. If a package is published, add it to publicPackages, so fallow treats its \
+             entry exports as public API.",
+            candidates.join(", ")
+        )
+    });
     notes
         .into_iter()
         .filter_map(|(kind, (singular, plural), outcome, hint)| {
@@ -246,6 +267,7 @@ pub fn stderr_notes(diagnostics: &[WorkspaceDiagnostic]) -> Vec<String> {
         .chain(override_notes)
         .chain(override_glob_notes)
         .chain(requested_notes)
+        .chain(candidate_note)
         .collect()
 }
 
@@ -360,7 +382,33 @@ pub fn markdown_section(diagnostics: &[WorkspaceDiagnostic]) -> Option<String> {
             override_globs.join("\n")
         ));
     }
+    sections.extend(candidate_section(diagnostics));
     (!sections.is_empty()).then(|| sections.join("\n"))
+}
+
+/// The Markdown section that lists the workspace packages that look
+/// published, or `None` when there are none.
+fn candidate_section(diagnostics: &[WorkspaceDiagnostic]) -> Option<String> {
+    let candidates: Vec<String> = diagnostics
+        .iter()
+        .filter_map(|diagnostic| {
+            let (package, findings) = diagnostic.kind.public_package_candidate()?;
+            let noun = if findings == 1 { "finding" } else { "findings" };
+            Some(format!(
+                "- {}: {findings} {noun} on the exports or members of its entry",
+                markdown_value(package)
+            ))
+        })
+        .collect();
+    (!candidates.is_empty()).then(|| {
+        format!(
+            "\n## Packages that look published\n\nThese workspace packages are not private and \
+             have an entry field, but `publicPackages` does not list them. If a package is \
+             published, add it to `publicPackages`, so fallow treats its entry exports as public \
+             API.\n\n{}",
+            candidates.join("\n")
+        )
+    })
 }
 
 /// The config entries with no effect of a saved JSON envelope.
@@ -387,6 +435,7 @@ pub fn envelope_diagnostics(envelope: &serde_json::Value) -> Vec<WorkspaceDiagno
                     || diagnostic.kind.ineffective_override().is_some()
                     || diagnostic.kind.unmatched_override_glob().is_some()
                     || diagnostic.kind.requested_rule_off().is_some()
+                    || diagnostic.kind.public_package_candidate().is_some()
             });
         for diagnostic in entries {
             if !diagnostics
@@ -782,5 +831,54 @@ mod tests {
             );
         }
         assert!(envelope_diagnostics(&serde_json::json!({})).is_empty());
+    }
+
+    fn candidate(package: &str, findings: u32) -> WorkspaceDiagnostic {
+        diagnostic(WorkspaceDiagnosticKind::PublicPackageCandidate {
+            package: package.to_owned(),
+            findings,
+        })
+    }
+
+    #[test]
+    fn packages_that_look_published_share_one_note_and_one_section() {
+        let entries = [candidate("@x/sdk", 227), candidate("@x/ui", 1)];
+        let notes = stderr_notes(&entries);
+        assert_eq!(
+            notes,
+            vec![
+                "Note: these workspace packages look published, but publicPackages does not list \
+                 them: @x/sdk (227 findings on the exports or members of its entry), @x/ui (1 \
+                 finding on the exports or members of its entry). If a package is published, add it to publicPackages, so fallow treats \
+                 its entry exports as public API."
+                    .to_owned()
+            ]
+        );
+        let section = markdown_section(&entries).expect("one section");
+        assert!(
+            section.contains(
+                "## Packages that look published\n\nThese workspace packages are not private"
+            ) && section.contains(
+                "- `@x/sdk`: 227 findings on the exports or members of its entry\n- `@x/ui`: 1 \
+                 finding on the exports or members of its entry"
+            ),
+            "{section}"
+        );
+    }
+
+    #[test]
+    fn a_saved_package_candidate_is_read_and_stays_on_its_line() {
+        let entry = candidate(HOSTILE, 3);
+        let envelope = serde_json::json!({ "dead_code": { "workspace_diagnostics": [&entry] } });
+        let read = envelope_diagnostics(&envelope);
+        assert_eq!(read.len(), 1);
+        assert_eq!(read[0].kind, entry.kind);
+        let notes = stderr_notes(&read);
+        assert!(!notes[0].contains(['\n', '\u{1b}']), "{notes:?}");
+        let section = markdown_section(&read).expect("one section");
+        assert!(
+            !section.lines().any(|line| line.starts_with("# injected")),
+            "{section}"
+        );
     }
 }

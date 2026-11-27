@@ -23,17 +23,7 @@ pub use deno_json::{
     load_deno_import_map, load_dir_package_json, load_member_package_manifest,
     load_root_deno_workspace_patterns, probe_dir_manifest,
 };
-#[cfg(test)]
-pub use diagnostics::capture_workspace_warnings;
-pub use diagnostics::{
-    WorkspaceDiagnostic, WorkspaceDiagnosticKind, WorkspaceLoadError, append_workspace_diagnostics,
-    clear_analysis_stage_diagnostics, clear_health_stage_diagnostics,
-    health_stage_workspace_diagnostics, missing_node_modules_diagnostic, node_modules_missing,
-    node_modules_state, record_plugin_config_diagnostics, record_source_parse_degradations,
-    record_source_read_failures, record_workspace_diagnostics, registry_diagnostics_to_fold,
-    replace_source_discovery_diagnostics, stash_workspace_diagnostics, workspace_diagnostics_for,
-};
-use diagnostics::{emit_diagnostics, is_skip_listed_dir};
+pub use diagnostics::*;
 use link_dependencies::collect_link_dependency_workspaces;
 use manifest_cache::{ManifestCache, load_member_package_manifest_cached};
 use missing_pattern_dirs::missing_dir_patterns;

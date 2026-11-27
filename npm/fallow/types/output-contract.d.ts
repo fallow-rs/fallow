@@ -717,6 +717,19 @@ kind: "rule-packs-not-configured"
 } | {
 kind: "client-server-leak-no-client-roots"
 } | {
+kind: "public-package-candidate"
+/**
+ * The `name` of the package manifest.
+ */
+package: string
+/**
+ * The number of findings on the exports or members that the
+ * package entry publishes. A finding counts when its rule is not
+ * `off` for its file and `ignoreFindings` does not cover it. The
+ * count is taken before a baseline.
+ */
+findings: number
+} | {
 kind: "production-excluded-file-imported"
 /**
  * The built-in production pattern that matched, verbatim.
