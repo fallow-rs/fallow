@@ -1,0 +1,12 @@
+{
+  "name": "issue-5385-vite-rolldown-options-input",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "build": "vp build"
+  },
+  "devDependencies": {
+    "vite": "8.0.0",
+    "vite-plus": "0.1.0"
+  }
+}

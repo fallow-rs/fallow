@@ -310,13 +310,8 @@ define_plugin!(
 
         add_root_entry_patterns(&mut result, source, config_path, root);
 
-        let rollup_input = config_parser::extract_config_string_or_array(
-            source,
-            config_path,
-            &["build", "rollupOptions", "input"],
-        );
-        extend_config_relative_input(&mut result, rollup_input, config_path, root);
-        add_environment_rollup_inputs(&mut result, source, config_path, root);
+        add_bundler_inputs(&mut result, source, config_path, root, &[]);
+        add_environment_bundler_inputs(&mut result, source, config_path, root);
 
         let lib_entry = config_parser::extract_config_string_or_array(
             source,
@@ -373,7 +368,7 @@ fn root_relative_input(
     config_parser::normalize_config_path(&value, config_path, root).unwrap_or(value)
 }
 
-/// Register a Vite `rollupOptions.input` value as an entry path, and credit
+/// Register a Vite bundler `input` value as an entry path, and credit
 /// the package that an ambiguous bare value names.
 ///
 /// This applies the rules of `extend_entry_patterns_and_dependencies`, with
@@ -397,23 +392,40 @@ fn extend_config_relative_input(
     }
 }
 
-/// Register the `build.rollupOptions.input` entries of each Vite environment.
+/// The names of the bundler options object inside a Vite `build` block.
+///
+/// Vite 8 bundles with Rolldown and names the object `rolldownOptions`. It
+/// still reads `rollupOptions`, the name of Vite 7 and earlier, as an alias.
+pub(super) const BUNDLER_OPTIONS_KEYS: &[&str] = &["rollupOptions", "rolldownOptions"];
+
+/// Register the bundler `input` entries of the `build` block under `prefix`.
+fn add_bundler_inputs(
+    result: &mut PluginResult,
+    source: &str,
+    config_path: &std::path::Path,
+    root: &std::path::Path,
+    prefix: &[&str],
+) {
+    for options_key in BUNDLER_OPTIONS_KEYS {
+        let mut path = prefix.to_vec();
+        path.extend(["build", options_key, "input"]);
+        let input = config_parser::extract_config_string_or_array(source, config_path, &path);
+        extend_config_relative_input(result, input, config_path, root);
+    }
+}
+
+/// Register the bundler `input` entries of each Vite environment.
 ///
 /// Vite 6 and later read the build options of each environment from
 /// `environments.<name>.build`, in addition to the top-level `build`.
-fn add_environment_rollup_inputs(
+fn add_environment_bundler_inputs(
     result: &mut PluginResult,
     source: &str,
     config_path: &std::path::Path,
     root: &std::path::Path,
 ) {
     for name in config_parser::extract_config_object_keys(source, config_path, &["environments"]) {
-        let input = config_parser::extract_config_string_or_array(
-            source,
-            config_path,
-            &["environments", &name, "build", "rollupOptions", "input"],
-        );
-        extend_config_relative_input(result, input, config_path, root);
+        add_bundler_inputs(result, source, config_path, root, &["environments", &name]);
     }
 }
 
@@ -1742,6 +1754,76 @@ mod tests {
                     .any(|pattern| pattern.ends_with("index.html")),
                 "no root means no extra entry: {patterns:?} for {source}"
             );
+        }
+    }
+
+    /// Vite 8 names the bundler options `rolldownOptions` (issue #5385).
+    #[test]
+    fn resolve_config_reads_rolldown_options_input_in_each_form() {
+        let cases = [
+            (
+                r#"export default { build: { rolldownOptions: { input: "src/single.ts" } } };"#,
+                vec!["src/single.ts"],
+            ),
+            (
+                r#"export default { build: { rolldownOptions: { input: ["index.html", "second.html"] } } };"#,
+                vec!["index.html", "second.html"],
+            ),
+            (
+                r#"
+                import { resolve } from "node:path";
+                import { defineConfig } from "vite";
+                export default defineConfig({
+                    build: {
+                        rolldownOptions: {
+                            input: { app: resolve(__dirname, "src/app.ts"), page: "page.html" },
+                        },
+                    },
+                });
+                "#,
+                vec!["src/app.ts", "page.html"],
+            ),
+            (
+                r#"
+                import { defineConfig } from "vite";
+                export default defineConfig({
+                    environments: {
+                        client: { build: { rolldownOptions: { input: ["client.html"] } } },
+                        sw: { build: { rolldownOptions: { input: "src/sw-main.ts" } } },
+                    },
+                });
+                "#,
+                vec!["client.html", "src/sw-main.ts"],
+            ),
+            (
+                r#"
+                export default {
+                    build: {
+                        rollupOptions: { input: "src/old-name.ts" },
+                        rolldownOptions: { input: "src/new-name.ts" },
+                    },
+                };
+                "#,
+                vec!["src/old-name.ts", "src/new-name.ts"],
+            ),
+        ];
+        for (source, expected) in cases {
+            let result = VitePlugin.resolve_config(
+                Path::new("/project/vite.config.ts"),
+                source,
+                Path::new("/project"),
+            );
+            let patterns: Vec<&str> = result
+                .entry_patterns
+                .iter()
+                .map(|rule| rule.pattern.as_str())
+                .collect();
+            for entry in expected {
+                assert!(
+                    patterns.contains(&entry),
+                    "rolldownOptions.input {entry} should be an entry: {patterns:?} for {source}"
+                );
+            }
         }
     }
 }

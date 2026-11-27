@@ -5,7 +5,8 @@
 //! Without an electron-vite config, every file under `src/main` and
 //! `src/preload` is an entry. With an electron-vite config, the plugin reads the
 //! entries that electron-vite builds: the declared `build.rollupOptions.input`
-//! or `build.lib.entry`, else the electron-vite default `src/<section>/index`.
+//! (`build.rolldownOptions.input` with Vite 8) or `build.lib.entry`, else the
+//! electron-vite default `src/<section>/index`.
 //! A renderer section without an input gets the default `src/renderer/index.html`.
 //!
 //! In a Forge config, the plugin reads the `entry` and `config` paths that the
@@ -58,7 +59,7 @@ const TOOLING_DEPENDENCIES: &[&str] = &[
 ];
 
 /// electron-vite top-level sections. Each is a Vite config with its own
-/// `build.rollupOptions.input`.
+/// bundler `input`.
 const VITE_SECTIONS: &[&str] = &["main", "preload", "renderer"];
 
 /// electron-vite sections that build Node entries. electron-vite gives each a
@@ -72,6 +73,7 @@ const RENDERER_DEFAULT_ENTRY: &str = "src/renderer/index.html";
 /// Property paths inside a section that declare the section entries.
 const SECTION_ENTRY_PATHS: &[&[&str]] = &[
     &["build", "rollupOptions", "input"],
+    &["build", "rolldownOptions", "input"],
     &["build", "lib", "entry"],
 ];
 
@@ -304,12 +306,14 @@ define_plugin! {
 
         let input_sections: &[&str] = if node_sections.is_some() { &["renderer"] } else { VITE_SECTIONS };
         for &section in input_sections {
-            let inputs = config_parser::extract_config_string_or_array(
-                source,
-                config_path,
-                &[section, "build", "rollupOptions", "input"],
-            );
-            push_config_entries(&mut result, inputs, config_path, root);
+            for options_key in super::vite::BUNDLER_OPTIONS_KEYS {
+                let inputs = config_parser::extract_config_string_or_array(
+                    source,
+                    config_path,
+                    &[section, "build", options_key, "input"],
+                );
+                push_config_entries(&mut result, inputs, config_path, root);
+            }
         }
         if classify_renderer_section(source, config_path) == Some(SectionEntries::Default) {
             push_config_entries(
@@ -768,5 +772,48 @@ mod tests {
         let source = "export default makeConfig();";
         let result = ElectronPlugin.resolve_config(&config_path(), source, Path::new("/project"));
         assert!(result.entry_patterns.is_empty());
+    }
+
+    /// Vite 8 names the bundler options `rolldownOptions` (issue #5385).
+    #[test]
+    fn resolve_config_reads_rolldown_options_input_of_each_section() {
+        let source = r#"
+            import { resolve } from "node:path";
+            export default {
+                main: { build: { rolldownOptions: { input: "electron/main.ts" } } },
+                preload: { build: { rolldownOptions: { input: ["electron/bridge.ts"] } } },
+                renderer: {
+                    build: {
+                        rolldownOptions: {
+                            input: { index: resolve(__dirname, "ui/index.html") },
+                        },
+                    },
+                },
+            };
+        "#;
+        let result = ElectronPlugin.resolve_config(&config_path(), source, Path::new("/project"));
+        let mut entries = entry_strings(&result);
+        entries.sort();
+        assert_eq!(
+            entries,
+            ["electron/bridge.ts", "electron/main.ts", "ui/index.html"],
+            "each section should have its declared input and no default entry"
+        );
+        assert!(result.replace_entry_patterns);
+    }
+
+    #[test]
+    fn resolve_config_rolldown_options_without_input_keeps_the_default_entry() {
+        let source = r#"
+            export default {
+                main: { build: { rolldownOptions: { output: { format: "es" } } } },
+            };
+        "#;
+        let result = ElectronPlugin.resolve_config(&config_path(), source, Path::new("/project"));
+        assert_eq!(
+            entry_strings(&result),
+            ["src/main/{index,main}.{js,ts,mjs,cjs}"],
+            "a section without an input should keep the electron-vite default entry"
+        );
     }
 }

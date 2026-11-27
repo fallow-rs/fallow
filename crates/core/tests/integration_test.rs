@@ -573,6 +573,8 @@ mod issue_4771_vite_alias_interface_members;
 mod issue_4942_svelte_markup_dispatch;
 #[path = "integration_test/issue_5233_exported_singleton_instance.rs"]
 mod issue_5233_exported_singleton_instance;
+#[path = "integration_test/issue_5385_vite_rolldown_options_input.rs"]
+mod issue_5385_vite_rolldown_options_input;
 #[path = "integration_test/issue_604_vite_rollup_path_helpers.rs"]
 mod issue_604_vite_rollup_path_helpers;
 #[path = "integration_test/issue_605_new_class_member.rs"]

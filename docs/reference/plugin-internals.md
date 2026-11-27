@@ -384,6 +384,10 @@ with the same first segment. Vite `build.lib.entry` stays a path only, because
 vite resolves it against its root with `path.resolve`. Webpack keeps the module
 request reading, because webpack resolves an entry without `./` as a module.
 
+Vite 8 names the bundler options object `build.rolldownOptions` and keeps
+`rollupOptions` as an alias. The Vite and Electron plugins read `input` under
+both names, also in `environments.<name>.build`.
+
 A bundler resolves an entry path without a source extension the way it resolves
 an import: as a file with each extension, then as a directory through its index
 file. A webpack, rspack or rsbuild entry such as `./lib` therefore also yields
