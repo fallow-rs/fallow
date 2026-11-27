@@ -58,6 +58,10 @@ fn second_parse(
     )
 }
 
+// Only Unix reports a ctime. Without it no fingerprint is trusted without
+// the content, so a hit on other platforms always compares the content hash.
+// The next test covers a fingerprint without a ctime on every platform.
+#[cfg(unix)]
 #[test]
 fn a_hit_on_a_trusted_fingerprint_is_a_metadata_hit() {
     let second = second_parse(SourceFingerprint::from_metadata, NO_FACTS);
