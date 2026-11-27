@@ -17,6 +17,9 @@ const MEMO = "reuse/memo.test.ts::doubles";
 const EXIT = "reuse/exit.test.ts::stays";
 const REGISTRY_A = "registry/a.test.ts::registers once";
 const REGISTRY_B = "registry/b.test.ts::adds";
+const NOHIT_FIRST = "nohit/first.test.ts::adds";
+const NOHIT_SECOND = "nohit/second.test.ts::adds";
+const NOHIT_PLAIN = "nohit/plain.test.ts::runs no source code";
 
 const startProject = async (packageName, configPath, env = {}, options = {}) => {
   const fixture = createFixtureProject({ packageName, ...options });
@@ -54,13 +57,21 @@ for (const { packageName, version } of VITEST_MAJORS) {
     let storeLeak;
     let reuse;
     let registry;
+    let noHit;
     let pidDir;
     let pidLog;
+    let plainLog;
 
     before(async () => {
       pidDir = mkdtempSync(join(tmpdir(), "fallow-mutation-pids-"));
       pidLog = join(pidDir, "pids.log");
       writeFileSync(pidLog, "");
+      plainLog = join(pidDir, "plain.log");
+      writeFileSync(plainLog, "");
+      noHit = await startProject(packageName, "vitest.nohit.config.mjs", {
+        FALLOW_PID_LOG: pidLog,
+        FALLOW_PLAIN_LOG: plainLog,
+      });
       shared = await startProject(packageName, "vitest.shared.config.mjs", {
         FALLOW_PID_LOG: pidLog,
       });
@@ -83,7 +94,7 @@ for (const { packageName, version } of VITEST_MAJORS) {
     });
 
     after(() => {
-      for (const project of [shared, leak, storeLeak, reuse, registry]) {
+      for (const project of [shared, leak, storeLeak, reuse, registry, noHit]) {
         project?.companion.stop();
         project?.fixture.cleanup();
       }
@@ -113,6 +124,24 @@ for (const { packageName, version } of VITEST_MAJORS) {
       await shared.run("m9", [FIRST, SECOND]);
       const pids = new Set(readFileSync(pidLog, "utf8").trim().split("\n"));
       assert.equal(pids.size, 2, "the control run does not use the reused process");
+    });
+
+    test("the shared-worker check runs only the test files with a hit", async () => {
+      const runs = readFileSync(plainLog, "utf8").trim().split("\n");
+      assert.equal(runs.length, 1, "a file with no hit runs only in the dry run itself");
+      writeFileSync(pidLog, "");
+      const result = await noHit.run("m1", [NOHIT_FIRST, NOHIT_SECOND]);
+      assert.equal(result.status, "survived", JSON.stringify(result));
+      const pids = new Set(readFileSync(pidLog, "utf8").trim().split("\n"));
+      assert.equal(pids.size, 1, `one worker for both files, got ${[...pids].join(", ")}`);
+    });
+
+    test("a run with a file outside the shared-worker check gets a worker for each file", async () => {
+      writeFileSync(pidLog, "");
+      const result = await noHit.run("m1", [NOHIT_FIRST, NOHIT_PLAIN]);
+      assert.equal(result.status, "survived", JSON.stringify(result));
+      const pids = new Set(readFileSync(pidLog, "utf8").trim().split("\n"));
+      assert.equal(pids.size, 2, `one worker for each file, got ${[...pids].join(", ")}`);
     });
 
     test("a project whose tests differ in a shared worker keeps isolated runs", async () => {

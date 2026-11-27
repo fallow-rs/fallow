@@ -617,6 +617,22 @@ const DETECTED = new Set(["killed", "timeout"]);
 // (2 minutes by default) for the first dry run of a companion.
 const SHARED_CHECK_MAX_DRY_RUN_MS = 45_000;
 
+/**
+ * The test files that a later run can select: the files with a test that
+ * hits a mutant. A mutant run and a control run select only covering tests,
+ * so a file with no hit never runs again. A static hit covers each test of
+ * each file that loads the module, so then each file counts (`null`). The
+ * shared-worker check runs only these files.
+ */
+const mutableFiles = (summary) => {
+  if (summary.staticHits.size > 0) return null;
+  return new Set(
+    summary.tests
+      .filter((test) => (summary.hits[test.test_id]?.length ?? 0) > 0)
+      .map((test) => test.file),
+  );
+};
+
 /** The start time of a test module in its worker, or infinity when unknown. */
 const startTime = (testModule) => testModule.task?.result?.startTime ?? Number.POSITIVE_INFINITY;
 
@@ -915,6 +931,9 @@ export const createAdapter = async (init) => {
   // Mutant runs keep one worker process only after a dry run proves that the
   // tests give the same results in a reused process, also on a second load.
   let reusedRuns = false;
+  // The test modules that the shared-worker check ran. A run that selects a
+  // module outside this set keeps a worker for each file.
+  let checkedModules = new Set();
   const reuse = createReuseControl(vitest.projects, workers);
   const runSpecifications = async (
     specifications,
@@ -1044,15 +1063,7 @@ export const createAdapter = async (init) => {
     const started = performance.now();
     const specifications = selected.map(([, specification]) => specification);
     const result = await runSpecifications(specifications, { mutantId: null, bail: false });
-    const checked =
-      freshModulesPerRun &&
-      specifications.length > 1 &&
-      performance.now() - started <= SHARED_CHECK_MAX_DRY_RUN_MS;
-    const modes = checked
-      ? await workerModes(specifications, result)
-      : { shared: false, reused: false };
-    sharedRuns = modes.shared;
-    reusedRuns = modes.reused;
+    const isolatedMs = performance.now() - started;
     const fileByModule = new Map(
       selected.map(([file, spec]) => [moduleKey(spec.project, spec.moduleId), file]),
     );
@@ -1067,6 +1078,31 @@ export const createAdapter = async (init) => {
       const file = fileByModule.get(moduleKey(testModule.project, testModule.moduleId));
       recordDryRunModule(testModule, file, summary);
     }
+    const mutable = mutableFiles(summary);
+    const checkedSpecs = selected
+      .filter(([file]) => mutable === null || mutable.has(file))
+      .map(([, specification]) => specification);
+    const checked =
+      freshModulesPerRun &&
+      specifications.length > 1 &&
+      checkedSpecs.length > 0 &&
+      isolatedMs <= SHARED_CHECK_MAX_DRY_RUN_MS;
+    const isolated = {
+      testModules: result.testModules.filter((testModule) =>
+        checkedSpecs.some(
+          (spec) =>
+            moduleKey(spec.project, spec.moduleId) ===
+            moduleKey(testModule.project, testModule.moduleId),
+        ),
+      ),
+      unhandledErrors: result.unhandledErrors,
+    };
+    const modes = checked
+      ? await workerModes(checkedSpecs, isolated)
+      : { shared: false, reused: false };
+    sharedRuns = modes.shared;
+    reusedRuns = modes.reused;
+    checkedModules = new Set(checkedSpecs.map((spec) => moduleKey(spec.project, spec.moduleId)));
     return dryRunResult({
       started,
       summary,
@@ -1198,14 +1234,20 @@ export const createAdapter = async (init) => {
   const run = async (request) => {
     validateRun(request);
     const requested = [...new Set(request.test_ids)];
-    const outcome = await runRequested(request, requested, sharedRuns);
+    const shared =
+      sharedRuns &&
+      requested.every((testId) => {
+        const entry = testIndex.get(testId);
+        return entry !== undefined && checkedModules.has(moduleKey(entry.project, entry.moduleId));
+      });
+    const outcome = await runRequested(request, requested, shared);
     // A reused worker whose tests added a global or changed the environment
     // gets a new process, so that the next mutant starts clean.
     const polluted = outcome.result.testModules.some((testModule) =>
       [...testModule.children.allTests()].some((testCase) => testCase.meta().fallowPolluted),
     );
     if (polluted) await reuse.recycle();
-    if (!sharedRuns || !DETECTED.has(outcome.body.status)) return outcome.body;
+    if (!shared || !DETECTED.has(outcome.body.status)) return outcome.body;
     // A kill with no failing test (an error outside each test) can come from
     // a timer or a promise of an earlier run of a reused process.
     if (reusedRuns && outcome.firstFailure === undefined) {

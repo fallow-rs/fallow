@@ -1133,7 +1133,9 @@ exception (see [Timeouts](#timeouts)).
   estimated test time first. The estimate is the sum of the dry-run times of
   the tests that cover the mutant. Thus the budget settles more mutants.
   Static mutants stay last. Without `--time-budget`, the jobs keep the plan
-  order.
+  order. A worker whose companion dry-ran a share of the test files first
+  takes the jobs of that share (see Baseline failures), so with more than
+  one worker the start order follows this order only inside each share.
 - With `--time-budget`, the first pass keeps time free for the retries of
   the survivors and timeouts that it found. Before each new mutant run, it
   adds these parts to the current time: the estimated retry time of each
@@ -1287,16 +1289,33 @@ mutant. Their results decide no mutant status.
   baseline mismatches suggest `--concurrency 1` or `mutation.concurrency: 1`.
   Shared state is a possible cause; the report keeps the original error.
   Serial phases and the first companion's setup do not receive this hint.
+- The first dry run divides the test files over up to `--concurrency`
+  companions. The files go to the companions in turn, and each companion
+  dry-runs its share at the same time as the others. Each companion keeps
+  its share for the mutant runs. A worker first takes a job whose test files
+  are all in the share of its companion. Then it takes a job that no share of
+  another worker holds. It takes a job of another share only when that share
+  holds more than one queued job, and it takes that job from the end of the
+  queue. With `--concurrency 1`, one companion dry-runs each file.
+- A fault of any companion in the first dry run stops the run, the same as a
+  fault of the first companion.
+- Companions that dry-run at the same time can fail on shared outside state,
+  for example a port or a fixed file. After each share ended, a new
+  companion dry-runs each test file with a failed test or an error again,
+  and its result counts. An error outside each test file runs each file
+  again. Only a failure that stays is a baseline failure.
 - A static mutant needs a new companion before and after its run when the
   runner keeps modules loaded between runs (Vitest with `isolate: false`).
   After a reload of the worker gave `restart_required`, the companion that
   starts for such a mutant dry-runs only the test files of its covering
-  tests. Each other companion dry-runs each test file of the run. A kept
-  companion with a narrow dry run restarts when a later job needs a test file
-  outside it.
+  tests. Each other new companion of the mutant phase dry-runs the test
+  files of the covering tests of all jobs. A kept companion with a narrow dry
+  run restarts when a later job needs a test file outside it.
 - The dry run of a restarted companion shares the host with the other
   workers. Its timeout is the first dry-run time times 2 times the worker
-  count, and at least `--setup-timeout` (2 minutes by default). On a slow
+  count, and at least `--setup-timeout` (2 minutes by default). When the
+  first dry run has more than one companion, the first dry-run time is the
+  sum of the dry-run times of the companions. On a slow
   or loaded host, a fixed timeout made each mutant of a restarted companion a
   `runtime_error`. The time budget does not stop a dry run in progress, so a
   companion that hangs in its dry run can extend the run past the budget.
@@ -1605,9 +1624,13 @@ control runs with `isolate: false`.
 - When any project has `isolate: false`, or the dry run has one test
   specification, the companion does not share workers. A project in browser
   mode keeps its own setting.
-- The check repeats the dry run, and `duration_ms` of the dry run includes
-  both runs. The check is skipped when the isolated dry run takes more than
-  45 seconds. A failed shared run keeps isolated runs.
+- The check repeats the test files of the dry run that a later run can
+  select, and `duration_ms` of the dry run includes both runs. A later run
+  selects only covering tests, so the check leaves out each file with no
+  test that hits a mutant. When a test of the dry run hits a module-level
+  mutant, the check repeats each file. The check is skipped when the
+  isolated dry run takes more than 45 seconds. A failed shared run keeps
+  isolated runs.
 
 ### Vitest reused workers
 

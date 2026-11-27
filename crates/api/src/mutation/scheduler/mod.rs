@@ -28,12 +28,14 @@ mod classification;
 pub mod clock;
 pub(super) mod control;
 mod dry_facts;
+mod dry_phase;
 mod issues;
 mod retry_set;
 pub mod targets;
 mod window;
 use classification::{attempt_record, classify, is_load_kill, kill_kind, matrix_evidence};
 use dry_facts::{DryRunFacts, covering_tests, read_dry_run, record_dry_run, reported_duplicates};
+use dry_phase::{DryPhase, WarmLink, checked_jobs, dry_phase, holds, shutdown_all};
 use issues::{no_covering_test_message, static_map_miss_issue, undiscovered_issue};
 use targets::{
     TargetFiles, check_targets, config_targets, confirmed_kill, job_targets, retries_unique_kill,
@@ -523,17 +525,21 @@ impl<'a> Worker<'a> {
         self.loaded_files = None;
     }
 
-    /// Gives a companion whose dry run covers `scope`, or each file of the
-    /// phase for `None`. A companion with a narrower dry run is replaced:
-    /// the protocol has no second dry run.
+    /// True when the companion of this worker dry-ran each of `files`.
+    fn holds(&self, files: &[String]) -> bool {
+        self.link.is_some() && holds(self.loaded_files.as_deref(), files)
+    }
+
+    /// Gives a companion whose dry run covers the sorted `need` files. A new
+    /// companion dry-runs `scope`, or each file of the phase for `None`. A
+    /// companion with a narrower dry run is replaced: the protocol has no
+    /// second dry run.
     fn ensure(
         &mut self,
         scope: Option<&[String]>,
+        need: &[String],
     ) -> Result<&mut Box<dyn CompanionLink>, EnsureError> {
-        if let Some(loaded) = &self.loaded_files
-            && self.link.is_some()
-            && scope.is_none_or(|scope| scope.iter().any(|file| !loaded.contains(file)))
-        {
+        if self.link.is_some() && !self.holds(need) {
             self.reset();
         }
         if self.link.is_none() {
@@ -608,6 +614,16 @@ impl<'a> Worker<'a> {
             .ok_or_else(|| EnsureError::Fault("the companion is gone".to_owned(), None))
     }
 
+    /// [`Self::ensure`] for the test files of `job`.
+    fn ensure_for(
+        &mut self,
+        job: &Job,
+        caps: Capabilities,
+    ) -> Result<&mut Box<dyn CompanionLink>, EnsureError> {
+        let scope = job.dry_scope(caps, self.restarts_on_reload);
+        self.ensure(scope, &job.test_files)
+    }
+
     /// Runs `job` one time. `Err` stops the run. A job with target tests
     /// runs in two phases, see [`Self::attempt_targets`].
     fn attempt(&mut self, job: &Job, caps: Capabilities) -> Result<Attempt, ScheduleError> {
@@ -629,7 +645,7 @@ impl<'a> Worker<'a> {
         if needs_reload && self.link.is_some() {
             self.reload();
         }
-        match self.ensure(job.dry_scope(caps, self.restarts_on_reload)) {
+        match self.ensure_for(job, caps) {
             Ok(_) => {}
             Err(EnsureError::Fatal(error)) => return Err(error),
             Err(EnsureError::Fault(message, tail)) => {
@@ -924,7 +940,7 @@ impl<'a> Worker<'a> {
             self.reload();
         }
         // The control tests are a subset of the tests of `job`.
-        match self.ensure(job.dry_scope(caps, self.restarts_on_reload)) {
+        match self.ensure_for(job, caps) {
             Ok(_) => {}
             Err(EnsureError::Fatal(error)) => return Err(error),
             Err(EnsureError::Fault(message, _)) => {
@@ -1235,6 +1251,9 @@ fn build_jobs(
 struct Phase<'a> {
     workers: usize,
     jobs: Mutex<VecDeque<Job>>,
+    /// The test files of the companion of each worker, while it holds a
+    /// share of the dry run. `None` for each other worker.
+    held: Mutex<Vec<Option<Vec<String>>>>,
     attempts: Mutex<Vec<(Job, Attempt)>>,
     fatal: Mutex<Option<ScheduleError>>,
     stop: AtomicBool,
@@ -1267,7 +1286,58 @@ impl Phase<'_> {
         }
     }
 
-    fn work(&self, primary: Option<Box<dyn CompanionLink>>, known: FxHashSet<String>) {
+    /// The next job of the worker in `slot`, in this order:
+    ///
+    /// 1. the first queued job whose test files its companion dry-ran;
+    /// 2. the first queued job that the share of no other worker holds;
+    /// 3. from the back of the queue, a job of another share that holds more
+    ///    than one queued job.
+    ///
+    /// A job for another companion needs a new companion and a new dry run,
+    /// so the worker leaves the last queued job of a share to its holder.
+    fn next_job(&self, slot: usize, worker: &Worker<'_>) -> Option<Job> {
+        let mut jobs = self.jobs.lock().ok()?;
+        let others: Vec<Vec<String>> = {
+            let mut held = self.held.lock().ok()?;
+            held[slot] = worker
+                .loaded_files
+                .clone()
+                .filter(|_| worker.link.is_some());
+            held.iter()
+                .enumerate()
+                .filter(|(index, _)| *index != slot)
+                .filter_map(|(_, loaded)| loaded.clone())
+                .collect()
+        };
+        if let Some(index) = jobs.iter().position(|job| worker.holds(&job.test_files)) {
+            return jobs.remove(index);
+        }
+        let holder = |job: &Job| {
+            others
+                .iter()
+                .position(|loaded| holds(Some(loaded), &job.test_files))
+        };
+        if let Some(index) = jobs.iter().position(|job| holder(job).is_none()) {
+            return jobs.remove(index);
+        }
+        let mut queued = vec![0_usize; others.len()];
+        for share in jobs.iter().filter_map(holder) {
+            queued[share] += 1;
+        }
+        let index = jobs
+            .iter()
+            .rposition(|job| holder(job).is_some_and(|share| queued[share] > 1))?;
+        jobs.remove(index)
+    }
+
+    /// Ends the claim of the worker in `slot` on the jobs of its share.
+    fn release(&self, slot: usize) {
+        if let Ok(mut held) = self.held.lock() {
+            held[slot] = None;
+        }
+    }
+
+    fn work(&self, slot: usize, primary: Option<WarmLink>) {
         let mut worker = Worker::new(
             self.spawner,
             self.config,
@@ -1276,15 +1346,16 @@ impl Phase<'_> {
             self.memo,
         );
         worker.workers = self.workers;
-        if let Some(link) = primary {
-            worker.link = Some(link);
-            worker.known_tests = known;
+        if let Some(warm) = primary {
+            worker.link = Some(warm.link);
+            worker.known_tests = warm.known;
+            worker.loaded_files = warm.loaded;
         }
         loop {
             if self.stop.load(Ordering::SeqCst) {
                 break;
             }
-            let Some(job) = self.jobs.lock().ok().and_then(|mut jobs| jobs.pop_front()) else {
+            let Some(job) = self.next_job(slot, &worker) else {
                 break;
             };
             if self.deadline.as_ref().is_some_and(PhaseDeadline::passed) {
@@ -1304,6 +1375,7 @@ impl Phase<'_> {
                 }
             }
         }
+        self.release(slot);
         worker.reset();
     }
 }
@@ -1314,7 +1386,8 @@ struct PhaseRunner<'a> {
     spawner: &'a dyn CompanionSpawner,
     config: &'a ScheduleConfig,
     caps: Capabilities,
-    /// The wall time of the first dry run.
+    /// The time of one dry run of each file: the sum of the dry-run times
+    /// of the shares.
     first_dry_run: Duration,
     /// The control results of the run.
     memo: &'a ControlMemo,
@@ -1322,11 +1395,9 @@ struct PhaseRunner<'a> {
     progress: MutationProgressSink<'a>,
 }
 
-/// A companion that already did its dry run, and the tests that passed in it.
-type WarmLink = (Box<dyn CompanionLink>, FxHashSet<String>);
-
-/// Runs `jobs` on up to `concurrency` workers. The first worker takes
-/// `primary`, a companion that already did its dry run. `event` makes the
+/// Runs `jobs` on up to `concurrency` workers. Each worker takes one of
+/// `primaries`, the companions that already did their dry run, and prefers
+/// the jobs whose test files its companion dry-ran. `event` makes the
 /// progress event of the phase from the finished and the total jobs.
 /// `finished` receives each finished job on its worker thread.
 fn run_phase(
@@ -1334,16 +1405,22 @@ fn run_phase(
     dry_files: &[String],
     jobs: Vec<Job>,
     deadline: Option<PhaseDeadline>,
-    (primary, finished): (Option<WarmLink>, Finished<'_>),
+    (primaries, finished): (Vec<WarmLink>, Finished<'_>),
     event: fn(usize, usize) -> MutationProgress,
 ) -> Result<(Vec<(Job, Attempt)>, usize), ScheduleError> {
     let workers = runner.config.concurrency.max(1).min(jobs.len().max(1));
     let total = jobs.len();
+    let mut primaries = primaries;
+    shutdown_all(primaries.split_off(workers.min(primaries.len())));
+    let mut held: Vec<Option<Vec<String>>> =
+        primaries.iter().map(|warm| warm.loaded.clone()).collect();
+    held.resize(workers, None);
     let report = |done: usize| (runner.progress)(event(done, total));
     report(0);
     let phase = Phase {
         workers,
         jobs: Mutex::new(jobs.into()),
+        held: Mutex::new(held),
         attempts: Mutex::new(Vec::new()),
         fatal: Mutex::new(None),
         stop: AtomicBool::new(false),
@@ -1361,21 +1438,14 @@ fn run_phase(
         report: &report,
         finished,
     };
-    let mut primary = primary;
+    let mut primaries = primaries.into_iter();
     std::thread::scope(|scope| {
-        for _ in 0..workers {
-            let (link, known) = primary
-                .take()
-                .map_or((None, FxHashSet::default()), |(link, known)| {
-                    (Some(link), known)
-                });
+        for slot in 0..workers {
+            let warm = primaries.next();
             let phase = &phase;
-            scope.spawn(move || phase.work(link, known));
+            scope.spawn(move || phase.work(slot, warm));
         }
     });
-    if let Some((mut link, _)) = primary {
-        link.shutdown();
-    }
     if let Some(error) = phase.fatal.into_inner().ok().flatten() {
         return Err(error);
     }
@@ -1502,6 +1572,27 @@ fn start_primary(
     plan: &SchedulePlan,
     config: &ScheduleConfig,
 ) -> Result<Primary, ScheduleError> {
+    let (link, ready) = start_link(spawner, config)?;
+    let runner_files: FxHashSet<&String> = ready.test_files.iter().collect();
+    let (dry_files, undiscovered) = plan
+        .test_files
+        .iter()
+        .cloned()
+        .partition(|file| runner_files.contains(file));
+    Ok(Primary {
+        link,
+        ready,
+        dry_files,
+        undiscovered,
+    })
+}
+
+/// Starts a companion for the dry run, sends `init`, and checks the runner
+/// version.
+fn start_link(
+    spawner: &dyn CompanionSpawner,
+    config: &ScheduleConfig,
+) -> Result<(Box<dyn CompanionLink>, Ready), ScheduleError> {
     let mut link = spawner.spawn().map_err(|failure| match failure {
         SpawnFailure::Integrity(message) => ScheduleError::Integrity(message),
         SpawnFailure::Fault(fault) => setup_error("start", &fault),
@@ -1518,18 +1609,7 @@ fn start_primary(
         link.shutdown();
         return Err(version_error(&config.runner, &ready.runner_version));
     }
-    let runner_files: FxHashSet<&String> = ready.test_files.iter().collect();
-    let (dry_files, undiscovered) = plan
-        .test_files
-        .iter()
-        .cloned()
-        .partition(|file| runner_files.contains(file));
-    Ok(Primary {
-        link,
-        ready,
-        dry_files,
-        undiscovered,
-    })
+    Ok((link, ready))
 }
 
 /// Gives `no_coverage` to each pending mutant that has no passing dry-run
@@ -1625,7 +1705,7 @@ fn retry_suspects(
         &retry_files,
         suspects,
         PhaseDeadline::retries(runner.config),
-        (None, &finished),
+        (Vec::new(), &finished),
         |done, total| MutationProgress::Retries { done, total },
     )?;
     note_control_failures(outcome, facts, runner.memo);
@@ -1676,175 +1756,31 @@ fn retry_suspects(
     Ok(())
 }
 
-/// Sends the dry run on the first companion. A failure shuts it down.
-fn first_dry_run(
-    link: &mut Box<dyn CompanionLink>,
-    dry_files: &[String],
-    config: &ScheduleConfig,
-) -> Result<DryRunResult, ScheduleError> {
-    let request = Request::DryRun {
-        test_files: dry_files.to_vec(),
-    };
-    let Response::DryRun(dry) = setup_request(link, &request, config.runner_timeout)? else {
-        link.shutdown();
-        return Err(setup_error(
-            "dry_run",
-            &LinkFault::Protocol("no dry_run_result".to_owned()),
-        ));
-    };
-    Ok(dry)
-}
+/// The dry-run test ids that the `--kill-matrix-for` targets select. `None`
+/// outside target mode.
+type TargetIds = Option<FxHashSet<String>>;
 
-/// Makes each test of `failed` a baseline failure that covers no mutant, the
-/// same as a test that fails in the dry run.
-fn drop_failed_tests(facts: &mut DryRunFacts, failed: &[FailedTest]) {
-    for test in failed {
-        let file = facts.passing.remove(&test.test_id).map(|(file, _)| file);
-        for tests in facts.covering.values_mut() {
-            tests.remove(&test.test_id);
-        }
-        facts.baseline.push(BaselineFailure {
-            file,
-            test_id: Some(test.test_id.clone()),
-            message: Some(test.message(CONTROL_RUN_FAILURE)),
-            mutant_ids: Vec::new(),
-        });
-    }
-    facts.covering.retain(|_, tests| !tests.is_empty());
-    facts.baseline.sort();
-}
-
-/// The issue tracker that the self-check error names.
-const ISSUE_TRACKER: &str = "https://github.com/fallow-rs/fallow/issues";
-
-/// The self-check of the run path. Before the first mutant job, the tests of
-/// the first job run with no active mutant, through the same request as a
-/// mutant run. The dry run selects whole test files, so it does not use this
-/// path. When a runner change breaks the path, each mutant run fails with an
-/// error and no executed test, and each mutant looks killed.
-///
-/// A control run that executes no test, or that gives a result with no
-/// failed test that is still not a pass, stops the run. A test that ran and
-/// failed is a fact about the tests, for example a test that depends on
-/// another test of its file. The check gives these tests back, and the run
-/// continues without them. The check needs no run when no job exists (no
-/// covered mutant, or each result comes from the cache) or when the time
-/// budget already ended.
-fn self_check(
-    runner: PhaseRunner<'_>,
-    dry_files: &[String],
-    ready: &Ready,
-    jobs: &[Job],
-    link: Box<dyn CompanionLink>,
-    known: &FxHashSet<String>,
-) -> Result<(Box<dyn CompanionLink>, Vec<FailedTest>), ScheduleError> {
-    let expired = reserve::expired(runner.config);
-    let Some(job) = jobs.first().filter(|_| !expired) else {
-        return Ok((link, Vec::new()));
-    };
-    let mut worker = Worker::new(
-        runner.spawner,
-        runner.config,
-        dry_files,
-        runner.config.runner_timeout,
-        runner.memo,
-    );
-    worker.link = Some(link);
-    worker.known_tests.clone_from(known);
-    let outcome = worker
-        .control_run(&job.tests, job, runner.caps)
-        .map(|(outcome, _)| outcome);
-    let runner_name = format!("{} {}", runner.config.runner.package, ready.runner_version);
-    let report =
-        format!("report this at {ISSUE_TRACKER} with the runner name and version ({runner_name})");
-    let stopped = ScheduleError::RunPath {
-        message: format!("the companion of {runner_name} stopped after the self-check"),
-        help: report.clone(),
-    };
-    let error = match outcome {
-        Err(error) => error,
-        Ok(ControlOutcome::Passed) => {
-            runner.memo.store(&job.tests, ControlVerdict::Passed);
-            if let Some(passed) = worker.link.take() {
-                return Ok((passed, Vec::new()));
-            }
-            stopped
-        }
-        Ok(ControlOutcome::Failed(fault)) if !fault.failed_tests.is_empty() => {
-            runner.memo.store(&job.tests, ControlVerdict::Failed);
-            if let Some(kept) = worker.link.take() {
-                return Ok((kept, fault.failed_tests));
-            }
-            stopped
-        }
-        Ok(ControlOutcome::Failed(fault)) if fault.no_tests => ScheduleError::RunPath {
-            message: format!(
-                "{runner_name} executes no tests in a mutant run: a control run of the tests of a covered mutant, with no active mutant, gave {}; each mutant would look killed",
-                fault.detail
-            ),
-            help: report,
-        },
-        Ok(ControlOutcome::Failed(fault)) => ScheduleError::RunPath {
-            message: format!(
-                "{runner_name} gives no trustworthy result in a mutant run: a control run of the tests of a covered mutant, with no active mutant, gave {}, but no test failed",
-                fault.detail
-            ),
-            help: report,
-        },
-        Ok(ControlOutcome::TimedOut(detail)) => ScheduleError::RunPath {
-            message: format!(
-                "the self-check of {runner_name} timed out: a control run of the tests of a covered mutant, with no active mutant, did not finish ({detail})"
-            ),
-            help: self_check_help(runner.config.runner_timeout, job.timeout_ms),
-        },
-        Ok(ControlOutcome::Fault(message)) => ScheduleError::RunPath {
-            message: format!(
-                "the self-check of {runner_name} failed: a control run with no active mutant gave no result: {message}"
-            ),
-            help: report,
-        },
-    };
-    worker.reset();
-    Err(error)
-}
-
-/// Builds the jobs and runs the self-check on the first job. A test that
-/// fails in the self-check is a baseline failure, the same as a test that
-/// fails in the dry run: it covers no mutant, so the jobs are built again
-/// without it. Gives the jobs, the first companion and its passing tests.
-fn checked_jobs(
-    runner: PhaseRunner<'_>,
+/// The dry-run facts and the `--kill-matrix-for` test ids of the dry run,
+/// and the companions of the dry run. A failure shuts down each companion.
+fn read_dry_phase(
     plan: &SchedulePlan,
-    facts: &mut DryRunFacts,
-    context: &JobContext<'_>,
-    link: Box<dyn CompanionLink>,
+    config: &ScheduleConfig,
+    (caps, files): (Capabilities, TargetFiles<'_>),
+    dry: &DryRunResult,
     outcome: &mut ScheduleOutcome,
-) -> Result<(Vec<Job>, WarmLink), ScheduleError> {
-    let mut first_jobs = ScheduleOutcome::empty();
-    let jobs = build_jobs(plan, facts, context, &mut first_jobs);
-    let known: FxHashSet<String> = facts.passing.keys().cloned().collect();
-    let (link, failed) = self_check(
-        runner,
-        context.dry_files,
-        context.ready,
-        &jobs,
-        link,
-        &known,
-    )?;
-    let (jobs, known) = if failed.is_empty() {
-        outcome.results.extend(first_jobs.results);
-        outcome.cache_keys.extend(first_jobs.cache_keys);
-        outcome.issues.extend(first_jobs.issues);
-        outcome.promoted = first_jobs.promoted;
-        (jobs, known)
-    } else {
-        drop_failed_tests(facts, &failed);
-        let jobs = build_jobs(plan, facts, context, outcome);
-        (jobs, facts.passing.keys().cloned().collect())
-    };
-    outcome.baseline_failures.clone_from(&facts.baseline);
-    mark_unreached_pending(plan, facts, context.dry_files, outcome);
-    Ok((jobs, (link, known)))
+    links: Vec<WarmLink>,
+) -> Result<(DryRunFacts, TargetIds, Vec<WarmLink>), ScheduleError> {
+    let read = read_dry_run(plan, caps, dry).and_then(|facts| {
+        record_dry_run(outcome, dry);
+        config_targets(config, dry, caps, files, outcome).map(|ids| (facts, ids))
+    });
+    match read {
+        Ok((facts, ids)) => Ok((facts, ids, links)),
+        Err(error) => {
+            shutdown_all(links);
+            Err(error)
+        }
+    }
 }
 
 /// [`run_schedule_with_progress`] with no progress events.
@@ -1925,19 +1861,21 @@ pub fn run_schedule_with_progress(
         test_files: dry_files.len(),
     });
     let dry_started = config.clock.now();
-    let dry = first_dry_run(&mut link, &dry_files, config)?;
+    let DryPhase {
+        result: dry,
+        links,
+        serial,
+    } = dry_phase(spawner, link, &dry_files, config)?;
     outcome.timings.dry_run = config.clock.now().saturating_duration_since(dry_started);
-    runner.first_dry_run = outcome.timings.dry_run;
-    let mut facts = match read_dry_run(plan, runner.caps, &dry) {
-        Ok(facts) => facts,
-        Err(error) => {
-            link.shutdown();
-            return Err(error);
-        }
-    };
-    record_dry_run(&mut outcome, &dry);
-    let target_ids = config_targets(config, &dry, runner.caps, files, &mut outcome)
-        .inspect_err(|_| link.shutdown())?;
+    runner.first_dry_run = serial;
+    let (mut facts, target_ids, links) = read_dry_phase(
+        plan,
+        config,
+        (runner.caps, files),
+        &dry,
+        &mut outcome,
+        links,
+    )?;
     outcome.unloaded_paths = dry.unloaded_paths;
     let context = JobContext {
         dry_files: &dry_files,
@@ -1950,15 +1888,15 @@ pub fn run_schedule_with_progress(
         budgeted: config.deadline.is_some(),
     };
     let mutants_started = config.clock.now();
-    let (jobs, (link, known)) =
-        checked_jobs(runner, plan, &mut facts, &context, link, &mut outcome)?;
+    let (jobs, phase_files, links) =
+        checked_jobs(runner, plan, &mut facts, &context, links, &mut outcome)?;
     let finished = |job: &Job, attempt: &Attempt| journal_first_run(config, job, attempt);
     let (attempts, workers) = run_phase(
         runner,
-        &dry_files,
+        &phase_files,
         jobs,
         PhaseDeadline::first_pass(config, &outcome.timings),
-        (Some((link, known)), &finished),
+        (links, &finished),
         |done, total| MutationProgress::Mutants { done, total },
     )?;
     outcome.workers = workers;
