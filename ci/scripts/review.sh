@@ -33,7 +33,7 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/gitlab_common.sh"
 gitlab_check_job_files fallow-skip-reason.txt fallow-dedup-lookup-failed.txt fallow-review.json \
   fallow-review-stderr.log fallow-review-post.json fallow-review-post-stderr.log \
-  fallow-mr-diff-stderr.log || exit 2
+  fallow-mr-diff-stderr.log fallow-mr.diff || exit 2
 
 # Initialize two sidecar markers so downstream jobs always see definitive
 # values. GitLab CI lacks an equivalent of $GITHUB_OUTPUT for cross-job

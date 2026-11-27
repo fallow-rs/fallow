@@ -19,7 +19,7 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/gitlab_common.sh"
 gitlab_check_job_files fallow-skip-reason.txt fallow-dedup-lookup-failed.txt fallow-comment-stderr.log \
   fallow-mr-comment.md fallow-mr-comment-envelope.json fallow-mr-decision.json \
-  fallow-mr-details.json fallow-mr-comment-plan.json fallow-mr-diff-stderr.log || exit 2
+  fallow-mr-details.json fallow-mr-comment-plan.json fallow-mr-diff-stderr.log fallow-mr.diff || exit 2
 
 # Initialize two sidecar markers so downstream jobs always see definitive
 # values. GitLab CI lacks an equivalent of $GITHUB_OUTPUT; these greppable
