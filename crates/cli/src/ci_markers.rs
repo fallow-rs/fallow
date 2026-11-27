@@ -12,7 +12,7 @@ fn trailer_marker_line(body: &str) -> Option<&str> {
         .filter(|line| !line.is_empty())
         .rev();
     let last = lines.next()?;
-    if last.starts_with("<!-- fallow-review-id: ") {
+    if last.starts_with(fallow_output::REVIEW_ID_MARKER_PREFIX) {
         lines.next()
     } else {
         Some(last)

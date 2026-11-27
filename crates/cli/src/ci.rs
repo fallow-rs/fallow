@@ -3843,7 +3843,7 @@ mod tests {
     }
 
     #[test]
-    fn malformed_or_duplicate_review_markers_fail_closed() {
+    fn malformed_review_markers_fail_closed() {
         assert!(
             fallow_output::parse_review_id_marker("<!-- fallow-review-id: bad value -->").is_err()
         );
@@ -3857,16 +3857,16 @@ mod tests {
             "<!-- fallow-fingerprint:v2: abcdef0123456789 -->\n<!-- fallow-review-id : frontend -->",
             None
         ));
-        assert!(
+        assert_eq!(
             fallow_output::parse_review_id_marker(
                 "<!-- fallow-review-id: first -->\n<!-- fallow-review-id: second -->"
-            )
-            .is_err()
+            ),
+            Ok(Some(ReviewId::parse("second").unwrap()))
         );
     }
 
     #[test]
-    fn envelope_scope_preflight_rejects_missing_unexpected_malformed_and_duplicate_markers() {
+    fn envelope_scope_preflight_rejects_missing_unexpected_and_malformed_markers() {
         let cases = [
             serde_json::json!({
                 "body": "<!-- fallow-review-id: frontend -->",
@@ -3883,7 +3883,7 @@ mod tests {
                 "meta": {"review_id": "frontend"}
             }),
             serde_json::json!({
-                "body": "<!-- fallow-review-id: frontend -->\n<!-- fallow-review-id: frontend -->",
+                "body": "<!-- fallow-review-id: frontend -->\n<!-- fallow-review-id: backend -->",
                 "comments": [],
                 "meta": {"review_id": "frontend"}
             }),

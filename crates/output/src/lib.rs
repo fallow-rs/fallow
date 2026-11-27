@@ -427,10 +427,10 @@ pub use resolved_run_view::{
 };
 pub use review_envelopes::{
     GitHubReviewComment, GitHubReviewSide, GitLabReviewComment, GitLabReviewPosition,
-    GitLabReviewPositionType, MARKER_REGEX_V3, ReviewCheckConclusion, ReviewComment,
-    ReviewEnvelopeEvent, ReviewEnvelopeMeta, ReviewEnvelopeOutput, ReviewEnvelopeSchema,
-    ReviewEnvelopeSummary, ReviewEnvelopeWireOutput, ReviewId, ReviewProvider,
-    ReviewReconcileOutput, ReviewReconcileSchema, body_matches_review_id, is_false,
+    GitLabReviewPositionType, MARKER_REGEX_V3, REVIEW_ID_MARKER_PREFIX, ReviewCheckConclusion,
+    ReviewComment, ReviewEnvelopeEvent, ReviewEnvelopeMeta, ReviewEnvelopeOutput,
+    ReviewEnvelopeSchema, ReviewEnvelopeSummary, ReviewEnvelopeWireOutput, ReviewId,
+    ReviewProvider, ReviewReconcileOutput, ReviewReconcileSchema, body_matches_review_id, is_false,
     parse_review_id_marker, review_id_marker, serialize_review_envelope_json_output,
     serialize_review_reconcile_json_output, serialize_scoped_review_envelope_json_output,
     validate_review_body_scope,
