@@ -513,15 +513,13 @@ fn namespace_escape_compact_line_has_four_fields() {
 }
 
 #[test]
-fn compact_dependency_and_duplicate_export_lines_include_locations_and_fanout() {
+fn compact_dependency_lines_include_package_manifest_locations() {
     use fallow_types::output_dead_code::{
-        DevDependencyInProductionFinding, DuplicateExportFinding, TestOnlyDependencyFinding,
-        TypeOnlyDependencyFinding, UnlistedDependencyFinding, UnusedDependencyFinding,
-        UnusedDevDependencyFinding, UnusedOptionalDependencyFinding,
+        DevDependencyInProductionFinding, TestOnlyDependencyFinding, TypeOnlyDependencyFinding,
+        UnusedDependencyFinding, UnusedDevDependencyFinding, UnusedOptionalDependencyFinding,
     };
     use fallow_types::results::{
-        DependencyLocation, DevDependencyInProduction, DuplicateExport, DuplicateLocation,
-        ImportSite, TestOnlyDependency, TypeOnlyDependency, UnlistedDependency,
+        DependencyLocation, DevDependencyInProduction, TestOnlyDependency, TypeOnlyDependency,
         UnusedDependency,
     };
 
@@ -558,6 +556,51 @@ fn compact_dependency_and_duplicate_export_lines_include_locations_and_fanout() 
             declared_and_imported_in: Vec::new(),
         }),
     );
+    results.type_only_dependencies.push(
+        TypeOnlyDependencyFinding::with_actions(TypeOnlyDependency {
+            package_name: "zod".to_string(),
+            path: root.join("package.json"),
+            line: 8,
+        }),
+    );
+    results.test_only_dependencies.push(
+        TestOnlyDependencyFinding::with_actions(TestOnlyDependency {
+            package_name: "msw".to_string(),
+            path: root.join("package.json"),
+            line: 9,
+        }),
+    );
+    results.dev_dependencies_in_production.push(
+        DevDependencyInProductionFinding::with_actions(DevDependencyInProduction {
+            package_name: "express".to_string(),
+            path: root.join("package.json"),
+            line: 10,
+        }),
+    );
+
+    assert_eq!(
+        build_compact_lines(&results, &root),
+        vec![
+            "unused-dep:package.json:5:lodash".to_owned(),
+            "unused-devdep:package.json:6:jest".to_owned(),
+            "unused-optionaldep:package.json:7:fsevents".to_owned(),
+            "type-only-dep:package.json:8:zod".to_owned(),
+            "test-only-dep:package.json:9:msw".to_owned(),
+            "dev-dep-in-prod:package.json:10:express".to_owned(),
+        ]
+    );
+}
+
+#[test]
+fn compact_unlisted_dependency_and_duplicate_export_lines_fan_out_locations() {
+    use fallow_types::output_dead_code::{DuplicateExportFinding, UnlistedDependencyFinding};
+    use fallow_types::results::{
+        DuplicateExport, DuplicateLocation, ImportSite, UnlistedDependency,
+    };
+
+    let root = PathBuf::from("/project");
+    let mut results = AnalysisResults::default();
+
     results.unlisted_dependencies.push(
         UnlistedDependencyFinding::with_actions(UnlistedDependency {
             package_name: "chalk".to_string(),
@@ -592,41 +635,14 @@ fn compact_dependency_and_duplicate_export_lines_include_locations_and_fanout() 
             ],
         }),
     );
-    results.type_only_dependencies.push(
-        TypeOnlyDependencyFinding::with_actions(TypeOnlyDependency {
-            package_name: "zod".to_string(),
-            path: root.join("package.json"),
-            line: 8,
-        }),
-    );
-    results.test_only_dependencies.push(
-        TestOnlyDependencyFinding::with_actions(TestOnlyDependency {
-            package_name: "msw".to_string(),
-            path: root.join("package.json"),
-            line: 9,
-        }),
-    );
-    results.dev_dependencies_in_production.push(
-        DevDependencyInProductionFinding::with_actions(DevDependencyInProduction {
-            package_name: "express".to_string(),
-            path: root.join("package.json"),
-            line: 10,
-        }),
-    );
 
     assert_eq!(
         build_compact_lines(&results, &root),
         vec![
-            "unused-dep:package.json:5:lodash".to_owned(),
-            "unused-devdep:package.json:6:jest".to_owned(),
-            "unused-optionaldep:package.json:7:fsevents".to_owned(),
             "unlisted-dep:src/a.ts:2:chalk".to_owned(),
             "unlisted-dep:src/b.ts:4:chalk".to_owned(),
             "duplicate-export:src/a.ts:10:Button".to_owned(),
             "duplicate-export:src/b.ts:20:Button".to_owned(),
-            "type-only-dep:package.json:8:zod".to_owned(),
-            "test-only-dep:package.json:9:msw".to_owned(),
-            "dev-dep-in-prod:package.json:10:express".to_owned(),
         ]
     );
 }
