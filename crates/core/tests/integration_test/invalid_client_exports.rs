@@ -17,7 +17,7 @@ fn fixture_config(name: &str) -> fallow_config::ResolvedConfig {
 }
 
 #[test]
-fn use_client_metadata_export_is_flagged_once() {
+fn use_client_entry_file_exports_are_flagged() {
     let config = fixture_config("invalid-client-export");
     let results = fallow_core::analyze(&config).expect("analysis should succeed");
 
@@ -32,16 +32,22 @@ fn use_client_metadata_export_is_flagged_once() {
         })
         .collect();
 
+    let mut flagged: Vec<String> = findings
+        .iter()
+        .map(|(name, path)| {
+            let file = path.split("invalid-client-export/").last().unwrap_or(path);
+            format!("{file}:{name}")
+        })
+        .collect();
+    flagged.sort();
     assert_eq!(
-        findings.len(),
-        1,
-        "exactly one invalid client export expected: {findings:?}"
-    );
-    assert_eq!(findings[0].0, "metadata");
-    assert!(
-        findings[0].1.ends_with("app/page.tsx"),
-        "finding should anchor at app/page.tsx, got {}",
-        findings[0].1
+        flagged,
+        [
+            "app/api/route.ts:GET",
+            "app/page.tsx:metadata",
+            "app/report/page.tsx:metadata",
+        ],
+        "only the names that Next.js rejects in an entry file"
     );
 
     // The directive is carried verbatim for the message.
@@ -97,4 +103,37 @@ fn no_findings_when_next_is_absent() {
         "without `next` declared, the rule must not fire: {:?}",
         results.invalid_client_exports
     );
+}
+
+/// Next.js reads these names only from an App Router entry file, and the
+/// route handler names only from a route file. A client module that is not
+/// such a file can export them (issue #5405).
+#[test]
+fn names_outside_app_router_entry_files_are_not_flagged() {
+    let config = fixture_config("invalid-client-export");
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let flagged: Vec<String> = results
+        .invalid_client_exports
+        .iter()
+        .map(|f| {
+            format!(
+                "{}:{}",
+                f.export.path.to_string_lossy().replace('\\', "/"),
+                f.export.export_name
+            )
+        })
+        .collect();
+    for (file, name) in [
+        ("app/settings/page-client.tsx", "dynamic"),
+        ("app/report/page.tsx", "GET"),
+        ("pages/legacy.tsx", "getServerSideProps"),
+    ] {
+        assert!(
+            !flagged
+                .iter()
+                .any(|finding| finding.ends_with(&format!("{file}:{name}"))),
+            "{file} must not report {name}: {flagged:?}"
+        );
+    }
 }

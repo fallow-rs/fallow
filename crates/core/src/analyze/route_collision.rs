@@ -35,7 +35,7 @@ use crate::graph::ModuleGraph;
 use crate::results::RouteCollision;
 use crate::suppress::{IssueKind, SuppressionContext};
 
-use super::route_tree::classify_route_file;
+use super::route_tree::{classify_route_file, collect_pkg_roots};
 
 /// The collision bucket key: `(app_root, slot_key, url)`.
 type BucketKey = (String, String, String);
@@ -121,13 +121,4 @@ fn append_route_collision_bucket(
             col: 0,
         });
     }
-}
-
-/// Package roots to anchor app-roots on: the project root plus every discovered
-/// workspace package root.
-fn collect_pkg_roots(config: &ResolvedConfig, workspaces: &[WorkspaceInfo]) -> Vec<PathBuf> {
-    let mut roots = Vec::with_capacity(workspaces.len() + 1);
-    roots.push(config.root.clone());
-    roots.extend(workspaces.iter().map(|w| w.root.clone()));
-    roots
 }

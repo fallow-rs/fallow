@@ -1105,9 +1105,8 @@ fn populate_unused_load_data_key_findings(input: &mut FrameworkSpecificFindingsI
         .collect();
 }
 
-/// Populate `invalid_client_exports` when the rule is enabled. Gated on the
-/// project declaring `next` inside the detector (see
-/// [`find_invalid_client_exports`]).
+/// Populate `invalid_client_exports` when the rule is enabled. Gated on the project
+/// declaring `next` inside the detector (see [`find_invalid_client_exports`]).
 fn populate_invalid_client_export_findings(input: &mut FrameworkSpecificFindingsInput<'_>) {
     if input.config.rules.invalid_client_export == Severity::Off {
         return;
@@ -1115,6 +1114,7 @@ fn populate_invalid_client_export_findings(input: &mut FrameworkSpecificFindings
     input.results.invalid_client_exports = find_invalid_client_exports(
         input.graph,
         input.modules,
+        &route_tree::collect_pkg_roots(input.config, input.workspaces),
         input.declared_deps,
         input.suppressions,
         input.line_offsets_by_file,
