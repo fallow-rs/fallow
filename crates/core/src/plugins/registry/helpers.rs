@@ -662,10 +662,10 @@ fn scan_dir_for_pattern(root: &Path, dir: &Path, file_pattern: &str) -> Vec<Path
     if !dir.is_dir() {
         return Vec::new();
     }
-    let Some(entries) = crate::discover::project_read::read_project_dir(root, dir) else {
+    let Ok(matcher) = globset::Glob::new(file_pattern).map(|g| g.compile_matcher()) else {
         return Vec::new();
     };
-    let Ok(matcher) = globset::Glob::new(file_pattern).map(|g| g.compile_matcher()) else {
+    let Some(entries) = crate::discover::project_read::read_project_dir(root, dir) else {
         return Vec::new();
     };
 
