@@ -176,6 +176,14 @@ const FULL_ONLY_COMMANDS = [
     args: ["test", "--workspace", "--lib", "--bins", "--tests", "--examples"],
   },
   {
+    // The CI job "Fallow Self Analysis" runs the branch binary on the VS Code
+    // extension and the npm wrapper. A detection change that reports more
+    // fails that job and no other gate.
+    label: "Self analysis dogfood",
+    command: "npm",
+    args: ["run", "check:self-analysis"],
+  },
+  {
     label: "Coverage producer conformance",
     command: "npm",
     args: ["run", "check:coverage-producers"],

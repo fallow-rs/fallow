@@ -31,6 +31,7 @@
     "check:emitted-versions": "node scripts/sync-emitted-versions.mjs --check",
     "check:miri-fs-tests": "node scripts/check-miri-fs-tests.mjs",
     "check:host-reads": "node scripts/check-host-reads.mjs",
+    "check:self-analysis": "node scripts/check-self-analysis.mjs",
     "check:tsconfig-reads": "node scripts/check-tsconfig-reads.mjs",
     "test:semantic-clone-conformance": "node --test scripts/semantic-clone-conformance.test.mjs",
     "type-aware:corpus": "node scripts/type-aware-corpus.mjs",
