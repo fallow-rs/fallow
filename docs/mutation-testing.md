@@ -545,6 +545,13 @@ or relational mutant, so it adds little test-strength signal for its run time.
   reads as string literals. The ids of the other mutants do not change
   (`without_pruned` in `crates/engine/src/mutation/plan.rs`). A
   `fallow-ignore` comment does not prune a mutant, so the copy keeps it.
+- The arguments of a call that a build tool evaluates at compile time get no
+  mutant, because the tool reads them with a static parse of the copy. These
+  calls are `feature()` from `bun:bundle`, a call of a Bun macro (an import
+  `with { type: "macro" }`), and `import.meta.glob()` of Vite. The code
+  around the call keeps its mutants, for example the condition of
+  `if (feature("FLAG"))` (`compile_time` in
+  `crates/mutation/src/collect/compile_time.rs`).
 - Fallow does not write to project files. The instrumented files live in the
   Fallow cache. The report lists any path that the tests changed.
 - The companions run in their own process group on Unix and in a Job Object on

@@ -4,7 +4,8 @@
 //! site holds the candidate mutants for that expression. The walk skips the
 //! positions where a mutant is invalid or useless: type positions, enum
 //! members, decorators, module syntax, directives, assignment targets,
-//! property keys, the arguments of logging calls, a `case` label whose
+//! property keys, the arguments of logging calls and of compile-time calls
+//! (see `compile_time`), a `case` label whose
 //! literal mutant is equivalent because its body is the `default` body, and
 //! the `!=` mutant of a counted `for` loop test (see `counted_loop_test`),
 //! the equivalent mutant of a zero comparison on the length of a known
@@ -56,9 +57,11 @@ use crate::replacements::{
 };
 use crate::{FunctionRef, MutantChange, Operator, is_identifier_byte};
 
+mod compile_time;
 mod filtered_lookups;
 mod opt_in;
 
+use compile_time::CompileTimeCalls;
 use filtered_lookups::{FILTER_BOOLEAN, FilteredLookups};
 
 /// One candidate mutant: replace `region` with `replacement`.
@@ -139,6 +142,7 @@ pub fn collect(program: &Program<'_>, source: &str) -> Collected {
         known_arrays,
         filtered_lookups,
         logging_globals: crate::logging_only::LoggingGlobals::scan(program, source),
+        compile_time_calls: CompileTimeCalls::scan(program),
         const_declaration: false,
         const_initializer: false,
     };
@@ -198,6 +202,8 @@ struct Collector<'s> {
     filtered_lookups: BTreeSet<(u32, u32)>,
     /// Which logging names are the globals. See `logging_only`.
     logging_globals: crate::logging_only::LoggingGlobals,
+    /// The calls whose arguments must stay as written. See `compile_time`.
+    compile_time_calls: CompileTimeCalls,
     /// True while the visitor is in the declarators of a `const`
     /// declaration.
     const_declaration: bool,
@@ -1610,6 +1616,10 @@ impl<'a> Visit<'a> for Collector<'_> {
             self.chain_link(it);
         }
         self.call_candidates(it);
+        if self.compile_time_calls.contains(it) {
+            self.visit_expression(&it.callee);
+            return;
+        }
         self.regex_constructor(&it.callee, &it.arguments);
         walk::walk_call_expression(self, it);
     }
