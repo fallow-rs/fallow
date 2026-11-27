@@ -1,0 +1,21 @@
+{
+  "name": "nx-run-commands-extensionless",
+  "targets": {
+    "node": {
+      "executor": "nx:run-commands",
+      "options": { "command": "node scripts/noext" }
+    },
+    "tsx": {
+      "executor": "nx:run-commands",
+      "options": { "command": "tsx scripts/tsnoext" }
+    },
+    "deploy": {
+      "executor": "nx:run-commands",
+      "options": { "command": "bash scripts/deploy.sh" }
+    },
+    "test-lib": {
+      "executor": "nx:run-commands",
+      "options": { "command": "vitest run src/lib/" }
+    }
+  }
+}

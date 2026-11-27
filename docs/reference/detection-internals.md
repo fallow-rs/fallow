@@ -797,6 +797,27 @@ the rules:
   because the body can run any program.
 - `sh -c "<command>"` reads the quoted command with the same rules.
 
+An entry file argument without a glob resolves on disk through
+`probe_runnable_file` in `crates/core/src/discover/entry_points.rs`, as Node
+and the TypeScript runners resolve it (issue #5325). The probe tries the exact
+file first. A path with a runnable extension (`.js`, `.ts` and their module
+variants) then gets each runnable extension in its place. Any other path gets
+each runnable extension added: `node scripts/build` runs `scripts/build.js`,
+and `node scripts/build.prod` runs `scripts/build.prod.js`. The probe never
+replaces another extension, so `bash scripts/deploy.sh` does not name
+`scripts/deploy.ts`. It never adds a style or markup extension, so
+`node scripts/theme` does not name `scripts/theme.css`. It does not resolve a
+directory to its index file, because a command can pass a directory as a
+filter (`vitest run src/lib/`). The `package.json` scripts, the Nx
+`run-commands` targets, the Vite+ tasks and the CI commands share this probe.
+
+Package entries (`main`, `bin`, `exports`) resolve through
+`probe_source_file`: the exact file, or the path with its extension replaced
+by any source extension, then the directory index. The `package.json`
+scripts also resolve through this package entry resolver, so a script
+argument there still resolves a directory to its index file and still swaps
+any extension.
+
 Formatters and linters (`file_target_tools.rs`) and the built-in test
 runners (`node --test`, `bun test`, `deno test`, `borp`) keep their own
 rules.
