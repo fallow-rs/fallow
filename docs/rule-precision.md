@@ -126,6 +126,8 @@ Judge the finding against the contract of the command that reported it. For
   For `untested-file` and `untested-export`, a test dependency path is a
   chain of imports from a test file. A browser, HTTP or subprocess test that
   reaches the code only at runtime does not import it, so the claim holds.
+  Code that only an end-to-end test runner starts, such as the app of a
+  Playwright `webServer`, is not runtime code, so a finding on it is noise.
 - `noise`: the claim is false, or the fix changes behavior. Give a
   `class` that names the cause, for example "framework convention export",
   "dynamic import by string", or "used by a script outside the source tree".
