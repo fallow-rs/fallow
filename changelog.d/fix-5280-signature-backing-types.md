@@ -1,8 +1,0 @@
-### Changed
-
-- **`fallow dead-code` now reports an exported type that only the signature of another export in the same file uses, when nothing needs that export.** An example is `export type ButtonProps = {...}` next to `export const Button = (props: ButtonProps) => ...`, with no other file that imports `ButtonProps`. Fallow did not report such a type before. Now `unused-type` reports it. You can remove the `export` keyword: TypeScript accepts the result, and the declaration emit of the file includes the local type. Fallow still keeps the export in two cases:
-  - The project of the file emits declarations. The nearest folder with a `tsconfig*.json` has a config with `declaration` or `composite` and without `noEmit`, or the nearest `package.json` names a `.d.ts` file in `types`, `typings`, `typesVersions` or a `types` export condition. Without the export, another module that holds the value with an inferred type can fail with TS4023.
-  - The `private-type-leak` rule is on for the file. Without the export, that rule reports the signature. `--type-aware` turns this rule on when the config does not set it.
-
-  Projects that do not emit declarations can see more `unused-type` findings after the upgrade. To not report a type that its own file uses, set `"ignoreExportsUsedInFile": { "type": true, "interface": true }`. `fallow dead-code --trace <file>:<Type>` now gives the same verdict as the report. When fallow keeps such a type, the trace names the backing exports and the reason, and the JSON has a new `kept_by_signature` object.
-  (Closes [#5280](https://github.com/fallow-rs/fallow/issues/5280))

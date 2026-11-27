@@ -1,4 +1,0 @@
-### Fixed
-
-- **A file that an Nx target or a CI command runs without its extension is no longer reported as unused.** `node scripts/build` in a `project.json` `nx:run-commands` target, a Vite+ task or a CI workflow step now credits `scripts/build.js` (and `scripts/build.prod` credits `scripts/build.prod.js`), and `tsx scripts/seed` credits `scripts/seed.ts`. These commands now resolve a file argument without an extension, as `package.json` scripts already did. Only `.js`, `.ts` and their module variants are tried, so `bash scripts/deploy.sh` does not credit `scripts/deploy.ts`, and `node scripts/theme` does not credit `scripts/theme.css`. A directory argument, such as `vitest run src/lib/`, is a filter and does not make the index file of the directory an entry.
-  (Closes [#5325](https://github.com/fallow-rs/fallow/issues/5325))
