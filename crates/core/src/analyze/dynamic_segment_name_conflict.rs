@@ -40,7 +40,7 @@ use crate::graph::ModuleGraph;
 use crate::results::DynamicSegmentNameConflict;
 use crate::suppress::{IssueKind, SuppressionContext};
 
-use super::route_tree::{DynKind, classify_route_file};
+use super::route_tree::{DynKind, classify_route_file, collect_pkg_roots};
 
 /// The position key: `(app_root, slot_key, parent position URL)`.
 type PositionKey = (String, String, String);
@@ -183,13 +183,4 @@ fn conflicting_spellings<'o>(occs: &'o [Occurrence<'_>]) -> Vec<&'o str> {
     }
     conflicting.sort_unstable();
     conflicting
-}
-
-/// Package roots to anchor app-roots on: the project root plus every discovered
-/// workspace package root.
-fn collect_pkg_roots(config: &ResolvedConfig, workspaces: &[WorkspaceInfo]) -> Vec<PathBuf> {
-    let mut roots = Vec::with_capacity(workspaces.len() + 1);
-    roots.push(config.root.clone());
-    roots.extend(workspaces.iter().map(|w| w.root.clone()));
-    roots
 }

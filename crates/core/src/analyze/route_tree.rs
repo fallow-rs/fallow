@@ -218,34 +218,12 @@ fn join_url(parts: &[&str]) -> String {
 /// URL and so must never be reported as a collision).
 #[must_use]
 pub fn classify_route_file<'a>(path: &'a Path, pkg_roots: &[&Path]) -> Option<ClassifiedRoute<'a>> {
-    // Anchor on the LONGEST matching package root so a nested package wins over
-    // an ancestor (and the project root).
-    let pkg_root = pkg_roots
-        .iter()
-        .filter(|root| path.starts_with(root))
-        .max_by_key(|root| root.components().count())?;
-
-    let rel = path.strip_prefix(pkg_root).ok()?;
-    let comps: Vec<&str> = rel
-        .components()
-        .filter_map(|c| match c {
-            std::path::Component::Normal(os) => os.to_str(),
-            _ => None,
-        })
-        .collect();
-
-    // The App Router dir is `<pkgRoot>/app` or `<pkgRoot>/src/app`. Determine the
-    // index of the first directory segment AFTER the app-root.
-    let (app_root_suffix, first_seg_idx) = match comps.split_first() {
-        Some((&"app", _)) => ("app", 1),
-        Some((&"src", rest)) if rest.first() == Some(&"app") => ("src/app", 2),
-        _ => return None,
-    };
-
-    // Need at least the filename after the app-root.
-    if comps.len() <= first_seg_idx {
-        return None;
-    }
+    let AppRouterPath {
+        pkg_root,
+        app_root_suffix,
+        comps,
+        first_seg_idx,
+    } = app_router_path(path, pkg_roots)?;
     let filename = *comps.last()?;
     let role = classify_filename(filename)?;
 
@@ -268,6 +246,85 @@ pub fn classify_route_file<'a>(path: &'a Path, pkg_roots: &[&Path]) -> Option<Cl
         role,
         segments,
     })
+}
+
+/// A file path below an App Router dir, split into its components.
+struct AppRouterPath<'a, 'r> {
+    pkg_root: &'r Path,
+    app_root_suffix: &'static str,
+    comps: Vec<&'a str>,
+    /// The index in `comps` of the first segment after the App Router dir.
+    first_seg_idx: usize,
+}
+
+/// Anchor `path` on the LONGEST matching package root (a nested package wins
+/// over an ancestor and the project root) and split it below the App Router
+/// dir, `<pkgRoot>/app` or `<pkgRoot>/src/app`. `None` when the path has no
+/// file name below such a dir.
+fn app_router_path<'a, 'r>(
+    path: &'a Path,
+    pkg_roots: &[&'r Path],
+) -> Option<AppRouterPath<'a, 'r>> {
+    let pkg_root = pkg_roots
+        .iter()
+        .copied()
+        .filter(|root| path.starts_with(root))
+        .max_by_key(|root| root.components().count())?;
+
+    let rel = path.strip_prefix(pkg_root).ok()?;
+    let comps: Vec<&str> = rel
+        .components()
+        .filter_map(|c| match c {
+            std::path::Component::Normal(os) => os.to_str(),
+            _ => None,
+        })
+        .collect();
+
+    let (app_root_suffix, first_seg_idx) = match comps.split_first() {
+        Some((&"app", _)) => ("app", 1),
+        Some((&"src", rest)) if rest.first() == Some(&"app") => ("src/app", 2),
+        _ => return None,
+    };
+    if comps.len() <= first_seg_idx {
+        return None;
+    }
+    Some(AppRouterPath {
+        pkg_root,
+        app_root_suffix,
+        comps,
+        first_seg_idx,
+    })
+}
+
+/// The App Router entry files whose exports the Next.js compiler checks
+/// against the `"use client"` directive. The compiler matches
+/// `[\\/](page|layout|route)\.(ts|js)x?$`, so the extensions are narrower than
+/// [`ROUTE_EXTENSIONS`].
+const ENTRY_STEMS: &[&str] = &["page", "layout", "route"];
+const ENTRY_EXTENSIONS: &[&str] = &["ts", "tsx", "js", "jsx"];
+
+/// The kind of an App Router entry file (`page`, `layout` or `route`), or
+/// `None` when `path` is not such a file below `<pkgRoot>/app` or
+/// `<pkgRoot>/src/app`. The compiler matches only the file name, so a file
+/// under a private `_folder` segment is an entry file too.
+#[must_use]
+pub fn app_router_entry_stem<'a>(path: &'a Path, pkg_roots: &[&Path]) -> Option<&'a str> {
+    let AppRouterPath { comps, .. } = app_router_path(path, pkg_roots)?;
+    let (stem, ext) = comps.last()?.rsplit_once('.')?;
+    (ENTRY_STEMS.contains(&stem) && ENTRY_EXTENSIONS.contains(&ext)).then_some(stem)
+}
+
+/// The package roots that anchor App Router dirs: the project root and each
+/// workspace root.
+#[must_use]
+pub fn collect_pkg_roots(
+    config: &fallow_config::ResolvedConfig,
+    workspaces: &[fallow_config::WorkspaceInfo],
+) -> Vec<std::path::PathBuf> {
+    let mut roots = Vec::with_capacity(workspaces.len() + 1);
+    roots.push(config.root.clone());
+    roots.extend(workspaces.iter().map(|w| w.root.clone()));
+    roots
 }
 
 /// Classify a route file's basename into its role, or `None` if it is not a
@@ -422,6 +479,43 @@ mod tests {
             let p = PathBuf::from(format!("/repo/app/about/{name}"));
             assert!(classify(&p, &roots).is_none(), "should reject {name}");
         }
+    }
+
+    #[test]
+    fn app_router_entry_stem_matches_only_compiled_entry_files() {
+        let root = pkg("/repo");
+        let roots: Vec<&Path> = vec![root.as_path()];
+        for (path, expected) in [
+            ("/repo/app/page.tsx", Some("page")),
+            ("/repo/src/app/(group)/about/layout.js", Some("layout")),
+            ("/repo/app/api/route.ts", Some("route")),
+            ("/repo/app/settings/page-client.tsx", None),
+            ("/repo/app/template.tsx", None),
+            ("/repo/app/docs/page.mdx", None),
+            ("/repo/app/_lib/page.tsx", Some("page")),
+            ("/repo/app/page.js", Some("page")),
+            ("/repo/app/Page.tsx", None),
+            ("/repo/app/page", None),
+            ("/repo/pages/page.tsx", None),
+            ("/repo/apps/web/page.tsx", None),
+        ] {
+            assert_eq!(
+                app_router_entry_stem(Path::new(path), &roots),
+                expected,
+                "{path}"
+            );
+        }
+    }
+
+    #[test]
+    fn app_router_entry_stem_anchors_on_the_nested_workspace() {
+        let root = pkg("/repo");
+        let web = pkg("/repo/apps/web");
+        let roots: Vec<&Path> = vec![root.as_path(), web.as_path()];
+        assert_eq!(
+            app_router_entry_stem(Path::new("/repo/apps/web/app/layout.tsx"), &roots),
+            Some("layout")
+        );
     }
 
     #[test]
