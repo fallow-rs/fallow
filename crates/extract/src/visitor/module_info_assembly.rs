@@ -33,9 +33,12 @@ impl ModuleInfoExtractor {
         // candidate exists: an unnamed factory result records no member candidate.
         self.resolve_factory_unnamed_result_accesses();
         self.resolve_factory_whole_object_candidates();
+        // Before `record_exported_instance_bindings`, so that
+        // `export const sm = Cls.getInstance()` binds the export to the class.
+        // See issue #5233.
+        self.resolve_factory_call_candidates();
         self.record_exported_instance_bindings();
         self.resolve_object_binding_candidates();
-        self.resolve_factory_call_candidates();
         self.resolve_playwright_factory_call_definitions();
         self.record_playwright_test_binding_facts();
         self.resolve_structural_class_calls();

@@ -655,6 +655,7 @@ fn typed_instance_export_binding_fact_builds_target_map() {
             InstanceExportBindingFact {
                 export_name: "service".to_string(),
                 target_name: "Service".to_string(),
+                factory_method: None,
             },
         )]
         .into(),
@@ -3396,5 +3397,35 @@ fn inheritance_does_not_leak_an_access_to_a_sibling_class() {
             .get(&FileId(2))
             .is_none_or(|set| !set.contains("helper")),
         "a `this` access must not reach a sibling"
+    );
+}
+
+#[test]
+fn unmatched_extends_pattern_warning_names_subclass_scope() {
+    let rule = ScopedUsedClassMemberRule {
+        extends: Some("SceneManager".to_string()),
+        implements: None,
+        members: vec!["*".to_string()],
+    };
+    assert_eq!(
+        unmatched_scoped_pattern_message("*", &rule),
+        "usedClassMembers scoped glob pattern '*' (extends='SceneManager') matched no unused \
+         class member. A scoped rule matches the members of a class that extends \
+         'SceneManager', not of 'SceneManager' itself. To keep the members of one class, put \
+         `// fallow-ignore-file unused-class-member` in the file of that class"
+    );
+}
+
+#[test]
+fn unmatched_implements_pattern_warning_has_no_extends_hint() {
+    let rule = ScopedUsedClassMemberRule {
+        extends: None,
+        implements: Some("Runner".to_string()),
+        members: vec!["run*".to_string()],
+    };
+    assert_eq!(
+        unmatched_scoped_pattern_message("run*", &rule),
+        "usedClassMembers scoped glob pattern 'run*' (implements='Runner') matched no unused \
+         class member. A scoped rule matches the members of a class that implements 'Runner'"
     );
 }

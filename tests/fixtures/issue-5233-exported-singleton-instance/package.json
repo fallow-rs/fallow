@@ -1,0 +1,6 @@
+{
+  "name": "issue-5233-exported-singleton-instance",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts"
+}

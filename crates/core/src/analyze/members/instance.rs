@@ -18,6 +18,15 @@ pub(super) fn build_instance_export_targets(
             let instance_targets = targets_by_instance.entry(instance_key).or_default();
             for target_key in target_keys {
                 for key in export_key_with_origins(graph, target_key) {
+                    // `export const sm = Cls.getInstance()` holds an instance
+                    // only when the static method returns one.
+                    if access
+                        .factory_method
+                        .as_deref()
+                        .is_some_and(|method| !export_has_instance_factory(indexes, &key, method))
+                    {
+                        continue;
+                    }
                     push_export_key(instance_targets, key);
                 }
             }

@@ -26,18 +26,7 @@ pub(super) fn propagate_factory_call_accesses(
                 for origin in
                     walk_re_export_origins(graph, seed_key.file_id, seed_key.export_name.as_str())
                 {
-                    let Some(origin_module) = indexes.module_by_id.get(&origin.file_id) else {
-                        continue;
-                    };
-                    let matches_factory = origin_module.exports.iter().any(|export| {
-                        export.name.matches_str(origin.export_name.as_str())
-                            && export.members.iter().any(|member| {
-                                member.is_instance_returning_static
-                                    && member.kind == MemberKind::ClassMethod
-                                    && member.name == access.callee_method
-                            })
-                    });
-                    if !matches_factory {
+                    if !export_has_instance_factory(indexes, &origin, &access.callee_method) {
                         continue;
                     }
                     accessed_members
@@ -48,6 +37,26 @@ pub(super) fn propagate_factory_call_accesses(
             }
         }
     }
+}
+
+/// Whether the class export at `key` has a static method `method` that
+/// returns an instance of the class.
+pub(super) fn export_has_instance_factory(
+    indexes: &MemberPassIndexes<'_>,
+    key: &ExportKey,
+    method: &str,
+) -> bool {
+    let Some(module) = indexes.module_by_id.get(&key.file_id) else {
+        return false;
+    };
+    module.exports.iter().any(|export| {
+        export.name.matches_str(key.export_name.as_str())
+            && export.members.iter().any(|member| {
+                member.is_instance_returning_static
+                    && member.kind == MemberKind::ClassMethod
+                    && member.name == method
+            })
+    })
 }
 
 pub(super) struct FactoryReturnCreditContext<'a, 'ctx> {

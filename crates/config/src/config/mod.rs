@@ -581,7 +581,7 @@ pub struct FallowConfig {
     #[schemars(extend("default" = []))]
     pub ignore_decorators: Vec<String>,
 
-    /// A list of class-member names or glob patterns treated as framework-used, so a method a library invokes reflectively (ag-Grid `agInit`/`refresh`, Web Component `connectedCallback`) is not reported as `unused-class-member`; it applies to class members only, not enum members. Each entry is either a plain string/glob (`"agInit"`, `"enter*"`, `"*"`) applied to every class, or a scoped object `{ extends?, implements?, members: [...] }` that applies only when the class matches that heritage clause (a scoped rule requires `extends` or `implements`); patterns matching zero members warn once.
+    /// A list of class-member names or glob patterns treated as framework-used, so a method a library invokes reflectively (ag-Grid `agInit`/`refresh`, Web Component `connectedCallback`) is not reported as `unused-class-member`; it applies to class members only, not enum members. Each entry is either a plain string/glob (`"agInit"`, `"enter*"`, `"*"`) applied to every class, or a scoped object `{ extends?, implements?, members: [...] }` that applies only when the class matches that heritage clause (a scoped rule requires `extends` or `implements`). A scoped rule with `"extends": "Base"` applies to the subclasses of `Base`, not to `Base` itself; to keep the members of one class, put `// fallow-ignore-file unused-class-member` in its file. Patterns matching zero members warn once.
     #[serde(default)]
     pub used_class_members: Vec<UsedClassMemberRule>,
 

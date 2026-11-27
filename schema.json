@@ -166,7 +166,7 @@
       "default": []
     },
     "usedClassMembers": {
-      "description": "A list of class-member names or glob patterns treated as framework-used, so a method a library invokes reflectively (ag-Grid `agInit`/`refresh`, Web Component `connectedCallback`) is not reported as `unused-class-member`; it applies to class members only, not enum members. Each entry is either a plain string/glob (`\"agInit\"`, `\"enter*\"`, `\"*\"`) applied to every class, or a scoped object `{ extends?, implements?, members: [...] }` that applies only when the class matches that heritage clause (a scoped rule requires `extends` or `implements`); patterns matching zero members warn once.",
+      "description": "A list of class-member names or glob patterns treated as framework-used, so a method a library invokes reflectively (ag-Grid `agInit`/`refresh`, Web Component `connectedCallback`) is not reported as `unused-class-member`; it applies to class members only, not enum members. Each entry is either a plain string/glob (`\"agInit\"`, `\"enter*\"`, `\"*\"`) applied to every class, or a scoped object `{ extends?, implements?, members: [...] }` that applies only when the class matches that heritage clause (a scoped rule requires `extends` or `implements`). A scoped rule with `\"extends\": \"Base\"` applies to the subclasses of `Base`, not to `Base` itself; to keep the members of one class, put `// fallow-ignore-file unused-class-member` in its file. Patterns matching zero members warn once.",
       "type": "array",
       "items": {
         "$ref": "#/$defs/UsedClassMemberRule"
@@ -840,7 +840,7 @@
       "type": "object",
       "properties": {
         "extends": {
-          "description": "Only apply when the class extends this parent class name.",
+          "description": "Only apply when the class extends this parent class name. The rule\ndoes not apply to the parent class itself.",
           "type": [
             "string",
             "null"

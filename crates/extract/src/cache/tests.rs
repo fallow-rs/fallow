@@ -728,6 +728,7 @@ fn module_to_cached_roundtrip_dynamic_imports() {
             SemanticFact::InstanceExportBinding(InstanceExportBindingFact {
                 export_name: "service".to_string(),
                 target_name: "Service".to_string(),
+                factory_method: None,
             }),
             SemanticFact::ExportedObjectInstanceProperty(ExportedObjectInstancePropertyFact {
                 export_name: "services".to_string(),
@@ -830,6 +831,7 @@ fn module_to_cached_roundtrip_dynamic_imports() {
             SemanticFact::InstanceExportBinding(InstanceExportBindingFact {
                 export_name: "service".to_string(),
                 target_name: "Service".to_string(),
+                factory_method: None,
             }),
             SemanticFact::ExportedObjectInstanceProperty(ExportedObjectInstancePropertyFact {
                 export_name: "services".to_string(),
