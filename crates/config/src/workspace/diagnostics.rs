@@ -789,6 +789,26 @@ pub fn clear_analysis_stage_diagnostics(root: &Path) {
     }
 }
 
+/// Keep only the entries for `root` that `keep` accepts.
+///
+/// A run scope uses it to drop an entry about a part of the project that the
+/// scope leaves out. The next dead-code pass records the analysis-stage
+/// entries again, so a later full run gets them back.
+pub fn retain_workspace_diagnostics(root: &Path, keep: impl FnMut(&WorkspaceDiagnostic) -> bool) {
+    let canonical = dunce::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+    if scratch_run() {
+        return;
+    }
+    let Some(registry) = WORKSPACE_DIAGNOSTICS.get() else {
+        return;
+    };
+    if let Ok(mut map) = registry.lock()
+        && let Some(existing) = map.get_mut(&canonical)
+    {
+        existing.retain(keep);
+    }
+}
+
 /// Remove all health-stage diagnostics (see
 /// [`WorkspaceDiagnosticKind::is_health_stage`]) for `root` from the registry,
 /// keeping every other entry.

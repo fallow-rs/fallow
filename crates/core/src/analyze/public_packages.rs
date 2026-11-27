@@ -170,8 +170,8 @@ struct SurfaceFinding<'a> {
 /// has an `exports`, `main` or `module` field. It gets the hint only when at
 /// least one reported finding is on its public surface. A finding counts when
 /// its rule is not `off` for its file and `ignoreFindings` does not cover it.
-/// A run scope (`--workspace`, `--changed-since`) and a baseline apply later,
-/// so they do not change the count. The hint changes no finding.
+/// A baseline applies later, so it does not change the count. The engine
+/// narrows the hints to the run scope. The hint changes no finding.
 pub(super) fn record_candidate_diagnostics(
     graph: &ModuleGraph,
     config: &ResolvedConfig,

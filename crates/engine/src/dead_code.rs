@@ -610,6 +610,59 @@ pub fn apply_scope(
         clear_dependency_findings(results);
     }
     filter_configured_ignored_findings(results, config);
+    scope_public_package_candidates(scope, config);
+}
+
+/// Narrow the `public-package-candidate` hints in the diagnostic registry to
+/// the scope of the run. A surface that reads the registry after
+/// [`apply_scope`] gets the narrowed set.
+fn scope_public_package_candidates(scope: &DeadCodeScope<'_>, config: &ResolvedConfig) {
+    if scope.narrows() {
+        fallow_config::retain_workspace_diagnostics(&config.root, |diagnostic| {
+            scope.keeps_diagnostic(diagnostic)
+        });
+    }
+}
+
+/// Narrow the `public-package-candidate` hints in `diagnostics` to the scope
+/// of the run, for a surface that read its diagnostics before [`apply_scope`].
+pub fn scope_workspace_diagnostics(
+    diagnostics: &mut Vec<fallow_config::WorkspaceDiagnostic>,
+    scope: &DeadCodeScope<'_>,
+) {
+    if scope.narrows() {
+        diagnostics.retain(|diagnostic| scope.keeps_diagnostic(diagnostic));
+    }
+}
+
+impl DeadCodeScope<'_> {
+    /// Whether the scope narrows the run at all.
+    fn narrows(&self) -> bool {
+        self.workspace_roots.is_some() || self.is_partial()
+    }
+
+    /// Whether the scope reports the findings of some files only.
+    fn is_partial(&self) -> bool {
+        self.changes.is_some_and(|changes| !changes.is_full())
+            || self.diff.is_some()
+            || self.files.is_some()
+    }
+
+    /// Whether a run with this scope keeps `diagnostic`.
+    ///
+    /// A workspace scope keeps the hint of each package inside the scope. A
+    /// change, diff or file scope reports the findings of some files, and the
+    /// hint counts the findings of a whole package, so such a run drops every
+    /// hint. Every other kind stays.
+    fn keeps_diagnostic(&self, diagnostic: &fallow_config::WorkspaceDiagnostic) -> bool {
+        if diagnostic.kind.public_package_candidate().is_none() {
+            return true;
+        }
+        !self.is_partial()
+            && self
+                .workspace_roots
+                .is_none_or(|roots| roots.contains(&diagnostic.path))
+    }
 }
 
 fn clear_dependency_findings(results: &mut AnalysisResults) {

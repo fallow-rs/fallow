@@ -365,14 +365,15 @@ pub enum WorkspaceDiagnosticKind {
     /// `publicPackages` lists it, so a package that the project publishes to
     /// a registry gets findings for its public API. This entry is a hint
     /// only: it changes no finding, no count and no gate. `path` is the
-    /// package directory.
+    /// package directory. A workspace scope keeps only the entries of the
+    /// packages inside it. A change, diff or file scope has no entry.
     PublicPackageCandidate {
         /// The `name` of the package manifest.
         package: String,
         /// The number of findings on the exports or members that the
         /// package entry publishes. A finding counts when its rule is not
         /// `off` for its file and `ignoreFindings` does not cover it. The
-        /// count is taken before a run scope and a baseline.
+        /// count is taken before a baseline.
         findings: u32,
     },
     /// In production mode, a built-in production pattern (for example

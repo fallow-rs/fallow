@@ -6,7 +6,7 @@ use std::path::Path;
 
 use serde_json::Value;
 
-use crate::common::{CommandOutput, parse_json, run_fallow_raw};
+use crate::common::{CommandOutput, commit_all, git, parse_json, run_fallow_raw};
 
 const KIND: &str = "public-package-candidate";
 
@@ -163,4 +163,38 @@ fn a_listed_package_gets_no_hint() {
         envelope["unused_enum_members"].as_array().map(Vec::len),
         Some(0)
     );
+}
+
+fn packages(root: &Path, extra: &[&str]) -> Vec<String> {
+    let mut args = vec!["dead-code", "--format", "json", "--quiet"];
+    args.extend_from_slice(extra);
+    entries(&parse_json(&run(root, &args)))
+        .iter()
+        .map(|entry| entry["package"].as_str().expect("package").to_owned())
+        .collect()
+}
+
+#[test]
+fn a_workspace_scope_keeps_only_the_hints_inside_it() {
+    let dir = project();
+    let root = dir.path();
+
+    assert_eq!(packages(root, &["--workspace", "@x/sdk"]), vec!["@x/sdk"]);
+    assert!(packages(root, &["--workspace", "web"]).is_empty());
+}
+
+#[test]
+fn a_change_scope_drops_the_hint() {
+    let dir = project();
+    let root = dir.path();
+    git(root, &["init", "-q"]);
+    commit_all(root, "initial");
+    write(
+        root,
+        "apps/web/src/main.ts",
+        "import { Mode } from '@x/sdk';\nconsole.log(Mode.On, 1);\n",
+    );
+
+    assert!(packages(root, &["--changed-since", "HEAD"]).is_empty());
+    assert_eq!(packages(root, &[]), vec!["@x/sdk"]);
 }

@@ -271,9 +271,11 @@ error by suppressing a downstream detector.
   `publicPackages` uses: the entry files of the package and each declaration
   that an entry exports or re-exports. The dead-code pass records the entry
   after its detectors run. It counts each finding on the surface whose rule
-  is not `off` for its file and that `ignoreFindings` does not cover. A run
-  scope and a baseline apply later, so they do not change the count. The
-  entry changes no finding. A package whose entry publishes no
+  is not `off` for its file and that `ignoreFindings` does not cover. A
+  baseline applies later, so it does not change the count. A workspace scope
+  keeps only the entries of packages inside the scope, and a change, diff or
+  file scope drops every entry (`apply_scope` in the engine). The entry
+  changes no finding. A package whose entry publishes no
   declaration with a finding, for example an `export {}` entry, gets no
   entry.
 - A Pinia state key read through the `$state` object of a known store is a

@@ -726,7 +726,7 @@ package: string
  * The number of findings on the exports or members that the
  * package entry publishes. A finding counts when its rule is not
  * `off` for its file and `ignoreFindings` does not cover it. The
- * count is taken before a run scope and a baseline.
+ * count is taken before a baseline.
  */
 findings: number
 } | {

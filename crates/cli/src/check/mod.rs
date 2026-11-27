@@ -643,7 +643,7 @@ fn handle_trace_side_effects(
 fn apply_scope_filters(
     opts: &CheckOptions<'_>,
     config: &ResolvedConfig,
-    results: &mut AnalysisResults,
+    data: &mut CheckAnalysisData,
     ws_roots: Option<&fallow_engine::workspace_scope::WorkspaceScope>,
     change_scope: &fallow_engine::change_scope::ChangeScope,
 ) {
@@ -653,16 +653,14 @@ fn apply_scope_filters(
         None => None,
     };
     let files = file_scope(opts);
-    fallow_engine::dead_code::apply_scope(
-        results,
-        &fallow_engine::dead_code::DeadCodeScope {
-            workspace_roots: ws_roots,
-            changes: Some(change_scope),
-            diff: diff_index.map(|index| (index, opts.root)),
-            files: files.as_ref(),
-        },
-        config,
-    );
+    let scope = fallow_engine::dead_code::DeadCodeScope {
+        workspace_roots: ws_roots,
+        changes: Some(change_scope),
+        diff: diff_index.map(|index| (index, opts.root)),
+        files: files.as_ref(),
+    };
+    fallow_engine::dead_code::apply_scope(&mut data.results, &scope, config);
+    fallow_engine::dead_code::scope_workspace_diagnostics(&mut data.workspace_diagnostics, &scope);
 }
 
 fn apply_rules_and_filters(
@@ -1001,13 +999,7 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
     .map_err(|err| emit_input_error(&format!("Workspace baseline error: {err}"), opts.output))?;
     crate::requests::warn_if_package_baselines_stood_down(&change_scope);
 
-    apply_scope_filters(
-        opts,
-        &config,
-        &mut data.results,
-        ws_roots.as_ref(),
-        &change_scope,
-    );
+    apply_scope_filters(opts, &config, &mut data, ws_roots.as_ref(), &change_scope);
 
     apply_rules_and_filters(opts, &config, &mut data.results);
     if let Some(trace) = finding_id_trace.as_mut() {
@@ -1089,13 +1081,7 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
         // diff, file list) narrows the final result, so they run again over
         // the refined set. They only remove findings, so this pass keeps what
         // the first pass kept. The first pass only saves sidecar work.
-        apply_scope_filters(
-            opts,
-            &config,
-            &mut data.results,
-            ws_roots.as_ref(),
-            &change_scope,
-        );
+        apply_scope_filters(opts, &config, &mut data, ws_roots.as_ref(), &change_scope);
         // Reconciliation can add findings a syntactic pass never produced, so
         // effective severities are resolved once more over the refined set.
         // The pass removes findings and writes each gate severity again, so a
