@@ -209,21 +209,15 @@ fn a_caveated_finding_carries_a_trailing_caveat_field() {
     enum_member.reachability_caveats = vec![ReachabilityCaveat::IncompleteImportGraph];
     results.unused_enum_members.push(enum_member);
 
-    let mut class_member =
-        fallow_types::output_dead_code::UnusedClassMemberFinding::with_actions(member(
-            "Widget",
-            "render",
-            MemberKind::ClassMethod,
-        ));
+    let mut class_member = fallow_types::output_dead_code::UnusedClassMemberFinding::with_actions(
+        member("Widget", "render", MemberKind::ClassMethod),
+    );
     class_member.reachability_caveats = vec![ReachabilityCaveat::IncompleteImportGraph];
     results.unused_class_members.push(class_member);
 
-    let mut store_member =
-        fallow_types::output_dead_code::UnusedStoreMemberFinding::with_actions(member(
-            "useCart",
-            "subtotal",
-            MemberKind::StoreMember,
-        ));
+    let mut store_member = fallow_types::output_dead_code::UnusedStoreMemberFinding::with_actions(
+        member("useCart", "subtotal", MemberKind::StoreMember),
+    );
     store_member.reachability_caveats = vec![ReachabilityCaveat::IncompleteImportGraph];
     results.unused_store_members.push(store_member);
 
@@ -526,57 +520,65 @@ fn compact_dependency_lines_include_package_manifest_locations() {
     let root = PathBuf::from("/project");
     let mut results = AnalysisResults::default();
 
-    results.unused_dependencies.push(
-        UnusedDependencyFinding::with_actions(UnusedDependency {
+    results
+        .unused_dependencies
+        .push(UnusedDependencyFinding::with_actions(UnusedDependency {
             package_name: "lodash".to_string(),
             location: DependencyLocation::Dependencies,
             path: root.join("package.json"),
             line: 5,
             used_in_workspaces: Vec::new(),
             declared_and_imported_in: Vec::new(),
-        }),
-    );
-    results.unused_dev_dependencies.push(
-        UnusedDevDependencyFinding::with_actions(UnusedDependency {
+        }));
+    results
+        .unused_dev_dependencies
+        .push(UnusedDevDependencyFinding::with_actions(UnusedDependency {
             package_name: "jest".to_string(),
             location: DependencyLocation::DevDependencies,
             path: root.join("package.json"),
             line: 6,
             used_in_workspaces: Vec::new(),
             declared_and_imported_in: Vec::new(),
-        }),
-    );
-    results.unused_optional_dependencies.push(
-        UnusedOptionalDependencyFinding::with_actions(UnusedDependency {
-            package_name: "fsevents".to_string(),
-            location: DependencyLocation::OptionalDependencies,
-            path: root.join("package.json"),
-            line: 7,
-            used_in_workspaces: Vec::new(),
-            declared_and_imported_in: Vec::new(),
-        }),
-    );
-    results.type_only_dependencies.push(
-        TypeOnlyDependencyFinding::with_actions(TypeOnlyDependency {
-            package_name: "zod".to_string(),
-            path: root.join("package.json"),
-            line: 8,
-        }),
-    );
-    results.test_only_dependencies.push(
-        TestOnlyDependencyFinding::with_actions(TestOnlyDependency {
-            package_name: "msw".to_string(),
-            path: root.join("package.json"),
-            line: 9,
-        }),
-    );
-    results.dev_dependencies_in_production.push(
-        DevDependencyInProductionFinding::with_actions(DevDependencyInProduction {
-            package_name: "express".to_string(),
-            path: root.join("package.json"),
-            line: 10,
-        }),
-    );
+        }));
+    results
+        .unused_optional_dependencies
+        .push(UnusedOptionalDependencyFinding::with_actions(
+            UnusedDependency {
+                package_name: "fsevents".to_string(),
+                location: DependencyLocation::OptionalDependencies,
+                path: root.join("package.json"),
+                line: 7,
+                used_in_workspaces: Vec::new(),
+                declared_and_imported_in: Vec::new(),
+            },
+        ));
+    results
+        .type_only_dependencies
+        .push(TypeOnlyDependencyFinding::with_actions(
+            TypeOnlyDependency {
+                package_name: "zod".to_string(),
+                path: root.join("package.json"),
+                line: 8,
+            },
+        ));
+    results
+        .test_only_dependencies
+        .push(TestOnlyDependencyFinding::with_actions(
+            TestOnlyDependency {
+                package_name: "msw".to_string(),
+                path: root.join("package.json"),
+                line: 9,
+            },
+        ));
+    results
+        .dev_dependencies_in_production
+        .push(DevDependencyInProductionFinding::with_actions(
+            DevDependencyInProduction {
+                package_name: "express".to_string(),
+                path: root.join("package.json"),
+                line: 10,
+            },
+        ));
 
     assert_eq!(
         build_compact_lines(&results, &root),
@@ -601,25 +603,28 @@ fn compact_unlisted_dependency_and_duplicate_export_lines_fan_out_locations() {
     let root = PathBuf::from("/project");
     let mut results = AnalysisResults::default();
 
-    results.unlisted_dependencies.push(
-        UnlistedDependencyFinding::with_actions(UnlistedDependency {
-            package_name: "chalk".to_string(),
-            imported_from: vec![
-                ImportSite {
-                    path: root.join("src/a.ts"),
-                    line: 2,
-                    col: 0,
-                },
-                ImportSite {
-                    path: root.join("src/b.ts"),
-                    line: 4,
-                    col: 0,
-                },
-            ],
-        }),
-    );
-    results.duplicate_exports.push(
-        DuplicateExportFinding::with_actions(DuplicateExport {
+    results
+        .unlisted_dependencies
+        .push(UnlistedDependencyFinding::with_actions(
+            UnlistedDependency {
+                package_name: "chalk".to_string(),
+                imported_from: vec![
+                    ImportSite {
+                        path: root.join("src/a.ts"),
+                        line: 2,
+                        col: 0,
+                    },
+                    ImportSite {
+                        path: root.join("src/b.ts"),
+                        line: 4,
+                        col: 0,
+                    },
+                ],
+            },
+        ));
+    results
+        .duplicate_exports
+        .push(DuplicateExportFinding::with_actions(DuplicateExport {
             export_name: "Button".to_string(),
             locations: vec![
                 DuplicateLocation {
@@ -633,8 +638,7 @@ fn compact_unlisted_dependency_and_duplicate_export_lines_fan_out_locations() {
                     col: 0,
                 },
             ],
-        }),
-    );
+        }));
 
     assert_eq!(
         build_compact_lines(&results, &root),
