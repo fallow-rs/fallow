@@ -355,6 +355,26 @@ pub enum WorkspaceDiagnosticKind {
     /// `off` does not report it. `fallow security` raises a top-level `off`
     /// to `warn` before the pass, so that command always reports it.
     ClientServerLeakNoClientRoots,
+    /// A workspace package looks published, but `publicPackages` does not
+    /// list it (issue #5335). The manifest is not `"private": true`, it has
+    /// an `exports`, `main` or `module` field, and the dead-code pass has a
+    /// finding on at least one export or member that the package entry
+    /// publishes.
+    ///
+    /// Fallow treats a workspace package as internal unless
+    /// `publicPackages` lists it, so a package that the project publishes to
+    /// a registry gets findings for its public API. This entry is a hint
+    /// only: it changes no finding, no count and no gate. `path` is the
+    /// package directory.
+    PublicPackageCandidate {
+        /// The `name` of the package manifest.
+        package: String,
+        /// The number of findings on the exports or members that the
+        /// package entry publishes. A finding counts when its rule is not
+        /// `off` for its file and `ignoreFindings` does not cover it. The
+        /// count is taken before a run scope and a baseline.
+        findings: u32,
+    },
     /// In production mode, a built-in production pattern (for example
     /// `**/test/**`) excluded at least one source file that a production file
     /// imports (issue #4498). Fallow does not analyze an excluded file, so an
@@ -1347,6 +1367,18 @@ fn render_message(root: &Path, path: &Path, kind: &WorkspaceDiagnosticKind) -> S
              count measures nothing. The rule does not apply to projects whose client code has \
              neither, such as a Vite SPA."
                 .to_string()
+        }
+        WorkspaceDiagnosticKind::PublicPackageCandidate { package, findings } => {
+            let noun = if *findings == 1 {
+                "finding is"
+            } else {
+                "findings are"
+            };
+            format!(
+                "{findings} {noun} on the exports or members that the entry of workspace package \
+                 `{package}` ('{display}') publishes. This package looks published. If it is, add \
+                 it to `publicPackages`, so fallow treats its entry exports as public API."
+            )
         }
         WorkspaceDiagnosticKind::ProductionExcludedFileImported {
             pattern,

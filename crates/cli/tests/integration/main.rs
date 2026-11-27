@@ -192,6 +192,7 @@ mod production_ignore_tests;
 mod production_override_tests;
 mod production_support_entries_tests;
 mod production_workspace_tests;
+mod public_package_candidate_tests;
 mod quiet_stderr_tests;
 mod reconcile_review_tests;
 mod regression_flag_scope_tests;

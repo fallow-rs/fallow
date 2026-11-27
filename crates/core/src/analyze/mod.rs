@@ -720,6 +720,7 @@ pub(crate) fn find_dead_code_full(
         excluded,
         results: &mut results,
     });
+    public_packages::record_candidate_diagnostics(graph, config, workspaces, &results);
 
     // Last, so every finding the detectors and the post-detection passes put
     // into a caveated array carries the caveat, including ones moved between
@@ -883,12 +884,7 @@ struct PostDetectionInput<'a, 'm> {
 /// reclassification, security, catalog/override, framework-convention findings,
 /// and stale-suppression accounting.
 fn populate_post_detection_findings(input: &mut PostDetectionInput<'_, '_>) {
-    public_packages::filter_public_workspace_results(
-        input.graph,
-        input.config,
-        input.workspaces,
-        input.results,
-    );
+    public_packages::filter_public_workspace_results(input);
 
     // Reclassify the server-action subset of unused exports BEFORE stale
     // detection so a `// fallow-ignore-next-line unused-server-action` marker is

@@ -559,6 +559,8 @@ In monorepos, shared library packages have exported APIs consumed by external co
 }
 ```
 
+When a workspace package is not `"private": true`, has an `exports`, `main` or `module` field, and has findings on the exports or members of its entry, fallow adds a `public-package-candidate` entry to `workspace_diagnostics[]` that names the package. Read it as a question: if the project publishes the package, add it to `publicPackages`. If the package is internal, set `"private": true` in its `package.json`, or leave the findings as they are. The entry changes no finding and no gate.
+
 This is the correct solution for library false positives in monorepos. Only use JSDoc visibility tags (`/** @public */`, `/** @internal */`, etc.) for individual exports in application packages.
 
 ---

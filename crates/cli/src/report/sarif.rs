@@ -187,30 +187,37 @@ pub fn annotate_config_pattern_sarif(
     let notifications = diagnostics
         .iter()
         .filter_map(|diagnostic| {
-            let properties =
-                if let Some((setting, pattern)) = diagnostic.kind.unmatched_config_pattern() {
-                    serde_json::json!({ "setting": setting, "pattern": pattern })
-                } else if let Some((rule, flag)) = diagnostic.kind.requested_rule_off() {
-                    serde_json::json!({ "setting": "rules", "rule": rule, "flag": flag })
-                } else if let Some((pattern, files, rules, reason)) =
-                    diagnostic.kind.unmatched_override_glob()
-                {
-                    serde_json::json!({
-                        "setting": "overrides",
-                        "pattern": pattern,
-                        "files": files,
-                        "rules": rules,
-                        "reason": reason,
-                    })
-                } else {
-                    let (rule, files, reason) = diagnostic.kind.ineffective_override()?;
-                    serde_json::json!({
-                        "setting": "overrides",
-                        "rule": rule,
-                        "files": files,
-                        "reason": reason,
-                    })
-                };
+            let properties = if let Some((setting, pattern)) =
+                diagnostic.kind.unmatched_config_pattern()
+            {
+                serde_json::json!({ "setting": setting, "pattern": pattern })
+            } else if let Some((rule, flag)) = diagnostic.kind.requested_rule_off() {
+                serde_json::json!({ "setting": "rules", "rule": rule, "flag": flag })
+            } else if let Some((package, findings)) = diagnostic.kind.public_package_candidate() {
+                serde_json::json!({
+                    "setting": "publicPackages",
+                    "package": package,
+                    "findings": findings,
+                })
+            } else if let Some((pattern, files, rules, reason)) =
+                diagnostic.kind.unmatched_override_glob()
+            {
+                serde_json::json!({
+                    "setting": "overrides",
+                    "pattern": pattern,
+                    "files": files,
+                    "rules": rules,
+                    "reason": reason,
+                })
+            } else {
+                let (rule, files, reason) = diagnostic.kind.ineffective_override()?;
+                serde_json::json!({
+                    "setting": "overrides",
+                    "rule": rule,
+                    "files": files,
+                    "reason": reason,
+                })
+            };
             Some(serde_json::json!({
                 "level": "note",
                 "descriptor": { "id": diagnostic.kind.id() },

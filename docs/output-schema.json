@@ -13884,6 +13884,29 @@
           "properties": {
             "kind": {
               "type": "string",
+              "const": "public-package-candidate"
+            },
+            "package": {
+              "type": "string",
+              "description": "The `name` of the package manifest."
+            },
+            "findings": {
+              "type": "integer",
+              "description": "The number of findings on the exports or members that the\npackage entry publishes. A finding counts when its rule is not\n`off` for its file and `ignoreFindings` does not cover it. The\ncount is taken before a run scope and a baseline."
+            }
+          },
+          "required": [
+            "kind",
+            "package",
+            "findings"
+          ],
+          "description": "A workspace package looks published, but `publicPackages` does not\nlist it (issue #5335). The manifest is not `\"private\": true`, it has\nan `exports`, `main` or `module` field, and the dead-code pass has a\nfinding on at least one export or member that the package entry\npublishes.\n\nFallow treats a workspace package as internal unless\n`publicPackages` lists it, so a package that the project publishes to\na registry gets findings for its public API. This entry is a hint\nonly: it changes no finding, no count and no gate. `path` is the\npackage directory."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
               "const": "production-excluded-file-imported"
             },
             "pattern": {

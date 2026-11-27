@@ -33,6 +33,7 @@ impl WorkspaceDiagnosticKind {
             Self::BoundariesNotConfigured => "boundaries-not-configured",
             Self::RulePacksNotConfigured => "rule-packs-not-configured",
             Self::ClientServerLeakNoClientRoots => "client-server-leak-no-client-roots",
+            Self::PublicPackageCandidate { .. } => "public-package-candidate",
             Self::ProductionExcludedFileImported { .. } => "production-excluded-file-imported",
             Self::ExcludedByDefaultIgnore { .. } => "excluded-by-default-ignore",
             Self::NoSourceFilesAnalyzed { .. } => "no-source-files-analyzed",
@@ -111,6 +112,7 @@ impl WorkspaceDiagnosticKind {
             Self::BoundariesNotConfigured
             | Self::RulePacksNotConfigured
             | Self::ClientServerLeakNoClientRoots
+            | Self::PublicPackageCandidate { .. }
             | Self::ExcludedByDefaultIgnore { .. }
             | Self::PluginEffectNotModeled { .. }
             | Self::CoverageAutoDetected
@@ -289,6 +291,7 @@ impl WorkspaceDiagnosticKind {
             | Self::BoundariesNotConfigured
             | Self::RulePacksNotConfigured
             | Self::ClientServerLeakNoClientRoots
+            | Self::PublicPackageCandidate { .. }
             | Self::ProductionExcludedFileImported { .. }
             | Self::ExcludedByDefaultIgnore { .. }
             | Self::NoSourceFilesAnalyzed { .. }
@@ -355,6 +358,7 @@ impl WorkspaceDiagnosticKind {
             | Self::BoundariesNotConfigured
             | Self::RulePacksNotConfigured
             | Self::ClientServerLeakNoClientRoots
+            | Self::PublicPackageCandidate { .. }
             | Self::ProductionExcludedFileImported { .. } => true,
             Self::UndeclaredWorkspace
             | Self::MalformedPackageJson { .. }
@@ -462,6 +466,7 @@ impl WorkspaceDiagnosticKind {
             | Self::BoundariesNotConfigured
             | Self::RulePacksNotConfigured
             | Self::ClientServerLeakNoClientRoots
+            | Self::PublicPackageCandidate { .. }
             | Self::ProductionExcludedFileImported { .. }
             | Self::ExcludedByDefaultIgnore { .. }
             | Self::PluginConfigUnreadable { .. }
@@ -539,6 +544,7 @@ impl WorkspaceDiagnosticKind {
             | Self::BoundariesNotConfigured
             | Self::RulePacksNotConfigured
             | Self::ClientServerLeakNoClientRoots
+            | Self::PublicPackageCandidate { .. }
             | Self::ProductionExcludedFileImported { .. }
             | Self::ExcludedByDefaultIgnore { .. }
             | Self::NoSourceFilesAnalyzed { .. }

@@ -127,6 +127,18 @@ impl WorkspaceDiagnosticKind {
         }
     }
 
+    /// The package name and the finding count of a `public-package-candidate`
+    /// entry. `None` for every other kind.
+    #[must_use]
+    pub fn public_package_candidate(&self) -> Option<(&str, u32)> {
+        match self {
+            Self::PublicPackageCandidate { package, findings } => {
+                Some((package.as_str(), *findings))
+            }
+            _ => None,
+        }
+    }
+
     /// Whether this is a config entry that matched something but changed
     /// nothing, as opposed to one that matched nothing (issue #3824).
     #[must_use]
