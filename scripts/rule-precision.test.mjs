@@ -7,6 +7,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import {
   buildRow,
+  carryVerdicts,
   combineReviews,
   findingAnchor,
   findingsByRule,
@@ -860,4 +861,59 @@ test("record reports a missing verdict file with exit code 2", () => {
   const result = run(["record", "--in", "/nonexistent", "--verdicts", "/nonexistent/v.json"]);
   assert.equal(result.status, 2);
   assert.match(result.stderr, /does not exist/);
+});
+
+const item = (project, id) => ({ project, id, anchor: { path: "src/a.ts", line: 1 } });
+const verdict = (project, id, value) => ({
+  project,
+  id,
+  verdict: value,
+  ...(value === "noise" ? { class: "c" } : {}),
+  reason: "r",
+});
+
+test("carried verdicts keep only sampled findings, and new findings need a review", () => {
+  const items = [item("app", "x"), item("app", "y"), item("lib", "x")];
+  const full = {
+    reviewed_on: "2026-01-01",
+    verdicts: [verdict("app", "x", "real"), verdict("app", "gone", "noise")],
+  };
+  const tiebreak = { reviewed_on: "2026-01-02", verdicts: [verdict("app", "x", "noise")] };
+  const { ok, carried, fresh } = carryVerdicts(items, [full, tiebreak]);
+  assert.equal(ok, true);
+  assert.deepEqual(carried, [
+    { reviewed_on: "2026-01-01", verdicts: [verdict("app", "x", "real")] },
+    { reviewed_on: "2026-01-02", verdicts: [verdict("app", "x", "noise")] },
+  ]);
+  assert.deepEqual(fresh, [item("app", "y"), item("lib", "x")]);
+  assert.deepEqual(carryVerdicts(items, [{ reviewed_on: "2026-01-01" }]).errors, [
+    "review 1 has no verdicts array",
+  ]);
+  assert.equal(carryVerdicts(items, []).ok, false);
+});
+
+test("carry writes one carried file per earlier review and the new findings", () => {
+  const root = mkdtempSync(join(tmpdir(), "rule-precision-carry-"));
+  try {
+    const dir = join(root, "unused-export");
+    mkdirSync(dir);
+    writeFileSync(join(dir, "review.json"), JSON.stringify([item("app", "x"), item("app", "y")]));
+    const old = join(root, "verdicts.json");
+    writeFileSync(
+      old,
+      JSON.stringify({ reviewed_on: "2026-01-01", verdicts: [verdict("app", "x", "real")] }),
+    );
+    const result = run(["carry", "--in", dir, "--from", old]);
+    assert.equal(result.status, 0, result.stderr);
+    const read = (name) => JSON.parse(readFileSync(join(dir, name), "utf8"));
+    assert.deepEqual(read("carried.0.json").verdicts, [verdict("app", "x", "real")]);
+    assert.deepEqual(read("review.new.json"), [item("app", "y")]);
+    assert.match(result.stdout, /1 carried, 1 new/);
+    assert.equal(run(["carry", "--in", dir]).status, 2);
+    const again = run(["carry", "--in", dir, "--from", old]);
+    assert.equal(again.status, 2);
+    assert.match(again.stderr, /already has carried\.0\.json/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
