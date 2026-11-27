@@ -11,9 +11,11 @@ const ADOPT_CAPS: Capabilities = Capabilities {
 /// The taken tests of each companion, by companion index.
 type Taken = Arc<Mutex<FxHashMap<usize, Vec<String>>>>;
 
-/// The dry run of `files`: `a::t1` hits m1 and m3, `b::u1` hits m2 and m3,
-/// `c::v1` hits nothing. Each passing test has an index entry, and the dry
-/// run proves a shared worker for its files.
+/// The dry run of `files`: `a::t1` hits m3, `b::u1` hits m2 and m3, and
+/// `c::v1` hits m1. Each passing test has an index entry, and the dry run
+/// proves a shared worker for its files. With two companions the shares are
+/// `[a, c]` and `[b]`, so m1 always runs in the companion that dry-ran its
+/// file, and the tests that another companion takes never cover it.
 fn dry_of(files: &[String]) -> DryRunResult {
     let mut dry = DryRunResult {
         tests: Vec::new(),
@@ -31,9 +33,9 @@ fn dry_of(files: &[String]) -> DryRunResult {
     };
     for file in files {
         let (id, hits): (&str, &[&str]) = match file.as_str() {
-            "test/a.test.ts" => ("t1", &["m1", "m3"]),
+            "test/a.test.ts" => ("t1", &["m3"]),
             "test/b.test.ts" => ("u1", &["m2", "m3"]),
-            _ => ("v1", &[]),
+            _ => ("v1", &["m1"]),
         };
         let test_id = format!("{file}::{id}");
         if !hits.is_empty() {
