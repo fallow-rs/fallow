@@ -866,3 +866,60 @@ fn filter_to_workspaces_narrows_component_findings() {
     assert_eq!(results.duplicate_prop_shapes.len(), 1);
     assert_eq!(results.prop_drilling_chains.len(), 1);
 }
+
+/// The fingerprint of a project at `root`, or `None` when the computation does
+/// not end within a short limit.
+#[cfg(unix)]
+fn fingerprint_within_limit(root: &std::path::Path) -> Option<String> {
+    let config = fallow_config::FallowConfig::default().resolve(
+        root.to_path_buf(),
+        fallow_config::OutputFormat::Json,
+        1,
+        true,
+        true,
+        None,
+    );
+    let (sender, receiver) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = sender.send(analysis_fingerprint_for_version(&config, "1.0.0"));
+    });
+    receiver
+        .recv_timeout(std::time::Duration::from_secs(3))
+        .ok()
+}
+
+#[cfg(unix)]
+fn fifo_project(fifo: &str) -> tempfile::TempDir {
+    let dir = tempfile::tempdir().expect("project");
+    let root = dir.path();
+    std::fs::create_dir_all(root.join(".git/info")).expect("git dir");
+    std::fs::create_dir_all(root.join("src")).expect("src");
+    std::fs::write(root.join("src/index.ts"), "export const a = 1;\n").expect("source");
+    let status = std::process::Command::new("mkfifo")
+        .arg(root.join(fifo))
+        .status()
+        .expect("run mkfifo");
+    assert!(status.success(), "mkfifo {fifo}");
+    dir
+}
+
+#[cfg(unix)]
+#[test]
+fn the_fingerprint_skips_a_fifo_root_gitignore() {
+    let project = fifo_project(".gitignore");
+    assert!(fingerprint_within_limit(project.path()).is_some());
+}
+
+#[cfg(unix)]
+#[test]
+fn the_fingerprint_skips_a_fifo_git_exclude_file() {
+    let project = fifo_project(".git/info/exclude");
+    assert!(fingerprint_within_limit(project.path()).is_some());
+}
+
+#[cfg(unix)]
+#[test]
+fn the_fingerprint_skips_a_fifo_package_json() {
+    let project = fifo_project("package.json");
+    assert!(fingerprint_within_limit(project.path()).is_some());
+}

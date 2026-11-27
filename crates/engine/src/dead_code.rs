@@ -365,7 +365,7 @@ fn input_files_digest(config: &ResolvedConfig) -> String {
     let root = config.root.as_path();
     let globs = resolution_file_globs(config);
     let mut files: std::collections::BTreeMap<String, String> = std::collections::BTreeMap::new();
-    if let Ok(content) = std::fs::read(root.join(".git/info/exclude")) {
+    if let Some(content) = read_input_file(root, &root.join(".git/info/exclude"), true) {
         files.insert(".git/info/exclude".to_owned(), normalized_text(&content));
     }
     let mut project_configs: Vec<PathBuf> = Vec::new();
@@ -384,7 +384,7 @@ fn input_files_digest(config: &ResolvedConfig) -> String {
         if config.ignore_patterns.is_match(relative) {
             continue;
         }
-        if let Ok(content) = std::fs::read(entry.path()) {
+        if let Some(content) = read_input_file(root, entry.path(), is_ignore_file) {
             let key = StableFileKey::from_relative(relative).as_str().to_owned();
             files.insert(key, normalized_text(&content));
             if is_project_config_name(&name) {
@@ -400,6 +400,22 @@ fn input_files_digest(config: &ResolvedConfig) -> String {
         .flat_map(|(path, content)| [path.as_str(), content.as_str()])
         .collect();
     fallow_types::identity::fnv1a64_parts(&parts)
+}
+
+/// The content of one fingerprint input file: a regular file inside `root`
+/// with at most [`fallow_types::read_guard::DEFAULT_MAX_READ_BYTES`] bytes. An
+/// ignore file must also pass the ignore file check, so a FIFO or a link to a
+/// device is never opened.
+fn read_input_file(root: &Path, path: &Path, is_ignore_file: bool) -> Option<Vec<u8>> {
+    if is_ignore_file && !fallow_config::readable_ignore_file(path, root) {
+        return None;
+    }
+    fallow_types::read_guard::read_bytes_inside(
+        root,
+        path,
+        fallow_types::read_guard::DEFAULT_MAX_READ_BYTES,
+    )
+    .ok()
 }
 
 /// Follow the `extends` chain of one tsconfig or jsconfig file and add each
@@ -420,7 +436,10 @@ fn add_extends_chain(
             let Some(next) = resolve_extends_target(root, &current, &target) else {
                 continue;
             };
-            if let Ok(content) = std::fs::read(&next) {
+            if let Ok(content) = fallow_types::read_guard::read_bytes_bounded(
+                &next,
+                fallow_types::read_guard::DEFAULT_MAX_READ_BYTES,
+            ) {
                 files.insert(extends_key(root, &next), normalized_text(&content));
                 frontier.push((next, depth + 1));
             }
@@ -431,7 +450,11 @@ fn add_extends_chain(
 /// The `extends` targets of a tsconfig or jsconfig file: one string or an
 /// array of strings.
 fn read_extends(path: &Path) -> Option<Vec<String>> {
-    let content = std::fs::read_to_string(path).ok()?;
+    let content = fallow_types::read_guard::read_to_string_bounded(
+        path,
+        fallow_types::read_guard::DEFAULT_MAX_READ_BYTES,
+    )
+    .ok()?;
     let value: serde_json::Value = fallow_config::jsonc::parse_to_value(&content).ok()?;
     match value.get("extends")? {
         serde_json::Value::String(target) => Some(vec![target.clone()]),
