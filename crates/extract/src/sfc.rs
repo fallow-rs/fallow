@@ -798,18 +798,16 @@ fn apply_emits_harvest(
     harvest: crate::sfc_props::DefineEmitsHarvest,
     byte_offset: u32,
 ) {
-    if harvest.has_unharvestable_emits {
-        input.combined.has_unharvestable_emits = true;
-    }
-    if harvest.has_dynamic_emit {
-        input.combined.has_dynamic_emit = true;
-    }
-    if harvest.has_emit_whole_object_use {
-        input.combined.has_emit_whole_object_use = true;
-    }
+    input.combined.has_unharvestable_emits |= harvest.has_unharvestable_emits;
+    input.combined.has_dynamic_emit |= harvest.has_dynamic_emit;
+    input.combined.has_emit_whole_object_use |= harvest.has_emit_whole_object_use;
     if let Some(binding) = harvest.emit_binding {
         *input.emit_return_binding = Some(binding);
     }
+    input
+        .script_binding_context
+        .model_ref_events
+        .extend(harvest.model_refs);
     for mut emit in harvest.emits {
         emit.span_start += byte_offset;
         input.combined.component_emits.push(emit);

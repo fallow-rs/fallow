@@ -22,6 +22,8 @@
 //!   object (credits `this.foo`, `changes.foo` / `changes['foo']` in
 //!   `ngOnChanges`, destructured reads); broad on purpose, to kill the
 //!   ngOnChanges-by-name false positive without a blanket abstain;
+//! - (in extraction) a `@HostBinding` decorator on the input member: Angular
+//!   reads the input to update the host element, so the harvest skips it;
 //! - any of the evidence above in a module that declares a subclass of the
 //!   component class, directly or through an intermediate class, in another
 //!   file. A base `@Directive()` often declares inputs that only its

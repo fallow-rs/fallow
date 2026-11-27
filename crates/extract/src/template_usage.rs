@@ -22,6 +22,9 @@ pub struct ScriptBindingContext {
     pub(crate) event_dispatch_bindings: FxHashSet<String>,
     /// Vue emit bindings: the `defineEmits()` return binding and `$emit`.
     pub(crate) emit_bindings: FxHashSet<String>,
+    /// VueUse model refs (`useVModel` / `useVModels`) with the events that a
+    /// write of the ref emits.
+    pub(crate) model_ref_events: FxHashMap<String, Vec<String>>,
     /// Script constants with a literal value (`const cmd = "ls"`). A security
     /// sink in markup reads such an argument as a literal, as in script.
     pub(crate) static_sink_literals: FxHashMap<String, SinkLiteralValue>,
@@ -126,6 +129,13 @@ impl TemplateUsage {
         if let Some(sink) = self.markup.as_mut() {
             sink.anchor = u32::try_from(offset).unwrap_or(u32::MAX);
         }
+    }
+
+    /// Whether `name` is a VueUse model ref of the component script.
+    pub(crate) fn names_model_ref(&self, name: &str) -> bool {
+        self.markup
+            .as_ref()
+            .is_some_and(|sink| sink.context.model_ref_events.contains_key(name))
     }
 
     /// Give back the component module with the markup snippet facts merged.

@@ -72,6 +72,7 @@ mod sfc_blocks;
 pub mod sfc_css;
 mod sfc_props;
 mod sfc_template;
+mod sfc_use_vmodel;
 mod shared_state;
 pub mod similar_code;
 mod sink_identity;

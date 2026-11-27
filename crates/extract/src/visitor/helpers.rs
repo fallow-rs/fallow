@@ -1091,7 +1091,9 @@ fn build_property_member(
 /// `@Input()`) are skipped per-member: a setter body runs on binding, so it is
 /// inherently used and never a dead input. The caller gates this on the class
 /// carrying an Angular component/directive decorator, so a non-Angular class with
-/// a same-named `input` / `Input` helper never contributes.
+/// a same-named `input` / `Input` helper never contributes. An `@Input()` member
+/// that also carries `@HostBinding(...)` is skipped: Angular reads it to update
+/// the host element.
 pub fn extract_angular_inputs_outputs(
     class: &Class<'_>,
 ) -> (Vec<AngularInputMember>, Vec<AngularOutputMember>) {
@@ -1110,6 +1112,9 @@ pub fn extract_angular_inputs_outputs(
 
         if let Some(role) = angular_decorator_member_role(prop) {
             match role {
+                // `@HostBinding('class.x') @Input() x` reflects the input onto the
+                // host element, so Angular reads it on every change detection.
+                AngularMemberRole::Input if has_host_binding_decorator(prop) => {}
                 AngularMemberRole::Input => inputs.push(AngularInputMember {
                     name: name.text().into_owned(),
                     span_start,
@@ -1162,6 +1167,12 @@ fn angular_decorator_member_role(prop: &PropertyDefinition<'_>) -> Option<Angula
             _ => None,
         }
     })
+}
+
+fn has_host_binding_decorator(prop: &PropertyDefinition<'_>) -> bool {
+    prop.decorators
+        .iter()
+        .any(|decorator| decorator_path(&decorator.expression) == "HostBinding")
 }
 
 enum AngularMemberRole {

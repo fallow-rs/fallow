@@ -47,6 +47,15 @@ impl MarkupContext {
             .is_some_and(|script| script.emit_bindings.contains(name))
     }
 
+    /// The events that a write of the VueUse model ref `name` emits, when no
+    /// template local shadows it.
+    fn model_ref_events(&self, name: &str) -> Option<&[String]> {
+        self.script_for(name)?
+            .model_ref_events
+            .get(name)
+            .map(Vec::as_slice)
+    }
+
     /// The script literal of `key` (`name`, or `Enum.MEMBER` for the enum
     /// `root`), when no template local shadows `root`.
     pub(in crate::visitor) fn sink_literal(
@@ -70,6 +79,16 @@ impl ModuleInfoExtractor {
         self.record_svelte_dispatch_call(expr);
         self.record_svelte_dispatch_whole_arg_use(expr);
         self.record_template_emit_call(expr);
+    }
+
+    /// Record a markup write (`title = x`, `count++`) of a VueUse model ref.
+    /// The template unwraps the ref, so the write runs its setter, which emits
+    /// the `update:` event.
+    pub(super) fn record_template_model_ref_write(&mut self, name: &str) {
+        if let Some(events) = self.markup.model_ref_events(name) {
+            let events = events.to_vec();
+            self.markup.emitted.extend(events);
+        }
     }
 
     /// Record a Vue `emit("close")` or `$emit("close")` call in a markup

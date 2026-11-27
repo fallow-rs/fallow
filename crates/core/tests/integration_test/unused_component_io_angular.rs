@@ -136,3 +136,11 @@ fn subclass_in_another_file_credits_base_inputs_and_outputs() {
     );
     assert_eq!(outputs, ["neverEmitted"], "outputs: {outputs:?}");
 }
+
+/// Angular reads an input through a `@HostBinding` on the same member and
+/// through a `host` metadata binding, so neither input is unused.
+#[test]
+fn host_bindings_credit_inputs() {
+    let (inputs, _) = flagged_names("angular-host-binding-input");
+    assert_eq!(inputs, ["neverRead"], "inputs: {inputs:?}");
+}

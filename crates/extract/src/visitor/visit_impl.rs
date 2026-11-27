@@ -1289,12 +1289,18 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
     }
 
     fn visit_assignment_expression(&mut self, expr: &AssignmentExpression<'a>) {
+        if let AssignmentTarget::AssignmentTargetIdentifier(target) = &expr.left {
+            self.record_template_model_ref_write(target.name.as_str());
+        }
         self.record_assignment_expression_facts(expr);
         walk::walk_assignment_expression(self, expr);
         self.record_direct_binding_assignment(expr);
     }
 
     fn visit_update_expression(&mut self, expr: &UpdateExpression<'a>) {
+        if let SimpleAssignmentTarget::AssignmentTargetIdentifier(target) = &expr.argument {
+            self.record_template_model_ref_write(target.name.as_str());
+        }
         match &expr.argument {
             SimpleAssignmentTarget::StaticMemberExpression(member) => {
                 if !self.invalidate_projected_property(

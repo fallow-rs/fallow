@@ -725,6 +725,41 @@ fn scan_vue_attr_value(
             attr_locals,
         );
     }
+    merge_model_ref_write(
+        attr,
+        expr,
+        imported_bindings,
+        bound_targets,
+        attr_locals,
+        usage,
+    );
+}
+
+/// `v-model="title"` writes `title` back on input. For a VueUse model ref, the
+/// write runs the setter of the ref, so the scan reads the attribute as the
+/// assignment that Vue compiles it to.
+fn merge_model_ref_write(
+    attr: &ParsedAttr,
+    expr: &str,
+    imported_bindings: &FxHashSet<String>,
+    bound_targets: &FxHashMap<String, String>,
+    attr_locals: &[String],
+    usage: &mut TemplateUsage,
+) {
+    let is_v_model = attr.name == "v-model"
+        || attr.name.starts_with("v-model:")
+        || attr.name.starts_with("v-model.");
+    let target = expr.trim();
+    if !is_v_model || !usage.names_model_ref(target) {
+        return;
+    }
+    merge_statement_usage_with_bound_targets(
+        usage,
+        &format!("{target} = $event"),
+        imported_bindings,
+        bound_targets,
+        attr_locals,
+    );
 }
 
 fn attr_value<'a>(parsed: &'a ParsedTag, name: &str) -> Option<&'a str> {
