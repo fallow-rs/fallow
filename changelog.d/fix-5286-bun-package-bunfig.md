@@ -1,0 +1,3 @@
+### Fixed
+
+- **`fallow mutation` runs `bun test` with the `bunfig.toml` of a workspace package.** Bun reads `bunfig.toml` only from its working folder. Fallow ran each test file from the project root, so the `[test] preload` of a package never ran and the baseline failed. Fallow now starts each test file in the folder of the nearest `bunfig.toml` between the test file and the root, as `cd <package> && bun test` does. For the tests of such a package, `process.cwd()` is the package folder, and Bun loads the `.env` files of the package folder. A project with only a root `bunfig.toml` runs as before. (#5286)

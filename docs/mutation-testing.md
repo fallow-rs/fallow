@@ -1658,6 +1658,16 @@ itself, so the next mutant run gets the same process.
 - Each dry run and each mutant run starts one test process for each test
   file. The `node:test` adapter uses `run()` of `node:test` with process
   isolation. The `bun test` adapter starts `bun test` with a JUnit report.
+- Bun reads the project `bunfig.toml` only from its working folder and does
+  not search the parent folders. The `bun test` adapter starts each test
+  file in the folder of the nearest `bunfig.toml` from the test file up to
+  the root, else at the root. A workspace package with its own `bunfig.toml`
+  then gets its `[test] preload` and its other settings, as
+  `cd <package> && bun test` does. Bun does not merge that file with the
+  root `bunfig.toml`. For the tests of such a package, `process.cwd()` is
+  the package folder, and Bun loads the `.env` files of the package folder,
+  not of the root. The test ids stay relative to the root (`bunfigFolder`
+  in `tools/mutation-runner/src/adapters/bun-test.mjs`).
 - A preload file serves the instrumented files. `node:test` uses a
   synchronous module hook (`module.registerHooks`), so `import` and
   `require` both get the instrumented file. Node strips the types of a
@@ -1841,6 +1851,9 @@ The key hashes these parts:
   does not hash the files that a selected config imports. The selected
   Vitest projects (`--runner-project`) are a key part too;
 - the lockfiles of the first directory from the root upward that has one;
+- for each covering test file, the `bunfig.toml` in each folder between the
+  root and the test file. An absent file is also a key fact, because a new
+  file changes the working folder of the `bun test` adapter;
 - the runner config files at the root: `vitest.config.*`, `vite.config.*`,
   `vitest.workspace.*`, `bunfig.toml`, `package.json` and `tsconfig.json`. An
   absent file is also a key fact, so a new config file changes the key;

@@ -42,7 +42,7 @@ use super::scheduler::{CachedResult, ResultLookup, ScheduleOutcome, ScheduledMut
 pub const RESULT_CACHE_FILE: &str = "results.json";
 /// The version of the key and of the file format. A change to the key
 /// parts or to the file shape needs a new version.
-const FORMAT_VERSION: u32 = 6;
+const FORMAT_VERSION: u32 = 7;
 /// The most entries that the file keeps.
 pub const MAX_ENTRIES: usize = 20_000;
 /// The inputs of a test that the key does not hash.
@@ -63,12 +63,13 @@ const LOCKFILES: [&str; 6] = [
 /// [`RUNNER_CONFIG_MODULES`], a file that is absent also is a key fact, so a
 /// new config file changes the key. The files that a config module reaches
 /// through static imports are in [`KeyFiles::support_files`].
-const RUNNER_CONFIG_DATA: [&str; 4] = [
-    "vitest.workspace.json",
-    "bunfig.toml",
-    "package.json",
-    TSCONFIG,
-];
+const RUNNER_CONFIG_DATA: [&str; 4] = ["vitest.workspace.json", BUNFIG, "package.json", TSCONFIG];
+
+/// The Bun test config. `bun test` reads it from its working folder, and
+/// the Bun adapter runs a test file from the folder of the nearest one. The
+/// key of a test file hashes this file in each folder between the root and
+/// the test file.
+const BUNFIG: &str = "bunfig.toml";
 
 /// The root tsconfig. The key also hashes each config of its `extends`
 /// chain.
@@ -119,6 +120,14 @@ fn lockfile_digest(root: &Path) -> String {
         break;
     }
     hex(&hasher.finalize())
+}
+
+/// The folders between the root and the root-relative `test_file`, from the
+/// folder of the file upward. The root is not one of them.
+fn package_folders(test_file: &str) -> impl Iterator<Item = &str> {
+    std::iter::successors(test_file.rsplit_once('/').map(|(dir, _)| dir), |dir| {
+        dir.rsplit_once('/').map(|(parent, _)| parent)
+    })
 }
 
 /// The runner config digest of the files at `root`, and of the configs that
@@ -370,6 +379,11 @@ impl ResultCache {
         let mut hasher = Sha256::new();
         feed(&mut hasher, test_file);
         feed(&mut hasher, &self.hash_of(test_file));
+        for dir in package_folders(test_file) {
+            let bunfig = format!("{dir}/{BUNFIG}");
+            feed(&mut hasher, &bunfig);
+            feed(&mut hasher, &self.hash_of(&bunfig));
+        }
         let reach = self.files.test_file_reach.get(test_file);
         hasher.update((reach.map_or(0, Vec::len) as u64).to_le_bytes());
         for path in reach
