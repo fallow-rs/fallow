@@ -244,6 +244,13 @@ fn tokenize_tsx_element_type_arguments() {
 #[test]
 fn strip_types_drops_call_and_new_type_arguments() {
     let stripped = tokenize_cross_language("check<First>(); new Map<string, Second>();");
-    assert!(!has_ident(&stripped, "First"));
-    assert!(!has_ident(&stripped, "Second"));
+    let plain = tokenize_cross_language("check(); new Map();");
+    assert_eq!(kinds(&stripped), kinds(&plain));
+}
+
+#[test]
+fn tokenize_ts_optional_call_type_arguments() {
+    for source in ["a?.b<First>();", "a?.<First>();", "a.b<First>?.();"] {
+        assert!(has_ident(&tokenize(source), "First"), "{source}");
+    }
 }

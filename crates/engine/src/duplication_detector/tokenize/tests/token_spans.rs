@@ -48,6 +48,9 @@ export default class Box extends Base {
       check<Props>(
         a,
       );
+      a?.check<Props>(
+        a,
+      );
       throw new Error<Props>(
         'x',
       );
