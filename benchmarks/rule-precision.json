@@ -20,6 +20,30 @@
       "repo": "react-hook-form/react-hook-form",
       "commit": "f3fd1bf4a3cb1265171adfc778f279a3c7e06fc5",
       "kind": "library"
+    },
+    "dub": {
+      "repo": "dubinc/dub",
+      "commit": "6b463b4bdd9ed2fd9aa416f67b5b77d317b1471e",
+      "kind": "Next.js app monorepo",
+      "default": false
+    },
+    "ghostfolio": {
+      "repo": "ghostfolio/ghostfolio",
+      "commit": "9cad9e102795aca04a6a58232a22a3fadc680383",
+      "kind": "Angular and NestJS app",
+      "default": false
+    },
+    "hoppscotch": {
+      "repo": "hoppscotch/hoppscotch",
+      "commit": "6177eae1875ea4cc8fc46604d65bf85478912d85",
+      "kind": "Vue app monorepo",
+      "default": false
+    },
+    "uptime-kuma": {
+      "repo": "louislam/uptime-kuma",
+      "commit": "d35c3fafa1da1fe42d86de55e60632255fd9a225",
+      "kind": "Vue and Node app",
+      "default": false
     }
   },
   "rows": [
@@ -76,6 +100,37 @@
           "count": 1
         }
       ]
+    },
+    {
+      "rule": "dev-dependency-in-production",
+      "command": "dead-code",
+      "args": [],
+      "fallow_version": "3.49.0",
+      "reviewed_on": "2026-11-27",
+      "sample_size": 30,
+      "reviews": 2,
+      "agreement_percent": 100,
+      "projects": [
+        {
+          "project": "ghostfolio",
+          "commit": "9cad9e102795aca04a6a58232a22a3fadc680383",
+          "findings": 1,
+          "sampled": 1,
+          "real": 1,
+          "noise": 0,
+          "unsure": 0
+        },
+        {
+          "project": "uptime-kuma",
+          "commit": "d35c3fafa1da1fe42d86de55e60632255fd9a225",
+          "findings": 23,
+          "sampled": 23,
+          "real": 23,
+          "noise": 0,
+          "unsure": 0
+        }
+      ],
+      "noise_classes": []
     },
     {
       "rule": "duplicate-export",
@@ -170,6 +225,33 @@
         }
       ],
       "noise_classes": []
+    },
+    {
+      "rule": "invalid-client-export",
+      "command": "dead-code",
+      "args": [],
+      "fallow_version": "3.49.0",
+      "reviewed_on": "2026-11-27",
+      "sample_size": 30,
+      "reviews": 2,
+      "agreement_percent": 100,
+      "projects": [
+        {
+          "project": "dub",
+          "commit": "6b463b4bdd9ed2fd9aa416f67b5b77d317b1471e",
+          "findings": 1,
+          "sampled": 1,
+          "real": 0,
+          "noise": 1,
+          "unsure": 0
+        }
+      ],
+      "noise_classes": [
+        {
+          "class": "ordinary client module export",
+          "count": 1
+        }
+      ]
     },
     {
       "rule": "package-cycle",
@@ -482,6 +564,60 @@
         {
           "class": "typed test mock reference",
           "count": 1
+        }
+      ]
+    },
+    {
+      "rule": "unused-component-emit",
+      "command": "dead-code",
+      "args": [],
+      "fallow_version": "3.49.0",
+      "reviewed_on": "2026-11-27",
+      "sample_size": 30,
+      "reviews": 2,
+      "agreement_percent": 100,
+      "projects": [
+        {
+          "project": "hoppscotch",
+          "commit": "6177eae1875ea4cc8fc46604d65bf85478912d85",
+          "findings": 14,
+          "sampled": 14,
+          "real": 10,
+          "noise": 4,
+          "unsure": 0
+        }
+      ],
+      "noise_classes": [
+        {
+          "class": "emitted by useVModel",
+          "count": 4
+        }
+      ]
+    },
+    {
+      "rule": "unused-component-input",
+      "command": "dead-code",
+      "args": [],
+      "fallow_version": "3.49.0",
+      "reviewed_on": "2026-11-27",
+      "sample_size": 30,
+      "reviews": 2,
+      "agreement_percent": 100,
+      "projects": [
+        {
+          "project": "ghostfolio",
+          "commit": "9cad9e102795aca04a6a58232a22a3fadc680383",
+          "findings": 5,
+          "sampled": 5,
+          "real": 3,
+          "noise": 2,
+          "unsure": 0
+        }
+      ],
+      "noise_classes": [
+        {
+          "class": "read by Angular host binding",
+          "count": 2
         }
       ]
     },
@@ -1393,6 +1529,692 @@
           "count": 1
         }
       ]
+    },
+    {
+      "rule": "cleartext-transport",
+      "command": "security",
+      "args": [],
+      "fallow_version": "3.49.0",
+      "reviewed_on": "2026-11-27",
+      "sample_size": 30,
+      "reviews": 2,
+      "agreement_percent": 100,
+      "projects": [
+        {
+          "project": "immich",
+          "commit": "7b27863b13d7ec52340e87637d71a39aa8d7efc0",
+          "findings": 2,
+          "sampled": 2,
+          "real": 0,
+          "noise": 2,
+          "unsure": 0
+        }
+      ],
+      "noise_classes": [
+        {
+          "class": "loopback-only transport",
+          "count": 2
+        }
+      ]
+    },
+    {
+      "rule": "client-server-leak",
+      "command": "security",
+      "args": [],
+      "fallow_version": "3.49.0",
+      "reviewed_on": "2026-11-27",
+      "sample_size": 30,
+      "reviews": 2,
+      "agreement_percent": 100,
+      "projects": [
+        {
+          "project": "documenso",
+          "commit": "cc491f1ec224bda8d3e09338e291ca11fe47641a",
+          "findings": 127,
+          "sampled": 30,
+          "real": 0,
+          "noise": 30,
+          "unsure": 0
+        },
+        {
+          "project": "plane",
+          "commit": "723bb178f97b87e80a23df9eed134eb1388d7465",
+          "findings": 2,
+          "sampled": 2,
+          "real": 0,
+          "noise": 2,
+          "unsure": 0
+        }
+      ],
+      "noise_classes": [
+        {
+          "class": "server-only env helper",
+          "count": 30
+        },
+        {
+          "class": "public Vite built-in",
+          "count": 2
+        }
+      ]
+    },
+    {
+      "rule": "code-injection",
+      "command": "security",
+      "args": [],
+      "fallow_version": "3.49.0",
+      "reviewed_on": "2026-11-27",
+      "sample_size": 30,
+      "reviews": 2,
+      "agreement_percent": 100,
+      "projects": [
+        {
+          "project": "plane",
+          "commit": "723bb178f97b87e80a23df9eed134eb1388d7465",
+          "findings": 3,
+          "sampled": 3,
+          "real": 0,
+          "noise": 3,
+          "unsure": 0
+        }
+      ],
+      "noise_classes": [
+        {
+          "class": "unreferenced script shim",
+          "count": 2
+        },
+        {
+          "class": "worker-only loader",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "rule": "command-injection",
+      "command": "security",
+      "args": [],
+      "fallow_version": "3.49.0",
+      "reviewed_on": "2026-11-27",
+      "sample_size": 30,
+      "reviews": 2,
+      "agreement_percent": 100,
+      "projects": [
+        {
+          "project": "immich",
+          "commit": "7b27863b13d7ec52340e87637d71a39aa8d7efc0",
+          "findings": 1,
+          "sampled": 1,
+          "real": 0,
+          "noise": 1,
+          "unsure": 0
+        }
+      ],
+      "noise_classes": [
+        {
+          "class": "validated command argument",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "rule": "dangerous-html",
+      "command": "security",
+      "args": [],
+      "fallow_version": "3.49.0",
+      "reviewed_on": "2026-11-27",
+      "sample_size": 30,
+      "reviews": 3,
+      "agreement_percent": 67,
+      "projects": [
+        {
+          "project": "documenso",
+          "commit": "cc491f1ec224bda8d3e09338e291ca11fe47641a",
+          "findings": 7,
+          "sampled": 7,
+          "real": 0,
+          "noise": 7,
+          "unsure": 0
+        },
+        {
+          "project": "plane",
+          "commit": "723bb178f97b87e80a23df9eed134eb1388d7465",
+          "findings": 3,
+          "sampled": 3,
+          "real": 0,
+          "noise": 3,
+          "unsure": 0
+        },
+        {
+          "project": "immich",
+          "commit": "7b27863b13d7ec52340e87637d71a39aa8d7efc0",
+          "findings": 4,
+          "sampled": 4,
+          "real": 0,
+          "noise": 4,
+          "unsure": 0
+        },
+        {
+          "project": "react-hook-form",
+          "commit": "f3fd1bf4a3cb1265171adfc778f279a3c7e06fc5",
+          "findings": 1,
+          "sampled": 1,
+          "real": 0,
+          "noise": 1,
+          "unsure": 0
+        }
+      ],
+      "noise_classes": [
+        {
+          "class": "trusted configuration",
+          "count": 5
+        },
+        {
+          "class": "generated QR markup",
+          "count": 2
+        },
+        {
+          "class": "inert document",
+          "count": 2
+        },
+        {
+          "class": "literal markup",
+          "count": 2
+        },
+        {
+          "class": "no runtime caller",
+          "count": 1
+        },
+        {
+          "class": "owner-only input",
+          "count": 1
+        },
+        {
+          "class": "trusted content",
+          "count": 1
+        },
+        {
+          "class": "value from trusted configuration",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "rule": "dynamic-module-load",
+      "command": "security",
+      "args": [],
+      "fallow_version": "3.49.0",
+      "reviewed_on": "2026-11-27",
+      "sample_size": 30,
+      "reviews": 2,
+      "agreement_percent": 100,
+      "projects": [
+        {
+          "project": "documenso",
+          "commit": "cc491f1ec224bda8d3e09338e291ca11fe47641a",
+          "findings": 1,
+          "sampled": 1,
+          "real": 0,
+          "noise": 1,
+          "unsure": 0
+        },
+        {
+          "project": "plane",
+          "commit": "723bb178f97b87e80a23df9eed134eb1388d7465",
+          "findings": 1,
+          "sampled": 1,
+          "real": 0,
+          "noise": 1,
+          "unsure": 0
+        }
+      ],
+      "noise_classes": [
+        {
+          "class": "directory entry names",
+          "count": 1
+        },
+        {
+          "class": "fixed module specifiers",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "rule": "nosql-injection",
+      "command": "security",
+      "args": [],
+      "fallow_version": "3.49.0",
+      "reviewed_on": "2026-11-27",
+      "sample_size": 30,
+      "reviews": 2,
+      "agreement_percent": 100,
+      "projects": [
+        {
+          "project": "documenso",
+          "commit": "cc491f1ec224bda8d3e09338e291ca11fe47641a",
+          "findings": 2,
+          "sampled": 2,
+          "real": 0,
+          "noise": 2,
+          "unsure": 0
+        }
+      ],
+      "noise_classes": [
+        {
+          "class": "non-database API",
+          "count": 2
+        }
+      ]
+    },
+    {
+      "rule": "open-redirect",
+      "command": "security",
+      "args": [],
+      "fallow_version": "3.49.0",
+      "reviewed_on": "2026-11-27",
+      "sample_size": 30,
+      "reviews": 3,
+      "agreement_percent": 99,
+      "projects": [
+        {
+          "project": "documenso",
+          "commit": "cc491f1ec224bda8d3e09338e291ca11fe47641a",
+          "findings": 53,
+          "sampled": 30,
+          "real": 3,
+          "noise": 27,
+          "unsure": 0
+        },
+        {
+          "project": "plane",
+          "commit": "723bb178f97b87e80a23df9eed134eb1388d7465",
+          "findings": 30,
+          "sampled": 30,
+          "real": 4,
+          "noise": 26,
+          "unsure": 0
+        },
+        {
+          "project": "immich",
+          "commit": "7b27863b13d7ec52340e87637d71a39aa8d7efc0",
+          "findings": 8,
+          "sampled": 8,
+          "real": 1,
+          "noise": 7,
+          "unsure": 0
+        }
+      ],
+      "noise_classes": [
+        {
+          "class": "fixed destination",
+          "count": 49
+        },
+        {
+          "class": "trusted provider endpoint",
+          "count": 9
+        },
+        {
+          "class": "no runtime caller",
+          "count": 1
+        },
+        {
+          "class": "owner-only input",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "rule": "path-traversal",
+      "command": "security",
+      "args": [],
+      "fallow_version": "3.49.0",
+      "reviewed_on": "2026-11-27",
+      "sample_size": 30,
+      "reviews": 3,
+      "agreement_percent": 97,
+      "projects": [
+        {
+          "project": "documenso",
+          "commit": "cc491f1ec224bda8d3e09338e291ca11fe47641a",
+          "findings": 10,
+          "sampled": 10,
+          "real": 0,
+          "noise": 10,
+          "unsure": 0
+        },
+        {
+          "project": "plane",
+          "commit": "723bb178f97b87e80a23df9eed134eb1388d7465",
+          "findings": 2,
+          "sampled": 2,
+          "real": 0,
+          "noise": 2,
+          "unsure": 0
+        },
+        {
+          "project": "immich",
+          "commit": "7b27863b13d7ec52340e87637d71a39aa8d7efc0",
+          "findings": 21,
+          "sampled": 21,
+          "real": 0,
+          "noise": 21,
+          "unsure": 0
+        }
+      ],
+      "noise_classes": [
+        {
+          "class": "fixed application path",
+          "count": 10
+        },
+        {
+          "class": "server-resolved paths",
+          "count": 7
+        },
+        {
+          "class": "deployment-configured path",
+          "count": 6
+        },
+        {
+          "class": "directory entry names",
+          "count": 4
+        },
+        {
+          "class": "validated backup filename",
+          "count": 4
+        },
+        {
+          "class": "managed storage path",
+          "count": 1
+        },
+        {
+          "class": "uncalled filesystem wrapper",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "rule": "postmessage-wildcard-origin",
+      "command": "security",
+      "args": [],
+      "fallow_version": "3.49.0",
+      "reviewed_on": "2026-11-27",
+      "sample_size": 30,
+      "reviews": 3,
+      "agreement_percent": 97,
+      "projects": [
+        {
+          "project": "documenso",
+          "commit": "cc491f1ec224bda8d3e09338e291ca11fe47641a",
+          "findings": 33,
+          "sampled": 30,
+          "real": 29,
+          "noise": 1,
+          "unsure": 0
+        }
+      ],
+      "noise_classes": [
+        {
+          "class": "unreachable signing branch",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "rule": "prototype-pollution",
+      "command": "security",
+      "args": [],
+      "fallow_version": "3.49.0",
+      "reviewed_on": "2026-11-27",
+      "sample_size": 30,
+      "reviews": 2,
+      "agreement_percent": 100,
+      "projects": [
+        {
+          "project": "immich",
+          "commit": "7b27863b13d7ec52340e87637d71a39aa8d7efc0",
+          "findings": 1,
+          "sampled": 1,
+          "real": 0,
+          "noise": 1,
+          "unsure": 0
+        }
+      ],
+      "noise_classes": [
+        {
+          "class": "non-merge helper",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "rule": "react-router-open-redirect",
+      "command": "security",
+      "args": [],
+      "fallow_version": "3.49.0",
+      "reviewed_on": "2026-11-27",
+      "sample_size": 30,
+      "reviews": 3,
+      "agreement_percent": 97,
+      "projects": [
+        {
+          "project": "documenso",
+          "commit": "cc491f1ec224bda8d3e09338e291ca11fe47641a",
+          "findings": 30,
+          "sampled": 30,
+          "real": 3,
+          "noise": 27,
+          "unsure": 0
+        },
+        {
+          "project": "plane",
+          "commit": "723bb178f97b87e80a23df9eed134eb1388d7465",
+          "findings": 9,
+          "sampled": 9,
+          "real": 3,
+          "noise": 6,
+          "unsure": 0
+        }
+      ],
+      "noise_classes": [
+        {
+          "class": "origin constrained",
+          "count": 31
+        },
+        {
+          "class": "discarded redirect",
+          "count": 2
+        }
+      ]
+    },
+    {
+      "rule": "secret-pii-log",
+      "command": "security",
+      "args": [],
+      "fallow_version": "3.49.0",
+      "reviewed_on": "2026-11-27",
+      "sample_size": 30,
+      "reviews": 3,
+      "agreement_percent": 95,
+      "projects": [
+        {
+          "project": "documenso",
+          "commit": "cc491f1ec224bda8d3e09338e291ca11fe47641a",
+          "findings": 240,
+          "sampled": 30,
+          "real": 4,
+          "noise": 26,
+          "unsure": 0
+        },
+        {
+          "project": "plane",
+          "commit": "723bb178f97b87e80a23df9eed134eb1388d7465",
+          "findings": 6,
+          "sampled": 6,
+          "real": 2,
+          "noise": 4,
+          "unsure": 0
+        },
+        {
+          "project": "immich",
+          "commit": "7b27863b13d7ec52340e87637d71a39aa8d7efc0",
+          "findings": 2,
+          "sampled": 2,
+          "real": 1,
+          "noise": 1,
+          "unsure": 0
+        }
+      ],
+      "noise_classes": [
+        {
+          "class": "resource identifier only",
+          "count": 25
+        },
+        {
+          "class": "disabled logging branch",
+          "count": 1
+        },
+        {
+          "class": "internal job identifier",
+          "count": 1
+        },
+        {
+          "class": "missing error fallback plugin",
+          "count": 1
+        },
+        {
+          "class": "navigation preload disabled",
+          "count": 1
+        },
+        {
+          "class": "organisation domain only",
+          "count": 1
+        },
+        {
+          "class": "unmounted middleware",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "rule": "sql-injection",
+      "command": "security",
+      "args": [],
+      "fallow_version": "3.49.0",
+      "reviewed_on": "2026-11-27",
+      "sample_size": 30,
+      "reviews": 3,
+      "agreement_percent": 96,
+      "projects": [
+        {
+          "project": "immich",
+          "commit": "7b27863b13d7ec52340e87637d71a39aa8d7efc0",
+          "findings": 28,
+          "sampled": 28,
+          "real": 0,
+          "noise": 28,
+          "unsure": 0
+        }
+      ],
+      "noise_classes": [
+        {
+          "class": "fixed SQL fragments",
+          "count": 23
+        },
+        {
+          "class": "bounded integer SQL fragment",
+          "count": 2
+        },
+        {
+          "class": "trusted database metadata",
+          "count": 2
+        },
+        {
+          "class": "trusted operator configuration",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "rule": "ssrf",
+      "command": "security",
+      "args": [],
+      "fallow_version": "3.49.0",
+      "reviewed_on": "2026-11-27",
+      "sample_size": 30,
+      "reviews": 3,
+      "agreement_percent": 96,
+      "projects": [
+        {
+          "project": "documenso",
+          "commit": "cc491f1ec224bda8d3e09338e291ca11fe47641a",
+          "findings": 33,
+          "sampled": 30,
+          "real": 2,
+          "noise": 28,
+          "unsure": 0
+        },
+        {
+          "project": "plane",
+          "commit": "723bb178f97b87e80a23df9eed134eb1388d7465",
+          "findings": 7,
+          "sampled": 7,
+          "real": 0,
+          "noise": 7,
+          "unsure": 0
+        },
+        {
+          "project": "immich",
+          "commit": "7b27863b13d7ec52340e87637d71a39aa8d7efc0",
+          "findings": 12,
+          "sampled": 12,
+          "real": 1,
+          "noise": 11,
+          "unsure": 0
+        },
+        {
+          "project": "react-hook-form",
+          "commit": "f3fd1bf4a3cb1265171adfc778f279a3c7e06fc5",
+          "findings": 1,
+          "sampled": 1,
+          "real": 0,
+          "noise": 1,
+          "unsure": 0
+        }
+      ],
+      "noise_classes": [
+        {
+          "class": "trusted destination",
+          "count": 25
+        },
+        {
+          "class": "browser-only request",
+          "count": 20
+        },
+        {
+          "class": "non-URL argument",
+          "count": 2
+        }
+      ]
+    },
+    {
+      "rule": "weak-crypto",
+      "command": "security",
+      "args": [],
+      "fallow_version": "3.49.0",
+      "reviewed_on": "2026-11-27",
+      "sample_size": 30,
+      "reviews": 2,
+      "agreement_percent": 100,
+      "projects": [
+        {
+          "project": "immich",
+          "commit": "7b27863b13d7ec52340e87637d71a39aa8d7efc0",
+          "findings": 7,
+          "sampled": 7,
+          "real": 7,
+          "noise": 0,
+          "unsure": 0
+        }
+      ],
+      "noise_classes": []
     }
   ]
 }

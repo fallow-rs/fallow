@@ -13,8 +13,10 @@ Reviews is the count of independent reviews; the percentage is how often the fir
 | Command | Rule | Findings | Sampled | Real | Noise | Unsure | Precision | Reviews | Measured on |
 |---|---|---|---|---|---|---|---|---|---|
 | `dead-code` | `circular-dependency` | 158 | 88 | 87 | 1 | 0 | 99% (84 to 100) | 1 | 3.49.0, 2026-11-27 |
+| `dead-code` | `dev-dependency-in-production` | 24 | 24 | 24 | 0 | 0 | 100% (79 to 100) | 2 (100% agree) | 3.49.0, 2026-11-27 |
 | `dead-code` | `duplicate-export` | 20 | 20 | 17 | 3 | 0 | 85% (36 to 98) | 2 (100% agree) | 3.48.0, 2026-11-25 |
 | `dead-code` | `duplicate-export-alias` | 69 | 50 | 50 | 0 | 0 | 100% (76 to 100) | 2 (100% agree) | 3.48.0, 2026-11-25 |
+| `dead-code` | `invalid-client-export` | 1 | 1 | 0 | 1 | 0 | 0% (0 to 98) | 2 (100% agree) | 3.49.0, 2026-11-27 |
 | `dead-code` | `package-cycle` | 20 | 20 | 18 | 2 | 0 | 90% (68 to 99) | 1 | 3.48.0, 2026-11-25 |
 | `dead-code` | `test-only-dependency` | 2 | 2 | 2 | 0 | 0 | 100% (16 to 100) | 1 | 3.48.0, 2026-11-25 |
 | `dead-code` | `unlisted-binary` | 1 | 1 | 0 | 1 | 0 | 0% (0 to 98) | 3 (0% agree) | 3.48.0, 2026-11-25 |
@@ -22,6 +24,8 @@ Reviews is the count of independent reviews; the percentage is how often the fir
 | `dead-code` | `unresolved-import` | 14 | 14 | 0 | 14 | 0 | 0% (0 to 65) | 3 (43% agree) | 3.48.0, 2026-11-25 |
 | `dead-code` | `unused-catalog-entry` | 16 | 16 | 16 | 0 | 0 | 100% (79 to 100) | 1 | 3.48.0, 2026-11-25 |
 | `dead-code` | `unused-class-member` | 268 | 70 | 33 | 37 | 0 | 60% (40 to 77) | 1 | 3.49.0, 2026-11-26 |
+| `dead-code` | `unused-component-emit` | 14 | 14 | 10 | 4 | 0 | 71% (42 to 92) | 2 (100% agree) | 3.49.0, 2026-11-27 |
+| `dead-code` | `unused-component-input` | 5 | 5 | 3 | 2 | 0 | 60% (15 to 95) | 2 (100% agree) | 3.49.0, 2026-11-27 |
 | `dead-code` | `unused-component-prop` | 18 | 18 | 18 | 0 | 0 | 100% (81 to 100) | 2 (100% agree) | 3.48.0, 2026-11-25 |
 | `dead-code` | `unused-dependency` | 32 | 32 | 29 | 3 | 0 | 91% (58 to 99) | 1 | 3.48.0, 2026-11-25 |
 | `dead-code` | `unused-dependency-override` | 7 | 7 | 7 | 0 | 0 | 100% (59 to 100) | 1 | 3.48.0, 2026-11-25 |
@@ -41,16 +45,35 @@ Reviews is the count of independent reviews; the percentage is how often the fir
 | `health --coverage-gaps --shallow-directories --css` | `shallow-directory` | 8 | 8 | 8 | 0 | 0 | 100% (23 to 100) | 2 (100% agree) | 3.48.0, 2026-11-25 |
 | `health --coverage-gaps --shallow-directories --css` | `untested-export` | 5640 | 95 | 83 | 12 | 0 | 97% (80 to 100) | 3 (99% agree) | 3.49.0, 2026-11-27 |
 | `health --coverage-gaps --shallow-directories --css` | `untested-file` | 3931 | 90 | 89 | 1 | 0 | 100% (85 to 100) | 3 (92% agree) | 3.49.0, 2026-11-27 |
+| `security` | `cleartext-transport` | 2 | 2 | 0 | 2 | 0 | 0% (0 to 84) | 2 (100% agree) | 3.49.0, 2026-11-27 |
+| `security` | `client-server-leak` | 129 | 32 | 0 | 32 | 0 | 0% (0 to 15) | 2 (100% agree) | 3.49.0, 2026-11-27 |
+| `security` | `code-injection` | 3 | 3 | 0 | 3 | 0 | 0% (0 to 71) | 2 (100% agree) | 3.49.0, 2026-11-27 |
+| `security` | `command-injection` | 1 | 1 | 0 | 1 | 0 | 0% (0 to 98) | 2 (100% agree) | 3.49.0, 2026-11-27 |
+| `security` | `dangerous-html` | 15 | 15 | 0 | 15 | 0 | 0% (0 to 66) | 3 (67% agree) | 3.49.0, 2026-11-27 |
+| `security` | `dynamic-module-load` | 2 | 2 | 0 | 2 | 0 | 0% (0 to 99) | 2 (100% agree) | 3.49.0, 2026-11-27 |
+| `security` | `nosql-injection` | 2 | 2 | 0 | 2 | 0 | 0% (0 to 84) | 2 (100% agree) | 3.49.0, 2026-11-27 |
+| `security` | `open-redirect` | 91 | 68 | 8 | 60 | 0 | 11% (2 to 34) | 3 (99% agree) | 3.49.0, 2026-11-27 |
+| `security` | `path-traversal` | 33 | 33 | 0 | 33 | 0 | 0% (0 to 30) | 3 (97% agree) | 3.49.0, 2026-11-27 |
+| `security` | `postmessage-wildcard-origin` | 33 | 30 | 29 | 1 | 0 | 97% (83 to 100) | 3 (97% agree) | 3.49.0, 2026-11-27 |
+| `security` | `prototype-pollution` | 1 | 1 | 0 | 1 | 0 | 0% (0 to 98) | 2 (100% agree) | 3.49.0, 2026-11-27 |
+| `security` | `react-router-open-redirect` | 39 | 39 | 6 | 33 | 0 | 15% (3 to 39) | 3 (97% agree) | 3.49.0, 2026-11-27 |
+| `security` | `secret-pii-log` | 248 | 38 | 7 | 31 | 0 | 14% (3 to 36) | 3 (95% agree) | 3.49.0, 2026-11-27 |
+| `security` | `sql-injection` | 28 | 28 | 0 | 28 | 0 | 0% (0 to 12) | 3 (96% agree) | 3.49.0, 2026-11-27 |
+| `security` | `ssrf` | 53 | 50 | 3 | 47 | 0 | 6% (0 to 36) | 3 (96% agree) | 3.49.0, 2026-11-27 |
+| `security` | `weak-crypto` | 7 | 7 | 7 | 0 | 0 | 100% (59 to 100) | 2 (100% agree) | 3.49.0, 2026-11-27 |
 
 ## Noise classes
 
 - `circular-dependency`: elided unused import (1)
 - `duplicate-export`: Svelte component instance method (3)
+- `invalid-client-export`: ordinary client module export (1)
 - `package-cycle`: Playwright fixture import (2)
 - `unlisted-binary`: Mise-managed binary (1)
 - `unlisted-dependency`: documentation example (8), Deno import map (7)
 - `unresolved-import`: documentation example (8), build output import (3), generated type import (2), server route URL (1)
 - `unused-class-member`: library contract (7), test fixture call (7), test use (5), fluent builder call (3), framework lifecycle hook (2), framework property (2), indirect receiver (2), test global storage implementation (2), dependency injection call (1), instance property call (1), release script (1), required interface (1), serialized log metadata (1), test proxy call (1), typed test mock reference (1)
+- `unused-component-emit`: emitted by useVModel (4)
+- `unused-component-input`: read by Angular host binding (2)
 - `unused-dependency`: required styling peer dependency (2), imported by an extensionless CLI entry (1)
 - `unused-dev-dependency`: loaded by tool configuration (4), invoked through a package binary (1)
 - `unused-enum-member`: published SDK enum contract (29), serialized value in live type (2)
@@ -64,6 +87,21 @@ Reviews is the count of independent reviews; the percentage is how often the fir
 - `css-token-drift`: unused third-party override (1)
 - `untested-export`: build-only web export (2), transitive Svelte component import (2), type test import path (2), value binding imported by type test (2), development-only export (1), package export assertion (1), type-only database schema (1), unused default export (1)
 - `untested-file`: test-only server (1)
+- `cleartext-transport`: loopback-only transport (2)
+- `client-server-leak`: server-only env helper (30), public Vite built-in (2)
+- `code-injection`: unreferenced script shim (2), worker-only loader (1)
+- `command-injection`: validated command argument (1)
+- `dangerous-html`: trusted configuration (5), generated QR markup (2), inert document (2), literal markup (2), no runtime caller (1), owner-only input (1), trusted content (1), value from trusted configuration (1)
+- `dynamic-module-load`: directory entry names (1), fixed module specifiers (1)
+- `nosql-injection`: non-database API (2)
+- `open-redirect`: fixed destination (49), trusted provider endpoint (9), no runtime caller (1), owner-only input (1)
+- `path-traversal`: fixed application path (10), server-resolved paths (7), deployment-configured path (6), directory entry names (4), validated backup filename (4), managed storage path (1), uncalled filesystem wrapper (1)
+- `postmessage-wildcard-origin`: unreachable signing branch (1)
+- `prototype-pollution`: non-merge helper (1)
+- `react-router-open-redirect`: origin constrained (31), discarded redirect (2)
+- `secret-pii-log`: resource identifier only (25), disabled logging branch (1), internal job identifier (1), missing error fallback plugin (1), navigation preload disabled (1), organisation domain only (1), unmounted middleware (1)
+- `sql-injection`: fixed SQL fragments (23), bounded integer SQL fragment (2), trusted database metadata (2), trusted operator configuration (1)
+- `ssrf`: trusted destination (25), browser-only request (20), non-URL argument (2)
 
 ## Corpus
 
@@ -73,3 +111,7 @@ Reviews is the count of independent reviews; the percentage is how often the fir
 | plane | makeplane/plane | `723bb178f97b` |
 | immich | immich-app/immich | `7b27863b13d7` |
 | react-hook-form | react-hook-form/react-hook-form | `f3fd1bf4a3cb` |
+| dub (by name only) | dubinc/dub | `6b463b4bdd9e` |
+| ghostfolio (by name only) | ghostfolio/ghostfolio | `9cad9e102795` |
+| hoppscotch (by name only) | hoppscotch/hoppscotch | `6177eae1875e` |
+| uptime-kuma (by name only) | louislam/uptime-kuma | `d35c3fafa1da` |

@@ -89,17 +89,40 @@ const namedFindings = (report) => {
   return named;
 };
 
+// A `fallow security` finding has a run-local `finding_id` and usually a
+// `stable_finding_id` of the form `sec1:<hash>`. Its category is the rule, so
+// the ID gets the form `sec1:<category>:<hash>`. A finding without a stable
+// ID (for example a sink in a component template) gets an `rp1:` ID from its
+// location, with a counter for a second finding at the same location.
+const securityFindings = (report) => {
+  const seen = new Map();
+  return listAt(report, ["security_findings"])
+    .filter((f) => f && typeof f.category === "string" && f.category !== "")
+    .map((f) => {
+      if (typeof f.stable_finding_id === "string") {
+        const hash = f.stable_finding_id.split(":").pop();
+        return { ...f, finding_id: `sec1:${f.category}:${hash}` };
+      }
+      const base = `${f.category}:${hashSeed(`${f.path}:${f.line}:${f.col}`).toString(16)}`;
+      const count = seen.get(base) ?? 0;
+      seen.set(base, count + 1);
+      return { ...f, finding_id: `rp1:${base}${count ? `~${count}` : ""}` };
+    });
+};
+
 /**
  * Groups the findings of one JSON report by rule id. An object with a
  * `finding_id` in a top-level array is a finding. The sections in
  * `UNNAMED_FINDINGS` are findings too, with an ID from their identifying
- * fields. Other keys are metadata.
+ * fields. `fallow security` findings group by their category. Other keys are
+ * metadata.
  */
 export const findingsByRule = (report) => {
   const out = new Map();
   const add = (rule, finding) => out.set(rule, [...(out.get(rule) ?? []), finding]);
+  for (const finding of securityFindings(report)) add(finding.category, finding);
   for (const [key, value] of Object.entries(report)) {
-    if (!Array.isArray(value)) continue;
+    if (!Array.isArray(value) || key === "security_findings") continue;
     for (const finding of value.filter(isFinding)) add(ruleOf(finding, key), finding);
   }
   for (const finding of namedFindings(report)) add(finding.finding_id.split(":")[1], finding);
@@ -454,7 +477,30 @@ const corpusErrors = (corpus) =>
     ...(/^[0-9a-f]{40}$/.test(project.commit ?? "")
       ? []
       : [`corpus ${name}: commit must be a full SHA`]),
+    ...(project.default === undefined || typeof project.default === "boolean"
+      ? []
+      : [`corpus ${name}: default must be true or false`]),
   ]);
+
+/**
+ * Picks the corpus projects of a sample run. Without names, the run takes
+ * each project that does not set `default: false`, so a project that only
+ * some rules need does not change the rows of the other rules.
+ */
+export const selectProjects = (corpus, names) => {
+  if (!names) {
+    return {
+      ok: true,
+      names: Object.keys(corpus).filter((name) => corpus[name].default !== false),
+    };
+  }
+  const wanted = [...new Set(names.map((name) => name.trim()).filter(Boolean))];
+  if (wanted.length === 0) return { ok: false, error: "--projects needs at least one project name" };
+  const unknown = wanted.filter((name) => !(name in corpus));
+  return unknown.length > 0
+    ? { ok: false, error: `--projects names ${unknown.join(", ")}, which is not in the corpus` }
+    : { ok: true, names: wanted };
+};
 
 const agreementIsValid = (row) =>
   row.reviews === 1
@@ -557,7 +603,8 @@ export const renderSummary = (ledger) => {
   }
   lines.push("", "## Corpus", "", "| Project | Repository | Commit |", "|---|---|---|");
   for (const [name, project] of Object.entries(ledger.corpus)) {
-    lines.push(`| ${name} | ${project.repo} | \`${project.commit.slice(0, 12)}\` |`);
+    const label = project.default === false ? `${name} (by name only)` : name;
+    lines.push(`| ${label} | ${project.repo} | \`${project.commit.slice(0, 12)}\` |`);
   }
   return `${lines.join("\n")}\n`;
 };
