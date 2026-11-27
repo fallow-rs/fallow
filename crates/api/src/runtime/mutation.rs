@@ -502,15 +502,18 @@ fn unsafe_cache_dir(message: String) -> ProgrammaticError {
 /// Refuses a cache directory that is the root or a directory above it. The
 /// worktree check leaves the mutation cache out, and the analysis writes a
 /// `.gitignore` that ignores the whole cache directory, so such a cache
-/// directory hides each stray write from the check.
+/// directory hides each stray write from the check. Also refuses a symlink on
+/// the way to the mutation run directories that leaves the project (see
+/// [`crate::mutation::check_cache_links`]).
 pub(super) fn guard_cache_dir(root: &Path, cache_dir: &Path) -> ProgrammaticResult<()> {
-    if !canonical_path(root).starts_with(canonical_path(cache_dir)) {
-        return Ok(());
+    if canonical_path(root).starts_with(canonical_path(cache_dir)) {
+        return Err(unsafe_cache_dir(format!(
+            "the cache directory `{}` is the project root or a directory above it, so the worktree check cannot see stray writes",
+            cache_dir.display()
+        )));
     }
-    Err(unsafe_cache_dir(format!(
-        "the cache directory `{}` is the project root or a directory above it, so the worktree check cannot see stray writes",
-        cache_dir.display()
-    )))
+    crate::mutation::check_cache_links(root, cache_dir)
+        .map_err(|error| unsafe_cache_dir(error.to_string()))
 }
 
 /// Refuses a cache directory that holds a planned source or test file.

@@ -134,3 +134,15 @@ is_dedup_lookup_failure() {
 post_error_message() {
   jq -r '.message // empty' "$1" 2> /dev/null | head -n 1 | grep . || printf 'see the job log\n'
 }
+
+# Refuses each job file name that is a symlink or not a regular file, so a
+# link in the checkout never redirects a write of the job.
+gitlab_check_job_files() {
+  local name
+  for name in "$@"; do
+    if [ -L "$name" ] || { [ -e "$name" ] && [ ! -f "$name" ]; }; then
+      echo "ERROR: ${name} must be a regular file, not a symlink or another file type" >&2
+      return 2
+    fi
+  done
+}
