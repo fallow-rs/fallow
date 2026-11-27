@@ -2431,6 +2431,86 @@ fn gitlab_sticky_comment_lookup_follows_next_page_past_a_filtered_short_page() {
     assert_eq!(server.join().expect("server thread").len(), 2);
 }
 
+/// Run a GitHub `ci post-pr-comment --dry-run` against `responses`, with no
+/// `FALLOW_BOT_LOGIN`. Returns the plan and the number of requests served.
+fn github_sticky_dry_run(responses: Vec<MockResponse>) -> (serde_json::Value, usize) {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let body = dir.path().join("comment.md");
+    std::fs::write(&body, "<!-- fallow-id: summary -->\nnew body").expect("write body");
+    let (api_url, server) = serve(responses);
+    let output = Command::new(fallow_bin())
+        .args(["--format", "json", "--quiet", "ci", "post-pr-comment"])
+        .args(["--provider", "github", "--pr", "7", "--repo", "owner/repo"])
+        .args(["--marker-id", "summary", "--dry-run", "--api-url", &api_url])
+        .arg("--body")
+        .arg(&body)
+        .env("NO_COLOR", "1")
+        .env("RUST_LOG", "")
+        .env("FALLOW_API_RETRIES", "1")
+        .env_remove("FALLOW_BOT_LOGIN")
+        .env("GH_TOKEN", "test-token")
+        .output()
+        .expect("run fallow post-pr-comment");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "stderr:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let plan = serde_json::from_str(&stdout).expect("json output");
+    (plan, server.join().expect("server thread").len())
+}
+
+const GITHUB_USER_STICKY_COMMENTS: &str = r#"[{"id":42,"body":"<!-- fallow-id: summary -->\nold body","user":{"login":"ci-person","type":"User"}}]"#;
+
+/// A personal access token posts as an account of type `User`. fallow reads
+/// the login of the token from `/user` and updates the comment of that login.
+#[test]
+fn github_sticky_comment_lookup_accepts_the_login_of_the_token() {
+    let (plan, requests) = github_sticky_dry_run(vec![
+        MockResponse {
+            method: "GET",
+            path_contains: "/repos/owner/repo/issues/7/comments?per_page=100&page=1",
+            status: 200,
+            body: GITHUB_USER_STICKY_COMMENTS,
+        },
+        MockResponse {
+            method: "GET",
+            path_contains: "/user",
+            status: 200,
+            body: r#"{"login":"ci-person","type":"User"}"#,
+        },
+    ]);
+
+    assert_eq!(plan["action"], "update", "plan: {plan}");
+    assert_eq!(plan["comment_id"], "42", "plan: {plan}");
+    assert_eq!(requests, 2);
+}
+
+/// `GITHUB_TOKEN` and app tokens cannot read `/user`. A comment of type
+/// `User` is then not the comment of the bot, and fallow creates a new one.
+#[test]
+fn github_sticky_comment_lookup_keeps_the_bot_rule_when_user_is_forbidden() {
+    let (plan, requests) = github_sticky_dry_run(vec![
+        MockResponse {
+            method: "GET",
+            path_contains: "/repos/owner/repo/issues/7/comments?per_page=100&page=1",
+            status: 200,
+            body: GITHUB_USER_STICKY_COMMENTS,
+        },
+        MockResponse {
+            method: "GET",
+            path_contains: "/user",
+            status: 403,
+            body: r#"{"message":"Resource not accessible by integration"}"#,
+        },
+    ]);
+
+    assert_eq!(plan["action"], "create", "plan: {plan}");
+    assert_eq!(requests, 2);
+}
+
 /// A note of another user with the sticky marker is not updated. The token
 /// user has no bot metadata, so fallow reads it from `/user` to compare.
 #[test]
