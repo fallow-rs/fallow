@@ -1313,7 +1313,7 @@ impl Phase<'_> {
                 self.push(job, Attempt::decided(MutantStatus::Pending, None, None));
                 continue;
             }
-            match PhaseDeadline::timed(self.deadline.as_ref(), job.retry_extra_ms, || {
+            match PhaseDeadline::timed(self.deadline.as_ref(), &job, || {
                 worker.run_with_retry(&job, self.caps)
             }) {
                 Ok(attempt) => self.push(job, attempt),
@@ -1850,7 +1850,7 @@ pub fn run_schedule_with_progress(
         runner,
         &phase_files,
         jobs,
-        PhaseDeadline::first_pass(config, &outcome.timings),
+        PhaseDeadline::first_pass(config, &outcome.timings, &facts),
         (links, &finished),
         |done, total| MutationProgress::Mutants { done, total },
     )?;
