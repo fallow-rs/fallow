@@ -1384,7 +1384,7 @@ fn needs_gitlab_authenticated_user(discussions: &[Value], bot_login: BotLogin<'_
         .any(|note| {
             let body = note.get("body").and_then(Value::as_str).unwrap_or("");
             let has_marker = extract_fallow_fingerprint(body).is_some()
-                || body.contains("fallow-resolved-fingerprint:");
+                || parse_resolution_marker(body).ok().flatten().is_some();
             has_marker
                 && !gitlab_note_has_native_bot_metadata(note)
                 && note

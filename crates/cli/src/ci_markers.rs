@@ -262,4 +262,35 @@ mod tests {
             Some("abc123def456")
         );
     }
+
+    /// A note that only mentions the resolution marker in its text does not
+    /// need the user of the token. The same trailer rule applies as for the
+    /// resolution itself.
+    #[test]
+    fn quoted_resolution_marker_text_does_not_need_the_token_user() {
+        let discussions = serde_json::json!([{
+            "id": "disc-1",
+            "notes": [{
+                "body": "Why does `fallow-resolved-fingerprint: x` show here?",
+                "author": { "id": 7, "username": "alice" }
+            }]
+        }]);
+        let discussions = discussions.as_array().unwrap();
+        assert!(!needs_gitlab_authenticated_user(
+            discussions,
+            BotLogin::Unset
+        ));
+
+        let reply = serde_json::json!([{
+            "id": "disc-2",
+            "notes": [{
+                "body": "Resolved.\n\n<!-- fallow-resolved-fingerprint: x -->",
+                "author": { "id": 9, "username": "ci-runner" }
+            }]
+        }]);
+        assert!(needs_gitlab_authenticated_user(
+            reply.as_array().unwrap(),
+            BotLogin::Unset
+        ));
+    }
 }
