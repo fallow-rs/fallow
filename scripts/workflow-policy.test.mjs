@@ -4462,3 +4462,32 @@ test("the pull request title check lints the squash subject", () => {
   assert.match(step, /git log -1 --format=%s "\$PR_HEAD_SHA"/u);
   assert.match(step, /printf '%s \(#%s\)\\n' "\$subject" "\$PR_NUMBER" \| npm run commitlint/u);
 });
+
+test("every Linux release target turns off the eager arena commit of mimalloc", () => {
+  // Every release binary uses mimalloc. On Linux its default commits arena
+  // memory eagerly, which raised peak RSS by about 150% on musl. A new Linux
+  // target without this flag ships with that memory cost.
+  const release = readWorkflow(".github/workflows/release.yml");
+  const build = indentedBlock(release, "build", 2);
+  const linuxEntries = matrixEntries(build).filter((entry) => /linux/u.test(entry));
+  const linuxTargets = linuxEntries
+    .map((entry) => entry.match(/^target: (\S+-linux-\S+)$/mu)?.[1])
+    .filter(Boolean);
+  assert.ok(linuxTargets.length > 0, "the release build has Linux targets");
+  assert.equal(linuxTargets.length, linuxEntries.length, "each Linux entry has a readable target");
+  // Cargo reads these values only from the `[env]` table. A CFLAGS value in
+  // the workflow would win over the config value.
+  const env = readFileSync(".cargo/config.toml", "utf8")
+    .split(/^\[env\]$/mu)[1]
+    ?.split(/^\[/mu)[0];
+  assert.ok(env, ".cargo/config.toml has an [env] table");
+  assert.doesNotMatch(release, /CFLAGS_\w*linux/u, "release.yml does not override the CFLAGS");
+  for (const target of linuxTargets) {
+    const key = `CFLAGS_${target.replaceAll("-", "_")}`;
+    assert.match(
+      env,
+      new RegExp(`^${key} = "(?:[^"]* )?-DMI_DEFAULT_ARENA_EAGER_COMMIT=0(?: [^"]*)?"$`, "mu"),
+      `the [env] table of .cargo/config.toml sets ${key} with -DMI_DEFAULT_ARENA_EAGER_COMMIT=0`,
+    );
+  }
+});
