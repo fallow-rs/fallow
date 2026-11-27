@@ -1,4 +1,0 @@
-### Fixed
-
-- **An unknown key in the `boundaries` config now stops the run with exit code 2.** The top-level config already rejected an unknown key, but `boundaries`, its zones, rules, `coverage` and `calls` ignored one. A misspelled key such as `publicFile` (for `publicFiles`) then turned off a check without a message. The error names the key and lists the valid keys. A config with a stale or misspelled key in `boundaries` that ran before now fails: correct or remove the key. `"boundaries": { "enabled": false }` is one such config, because `boundaries` has no `enabled` key. Its error tells you to remove the `boundaries` section to turn the checks off. A key that a later fallow version adds to `boundaries` now needs `minimumVersion`, as a new top-level key does.
-  (Closes [#5292](https://github.com/fallow-rs/fallow/issues/5292))

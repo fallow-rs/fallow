@@ -7,6 +7,238 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.50.0] - 2026-11-27
+
+### Added
+
+- **`fallow mutation tasks --format json` gives the scope of the run.** The new `scope` object has the `kind` of the run (`changed`, `all` or `paths`), the `base_ref` of a `changed` run, and `files`: each file with a mutant result in the report, also a file without a task. A consumer can now tell a mutant that a test killed from a mutant that the run did not mutate, and does not need to read the saved report.
+  (Closes [#5289](https://github.com/fallow-rs/fallow/issues/5289))
+
+- **MCP tools with large results keep them in the conversation.** Claude Code saves a tool result over 50,000 characters to a file, and the agent must read that file again. Eighteen tools returned more on large public projects: `analyze`, `audit`, `check_architecture`, `check_changed`, `check_health`, `check_runtime_coverage`, `code_execute`, `find_dupes`, `fix_preview`, `get_blast_radius`, `get_cleanup_candidates`, `get_hot_paths`, `get_importance`, `get_token_blast_radius`, `impact_all`, `project_info`, `security_candidates` and `trace_file`. These tools now declare `_meta["anthropic/maxResultSizeChars"]` of 200,000 in `tools/list`, so Claude Code keeps a result up to that size inline. A larger result still goes to a file. The server cap (`FALLOW_MCP_MAX_OUTPUT_BYTES`, default 1,000,000 bytes) and the `max_output_bytes` parameter do not change. Other clients ignore the field.
+  (Closes [#5239](https://github.com/fallow-rs/fallow/issues/5239))
+
+- **`fix_apply` asks the user to confirm before it writes.** When the MCP client declares form elicitation, `fix_apply` first shows the dry-run plan in one form: the number of fixes, the number of files, and the fixes per type. The tool writes only after the user confirms. On a decline, a cancel or a timeout, no file changes, and the result has `applied: false` with a `confirmation` value that gives the reason. On protocol `2026-07-28` the form arrives through `input_required`, and the client calls the tool again with the answer. A client without form elicitation keeps the old behavior. A headless session, such as `claude -p`, cancels the form at once, so the call does not hang.
+  (Closes [#5238](https://github.com/fallow-rs/fallow/issues/5238))
+
+- **A `deep-modules` boundary preset.** `"boundaries": { "preset": "deep-modules" }` makes each folder of `src/modules` a zone, or each folder of `src/features` when `src/modules` does not exist. Other files may import a module only through its index file (`index.{ts,tsx,mts,cts,js,jsx,mjs,cjs}`), so an import of an internal file of the module is a `boundary-violation`. A file such as `index.internal.ts` stays internal. The preset also adds an `app` zone for the rest of the source root, and a `tests` zone for `test/**`, `tests/**` and `e2e/**`. These two zones come after your own zones, so a zone that you add keeps its files. A test in one of these folders must use the index file, and a test next to the module code may import internal files. Loose files directly under the module root are in a `modules` zone without public files. A folder with module folders in it wins over an empty one. When neither folder exists and no zone of yours is named `modules`, the run exits with code 2. `fallow list --boundaries` now prints the public files of each zone.
+  (Closes [#5254](https://github.com/fallow-rs/fallow/issues/5254))
+- **Opt-in public files for the `bulletproof` and `feature-sliced` presets.** With `"presetPublicFiles": true` in `boundaries`, other zones must import a feature (`bulletproof`) or a slice of `pages`, `widgets`, `features` and `entities` (`feature-sliced`) through its index file. The `@x` files of an entity also stay public. Without the key, the findings of these presets do not change. An older fallow version ignores the key and reports the preset without public files. Set `minimumVersion` to make an older version stop with a message instead.
+- **The `narrow-interface` action in the JSON output of `fallow health --shallow-directories` links to the new guide "Keep a module deep".**
+
+- **The MCP server returns long tool calls as tasks.** The server now advertises the MCP tasks extension (`io.modelcontextprotocol/tasks`). When a `tools/call` request declares the extension in its `_meta` client capabilities, `audit`, `mutation_plan`, `find_similar_code` and type-aware `analyze` return a task handle at once. The client polls `tasks/get` for the status and the result, and `tasks/cancel` stops the run. A task run has a default deadline of 30 minutes instead of 120 seconds. `FALLOW_TIMEOUT_SECS` still sets the deadline. A finished result stays readable for at least one hour. A request without the extension gets the synchronous result as before.
+  (Closes [#5237](https://github.com/fallow-rs/fallow/issues/5237))
+
+- **Opt-in telemetry now counts MCP tool calls that run in the server process.** Most MCP analysis tools run in the server through `fallow-api` and gave no event before, so agent use through MCP was mostly invisible even with telemetry on. After such a call, the server now runs the hidden `fallow telemetry record` command, which applies the usual consent rules and records one coarse event with `integration_surface: mcp` and the tool name. A call that runs the CLI still gets its events from the CLI. The server does this work after the answer, so telemetry never delays a tool call, and with telemetry off it starts no `record` process. See [`docs/telemetry.md`](docs/telemetry.md#integration-surfaces).
+
+- **MCP `analyze` runs as a task when the environment or the config turns on type-aware analysis.** Before, `analyze` returned an MCP task only when a parameter asked for type-aware analysis. Now `FALLOW_TYPE_AWARE` and `typeAware.enabled` in the project config count too, when the parameters leave the choice open. A type-aware run can take about a minute on a large repository, and a synchronous call stops at the 120-second default. `type_aware: false` keeps the call synchronous.
+  (Refs [#5237](https://github.com/fallow-rs/fallow/issues/5237))
+
+- **The MCP server can ask once for telemetry consent.** Agent users never saw the telemetry note of the human CLI, so they had no way to opt in except `fallow telemetry enable` in a shell. A client that supports MCP form elicitation now gets one form, after the first tool call and only when no call has run for 20 seconds. The form says what a yes turns on, and its checkbox is clear by default. Only a checked box enables telemetry; a clear box or a decline records "no", so nothing asks again. A machine gets the form at most twice, 14 days apart, for all its MCP servers together. The form never appears in CI, with `DO_NOT_TRACK` or `FALLOW_TELEMETRY_DISABLED`, or after a recorded decision. Set `FALLOW_TELEMETRY_DISABLED=1` to keep it off a fleet of machines. See [`docs/telemetry.md`](docs/telemetry.md#consent-form-in-mcp-clients).
+
+- **`fallow feedback` files a report as a GitHub issue.** A person or a coding agent can report a false positive, a false negative, a bug, friction, a docs gap or a missing feature. The command takes a note plus `--type`, `--impact`, `--task`, `--command`, `--expected`, `--actual` and `--agent`, or a JSON report with `--input-json <file>` (`-` reads stdin). Without `--yes`, the command sends nothing: it prints the issue preview and a prefilled `issues/new` link. With `--yes`, the GitHub CLI (`gh`) creates the issue on fallow-rs/fallow and the command prints the issue URL. `--confirm <digest>` takes the `digest` of the preview, and a report that changed since that preview exits 2 and creates nothing. When `gh` is not available, the command prints the link and exits 3. The report holds only the given text, the Fallow version and the operating system. `--no-diagnostics`, `DO_NOT_TRACK=1` and `FALLOW_TELEMETRY_DISABLED=1` leave out the version and the operating system. Home directory paths become `~`. Common secret shapes (access tokens, JWTs, `Bearer` values, URL passwords and PEM private keys) become `[redacted]`.
+- **The MCP server has a `submit_feedback` tool.** The tool wraps `fallow feedback`. It returns the preview by default. It creates the issue only with `submit: true` and `confirm` set to the digest of the preview, after the user approves the preview.
+
+- **Opt-in telemetry of in-process MCP analysis calls now tells whether the analysis found something.** Events of `analyze`, `check_changed`, `check_architecture`, `find_dupes`, `check_health` and `audit` that run in the MCP server process now carry `findings_present` and the coarse `result_count_bucket`, like the events of the same commands on the CLI. The server reads only the count from the result, and only when telemetry may be on. See [`docs/telemetry.md`](docs/telemetry.md#integration-surfaces).
+
+### Changed
+
+- **The type-aware companion protocol changes to version 10. Install `fallow-type-aware` at the same version as `fallow`.** A companion of an older release does not keep checker reads inside the project, so this release refuses it. What you see depends on how you install the companion:
+  - npm, pnpm or Yarn: the `fallow` launcher uses only a `fallow-type-aware` package of the same version. A pinned older version is not used, so Fallow finds no companion. Upgrade both packages together, for example `npm install --save-dev fallow@<version> fallow-type-aware@<version>`.
+  - `fallow type-aware setup`: Fallow uses an older install only when it speaks the same protocol, so it skips the installs of earlier releases. Run `fallow type-aware setup` again, then `fallow type-aware cleanup` to remove the old installs.
+  - `FALLOW_TYPE_AWARE_BIN` that points to an older companion: the companion stops with `unsupported protocol_version`, and Fallow adds the command to run.
+
+  The GitHub Action and the GitLab template install the matching companion themselves. While the companion does not match, the type-aware pass does not run. With the default `typeAware.require: best-effort`, the run reports the syntactic findings. With `complete`, the run exits with code 2.
+
+- **The `fallow` skill has one CLI reference file per command.** The single CLI reference was about 259 KB. A client that read it through the MCP skills extension got the full file in one response, and Claude Code saved a response of more than 50,000 characters to a file. Each command and each shared topic, such as the global flags and the configuration format, now has its own file under `references/cli/`, for example `references/cli/audit.md`. `references/cli-reference.md` is now the command index with a link to each file. No served skill file is larger than 50,000 characters, and `skills/list` lists each new file with its digest. `fallow agent install` writes the new files, and `fallow agent uninstall` removes them.
+  (Closes [#5301](https://github.com/fallow-rs/fallow/issues/5301))
+
+- **The `includeEntryExports` description names the enums that a public package entry re-exports.** With the option on, fallow checks the members of such an enum. The JSON schema and the config reference now say so.
+
+- **The `usedClassMembers` warning for a scoped rule that matches nothing now names the scope.** A rule with `"extends": "SceneManager"` applies to the subclasses of `SceneManager`, not to `SceneManager` itself. The warning now says so, and it names the suppression for one class: `// fallow-ignore-file unused-class-member` in the file of that class. The schema text of `usedClassMembers` and `extends` gives the same information.
+
+- **`fallow dead-code` now reports an exported type that only the signature of another export in the same file uses, when nothing needs that export.** An example is `export type ButtonProps = {...}` next to `export const Button = (props: ButtonProps) => ...`, with no other file that imports `ButtonProps`. Fallow did not report such a type before. Now `unused-type` reports it. You can remove the `export` keyword: TypeScript accepts the result, and the declaration emit of the file includes the local type. Fallow still keeps the export in two cases:
+  - The project of the file emits declarations. The nearest folder with a `tsconfig*.json` has a config with `declaration` or `composite` and without `noEmit`, or the nearest `package.json` names a `.d.ts` file in `types`, `typings`, `typesVersions` or a `types` export condition. Without the export, another module that holds the value with an inferred type can fail with TS4023.
+  - The `private-type-leak` rule is on for the file. Without the export, that rule reports the signature. `--type-aware` turns this rule on when the config does not set it.
+
+  Projects that do not emit declarations can see more `unused-type` findings after the upgrade. To not report a type that its own file uses, set `"ignoreExportsUsedInFile": { "type": true, "interface": true }`. `fallow dead-code --trace <file>:<Type>` now gives the same verdict as the report. When fallow keeps such a type, the trace names the backing exports and the reason, and the JSON has a new `kept_by_signature` object.
+  (Closes [#5280](https://github.com/fallow-rs/fallow/issues/5280))
+
+- **The configuration reference of the fallow skill now says that a scoped `usedClassMembers` rule skips the named class.** A rule with `"extends": "Base"` applies to the subclasses of `Base`, not to `Base` itself. To keep all members of one class, put `// fallow-ignore-file unused-class-member` in its file.
+  (Refs [#5233](https://github.com/fallow-rs/fallow/issues/5233))
+
+### Fixed
+
+- **`fallow fix` now names the diagnostic that holds back a fix, with the step that unblocks it.** When a fix rests on a file or folder that the run did not fully analyze, the help said only "Resolve the workspace diagnostics". That list also held diagnostics that hold back no fix, such as `undeclared-workspace`. Now each held-back entry names the path and the config change, for example "add `!.claude/**` to `ignorePatterns`". The JSON envelope has a new `incomplete_analysis_diagnostics` array with each blocking diagnostic and its `action`. The human output lists them also with `--quiet`.
+- **`fallow workspaces` now shows the diagnostics of the source file walk.** It showed only the workspace diagnostics, so a skipped hidden folder with sources (`skipped-source-dotdir`) was not in the list. The command now runs the file walk and reports the same `workspace_diagnostics` as `fallow list`.
+- **The `undeclared-workspace` hint also names `workspaces.patterns` in the fallow config**, for a folder that does not belong in `package.json` or `pnpm-workspace.yaml`.
+- **VS Code: an auto-fix run that applies no fix now shows why.** The warning shows the reason that held back the most fixes, with its next step.
+  (Closes [#5127](https://github.com/fallow-rs/fallow/issues/5127))
+
+- **Windows: a folder of another user above the project no longer widens the read scope.** A `.git` entry or a workspace manifest in a folder above the analysis root, such as `C:\Users\Public` or the root of a shared drive, gave the shared configs of that folder to every project below it. Now such a folder counts only when the current user or the owner of the analysis root owns it. This is the owner rule that Fallow already uses on Linux and macOS.
+
+- **A write through a symlink into the Git directory of a superproject is now refused.** When the project root is in a submodule, the write guard protected only the Git directory of the submodule. A superproject can keep its Git directory outside its work tree (`git init --separate-git-dir`), for example in a temp directory. A report path such as `--output-file /tmp/r.json` that is a link into that directory now fails, the same as a link into `.git`. A `.git` file that fallow cannot read, or that names no Git directory, now makes each link target count as protected.
+
+- **`fallow fix` no longer changes a finding that an `overrides` entry turns `off`.** The reports leave out a finding when an `overrides` entry sets its rule to `off` for its file, but `fix` planned and applied a fix for it. For example, with `unused-exports` set to `off` for `src/jobs/**`, `fallow dead-code` reported no export there while `fallow fix --yes` removed the `export` keyword of each unused one. `fix` now runs the same rule pass as the reports, so it changes exactly the findings that `fallow dead-code` lists. Thanks [@marco2216](https://github.com/marco2216) for the patch in [#5258](https://github.com/fallow-rs/fallow/pull/5258).
+
+- **`DO_NOT_TRACK` and `FALLOW_TELEMETRY_DISABLED` accept any value as an opt-out.** Before, only `1`, `true`, `yes` and `on` disabled telemetry, so `DO_NOT_TRACK=enabled` or `DO_NOT_TRACK=y` left it on. Now every value except empty, `0`, `false`, `no` and `off` disables telemetry and the update check.
+
+- **A graph cache that a run writes after it reuses the cached import
+  resolution now keeps the versions of the hoisted Bun packages.** Such a
+  run wrote the cache again without the installed versions that the
+  resolution had read. A later `bun install` that replaced a hoisted package
+  under the same name was then not seen.
+
+- **An unknown key in the `boundaries` config now stops the run with exit code 2.** The top-level config already rejected an unknown key, but `boundaries`, its zones, rules, `coverage` and `calls` ignored one. A misspelled key such as `publicFile` (for `publicFiles`) then turned off a check without a message. The error names the key and lists the valid keys. A config with a stale or misspelled key in `boundaries` that ran before now fails: correct or remove the key. `"boundaries": { "enabled": false }` is one such config, because `boundaries` has no `enabled` key. Its error tells you to remove the `boundaries` section to turn the checks off. A key that a later fallow version adds to `boundaries` now needs `minimumVersion`, as a new top-level key does.
+  (Closes [#5292](https://github.com/fallow-rs/fallow/issues/5292))
+
+- **A member read on a local with the name of a namespace import no longer uses the export of that name.** In `catch (e) { e.message }` after `import * as e from './errors'`, the export `message` was reported as used. The same was true for a binding in a static block, and for the forms `e['message']`, `e.message.length`, `e().message` and `e[0].message`. Now a member read uses an export of the import only when its root resolves to the import binding.
+  (Closes [#5231](https://github.com/fallow-rs/fallow/issues/5231))
+
+- **`unused-class-member` credits members that a MobX annotation object names.** A static key in the annotation object of `makeObservable(this, {...})` or `makeAutoObservable(this, {...})` from `mobx` now counts as a use of the member with that name. MobX reads these members when the constructor runs.
+  (Closes [#5297](https://github.com/fallow-rs/fallow/issues/5297))
+- **`unused-class-member` credits four more receiver forms whose class the syntax proves.** These forms are now credited: a factory whose every return gives `new X()` inside a branch and whose body ends in `throw`, a factory that returns a subclass without own members, a static method that returns `new X()` through methods that return `this`, and a destructured property of an object factory result (`const { ctx } = newService(); ctx.member()`).
+  (Closes [#5298](https://github.com/fallow-rs/fallow/issues/5298))
+- **`unused-class-member` keeps the members that an implemented interface inherits.** A class that implements an interface now keeps each required member of each interface that the implemented interface extends, also when the parent interface is in another module.
+  (Closes [#5299](https://github.com/fallow-rs/fallow/issues/5299))
+
+- **`unused-enum-member` does not report the members of an enum that a public package entry re-exports.** A package that is not private can publish an enum from its entry file through `export *`, `export { E } from` or `export * as ns`. The re-export can also go through more barrels. A consumer of the package can read each member of that enum, so fallow does not report these members. The public entries are the same as for class members: the entries of the root package when it is not private, and the entries of the workspaces that `publicPackages` lists. A workspace package outside `publicPackages` is internal, so fallow still reports its unused enum members. To publish such a package, add it to `publicPackages`. Under `includeEntryExports`, fallow checks these members as before.
+  (Closes [#5261](https://github.com/fallow-rs/fallow/issues/5261))
+
+- **`circular-dependency` no longer reports a cycle that closes only through imports of types.** TypeScript removes a plain `import { X }` when `X` is only a type in the target (an interface, a type alias, or a re-export of one). Such an import does not load the target at runtime, so it no longer closes a cycle. The import still counts when the tsconfig of the importer sets `verbatimModuleSyntax`, `preserveValueImports`, or `importsNotUsedAsValues` to `preserve` or `error`, because TypeScript then keeps it. A namespace import, a side-effect import and a re-export still count. When a dense group of files loses such an edge, the cycle list of that group can show other cycles that the per-group limit hid before.
+- **A local `export { X }` of an interface or a type alias, and `export default interface`, are now type-only exports.** An unused one is now reported as `unused-type` instead of `unused-export`.
+  (Closes [#5262](https://github.com/fallow-rs/fallow/issues/5262))
+
+- **The commit gate of `fallow agent install` and `fallow hooks install` now audits more forms of a git commit or push.** The gate skipped `GIT commit`, `/usr/bin/git push`, `git.exe commit`, `git {commit,status}`, `git c{o,}mmit`, `$G commit` and `g?t push`. It now reads `git` in any letter case, with the `.exe` suffix, and as the last part of a path. A git subcommand with an expansion, a brace or a glob now goes to the audit. A command with an expansion, a brace, a glob or a backquote that also holds a `commit` or `push` word goes to the audit too. A command without such a word still skips the audit, so `ls -la` and `echo $HOME` stay as fast as before.
+- **The commit gate refuses a helper program from a tree that the command writes to.** The gate can run `readlink`, `jq`, `mktemp` or `rm` before it knows the target of the command. When the tree of a `git -C` target holds one of these programs on `PATH`, the gate now blocks with exit code 2, as it does for `fallow`, `git` and `jq`. The gate also looks for the `fallow` on `PATH` only after it knows the targets.
+
+- **`fallow dead-code` no longer reports the files of a Kysely migration folder as unused.** Kysely's `FileMigrationProvider`, imported from `kysely` or `kysely/migration`, imports each script file of its `migrationFolder`. When that folder is a path below the module directory, such as `join(import.meta.dirname, '..', 'schema/migrations')`, fallow now credits the files directly inside the folder and their exports. Files in a sub-folder and declaration files stay unused, because Kysely does not read them. The `up` and `down` exports of migration files are no longer reported as duplicate exports. The extraction cache version changes, so the first run after the upgrade parses each file again.
+  (Closes [#5294](https://github.com/fallow-rs/fallow/issues/5294))
+- **`fallow dead-code` now finds a React Router app in a package sub-folder.** A package script such as `react-router dev --config preview/vite.config.ts` names a Vite config. When that config sets a static `root` below the package root, fallow reads `react-router.config.*` and the app directory from that root, and credits the root route, the entry files and the routes. This also works when the package does not declare `@react-router/dev` itself.
+  (Closes [#5295](https://github.com/fallow-rs/fallow/issues/5295))
+
+- **The VS Code status bar and sidebar show the same total.** The language server now decides type-aware analysis as the CLI does: the `fallow.typeAware.enabled` setting, then `typeAware.enabled` of the config. A type-aware session also turns the opt-in `private-type-leaks` rule on at `warn`, as the CLI does, unless the config sets the rule. Before, the status bar left out every private type leak, and a project that turned type-aware analysis on only in its config got no type-aware editor diagnostics. `fallow watch` and `fallow inspect` now apply the same rule default.
+  (Closes [#5321](https://github.com/fallow-rs/fallow/issues/5321))
+- **The VS Code sidebar follows each save.** After a language server run, a loaded and visible Fallow sidebar refreshes in the background, with no notification. Before, a save changed the status bar count and left the sidebar on its last count until a manual Analyze.
+- **VS Code counts each finding once.** A sidebar category label counts findings, not rows: an unlisted dependency that four files import counts once, as in the total. The prop drilling, thin wrapper and duplicate prop shape categories show `advisory`, because the total does not count them. The status bar hover now lists each category that the total counts.
+- **The VS Code sidebar ignores the shell variables that the language server ignores.** `FALLOW_PRODUCTION`, `FALLOW_DIFF_FILE` and `FALLOW_TYPE_AWARE` in the environment of VS Code no longer change the sidebar run. The `fallow.production` and `fallow.typeAware` settings decide for both. `fallow.typeAware.timeoutSeconds` now also reaches the language server.
+
+- **VS Code counts component health findings at error severity.** With `"prop-drilling": "error"`, `"thin-wrapper": "error"` or `"duplicate-prop-shape": "error"`, the CLI counts these findings in its total and fails the run on them. The VS Code sidebar total, the notification and the status bar now count them too. The sidebar shows `advisory` only for a category whose findings the total does not count. The status bar hover also says that the Problems panel lists each location of a finding, so its count can be higher than the total.
+
+- **A global install of the runtime coverage add-on now runs.** After `npm install -g @fallow-cli/fallow-cov`, the `PATH` search found the Node launcher of the package. The launcher has no `.sig` file, so fallow stopped with exit code 4. The `PATH` search now finds the signed binary of the platform package of the same install. This works for global installs with npm, pnpm, Yarn and Bun, and for the install that `fallow coverage setup` makes. The signature check still runs on the binary that fallow starts. When fallow cannot find the signed binary, the error now tells you to set `FALLOW_COV_BIN`.
+  (Closes [#5303](https://github.com/fallow-rs/fallow/issues/5303))
+
+- **`fallow health --top` now cuts the large-functions list.** Before, `--top` cut the findings, file scores, hotspots and targets, but every large function stayed in the report. On a large project, a bounded MCP `check_runtime_coverage` call with `top: 20` was still more than 250,000 characters, and the MCP client saved it to a file instead of showing it. Now the same call is about 140,000 characters. The report and each `--group-by` group carry the new optional count `large_functions_omitted` when `--top` cut a row. The human output shows the full total.
+
+- **An unknown key in a nested config section now stops the run with exit code 2.** The top-level config and `boundaries` already rejected an unknown key. These sections ignored one: `duplicates`, `duplicates.normalization`, `flags`, `flags.sdkPatterns`, `health.ownership`, `resolve`, `fix`, `fix.catalog`, `audit`, `regression` and the object form of `ignoreExportsUsedInFile`. A misspelled key such as `minToken` (for `minTokens`) then turned off a setting without a message. A snake_case key such as `min_tokens` had the same effect.
+  - A config with a stale or misspelled key in one of these sections that ran before now fails. Correct or remove the key.
+  - `regression.baseline` still accepts an unknown key, because a newer fallow can write a count that an older one does not know.
+  - A nested key that a later fallow version adds now needs `minimumVersion` in a shared config, as a new top-level key does.
+- **An unknown-key error now names the valid key that is closest to the unknown key.** For example, the error for `minToken` asks: did you mean `minTokens`? The error for the object form of `ignoreExportsUsedInFile` now names the unknown key.
+
+- **`fallow health --css` no longer reports classes that code, a dependency or a theme adds at runtime.** Before, `unreferenced-css-class` reported a class when project markup did not write it, also when other code applied it. Fallow now credits these classes:
+  - a class name in a string literal of a statement that names a class, for example `const ROW_MARKER_CLASS = "table-row-drag-marker"` or `classes.push("cell-border-top")`. The static head of a template literal in such a statement credits a prefix, for example `` `cell-edge-${side}` ``.
+  - a class that a declared dependency renders: ProseMirror and its tables, the Tiptap placeholder and node views, and BProgress.
+  - a class of the Docusaurus classic theme and its Infima styles, when the package declares `@docusaurus/preset-classic` or `@docusaurus/theme-classic`.
+  - a class that starts with the name of a declared package, for example `maplibregl-popup` for `maplibre-gl`.
+
+  Fallow now reads the dependencies of each workspace `package.json`, not only the root `package.json`. A dependency credits a class only in the stylesheets of the workspace that declares it.
+  (Closes [#5272](https://github.com/fallow-rs/fallow/issues/5272))
+
+- **`unused-file` now credits four more framework entry points.**
+  - React Email: an `email dev`, `email build`, `email start` or `email export` command in a package script or a mise task makes the `.js`, `.jsx` and `.tsx` templates of its `--dir` folder (default `emails/`) entry points.
+  - Docusaurus: a nested theme component with a `PascalCase` name, such as `src/theme/NavbarItem/ComponentTypes.js`, is an entry point. A lowercase helper file in a swizzled folder stays an ordinary module.
+  - Config values: when a config property names a top-level array binding, fallow reads the array values and the static values that top-level `push`, `unshift` and `splice` calls add, also in an `if`, a block or a `try` statement. A Vitest `globalSetup` file that a condition adds is now a setup file.
+  - mise: a task that runs build output, such as `node ./dist/bin/sync.js`, credits the source file through the `tsconfig` `outDir` and `rootDir` of the task directory.
+  (Closes [#5338](https://github.com/fallow-rs/fallow/issues/5338), [#5339](https://github.com/fallow-rs/fallow/issues/5339), [#5340](https://github.com/fallow-rs/fallow/issues/5340), [#5341](https://github.com/fallow-rs/fallow/issues/5341))
+
+- **`unused-load-data-key` no longer reports the response body of a resource route.** A React Router or Remix route module with a `loader` and no default export component is a resource route. An HTTP client reads its response, so no component can read the keys. The rule now skips such a route. It also skips the keys of a `Response.json(...)` return. The rule text in `fallow explain`, SARIF, CodeClimate, LSP, the GitHub annotations and job summary, and the skill references now describes SvelteKit, React Router and Remix loaders. The parse cache version changes, so the first run after the upgrade parses all files again.
+  (Closes [#5264](https://github.com/fallow-rs/fallow/issues/5264))
+
+- **The GitHub Action and the GitLab template run the fallow command that npm installed, also when the npm global bin folder is not on `PATH`.** Node from `pnpm/setup` puts only the pnpm folders on `PATH`. The install step then reported "unknown version", and the next step failed with `fallow: command not found`. The install step now puts the npm global bin folder first on `PATH` for the later steps when `fallow` is missing from `PATH` or is a different file. When npm installed no fallow command, the install step fails with an error that names the folder.
+  (Closes [#5242](https://github.com/fallow-rs/fallow/issues/5242))
+
+- **`circular-dependency` no longer reports a cycle that closes only through imports that a file uses as types or not at all.** TypeScript removes a plain `import { X }` when the file never reads `X` as a value, also when `X` is a class. Such an import does not load the target at runtime, so it no longer closes a cycle. The import still counts in three cases: when the file reads the binding as a value, when the importer is a `.tsx` file (the binding can be the JSX factory), and in a file with a decorator when the tsconfig sets `emitDecoratorMetadata`. The tsconfig options that keep each import (`verbatimModuleSyntax`, `preserveValueImports`) still apply.
+  (Closes [#5309](https://github.com/fallow-rs/fallow/issues/5309))
+
+- **The coverage gap rules no longer report the app that a Playwright `webServer` starts for the tests.** A `webServer.command` such as `pnpm start`, with a `start` script `cd ./app && pnpm run dev`, starts a nested package that exists only for the end-to-end tests. `untested-file` and `untested-export` reported each file of that app as untested production code. Fallow now follows the command through `cd`, the `--dir`, `-C`, `--prefix` and `--cwd` options, `webServer.cwd` and package scripts. When a command that can start a server runs in a folder below the config folder, and that folder has its own `package.json`, its runtime entry points become support entry points. A folder that a workspace pattern declares stays production code, and so does an entry that you list in `entry`. The files of the app stay in use. A file that a production entry point also reaches stays runtime code.
+  (Closes [#5270](https://github.com/fallow-rs/fallow/issues/5270))
+
+- **`fallow mutation` keeps the arguments of compile-time calls as written.** A file that calls `feature()` from `bun:bundle` failed the baseline with "feature() argument must be a string literal", because the instrumented copy replaced the string with a mutant switch. The arguments of `feature()` from `bun:bundle`, of a Bun macro call and of `import.meta.glob()` now get no mutant. The condition around the call keeps its mutants. (#5285)
+
+- **`fallow dead-code` no longer reports the members of a singleton class that other code calls through an exported instance.** For `export const sm = SceneManager.getInstance()`, a call `sm.createScene()` in another module now counts as a use of `SceneManager.createScene`. This works when the class is in the same file or is imported, and when a local constant is exported with `export { sm }`. A static getter without a return type annotation also counts as a factory when it returns the instance that a static field holds: `return SceneManager.instance`, `return this.#instance!`, `return SceneManager.instance ?? (SceneManager.instance = new SceneManager())`, or `return (SceneManager.#instance ??= new SceneManager())`. A static method that returns another value, or the class itself (`return this`), still credits no instance member. When two different factory calls in one file give values to the same name, the export credits no class. The cache version changes, so the first run after the update parses every file again.
+  (Closes [#5233](https://github.com/fallow-rs/fallow/issues/5233))
+
+- **`fallow mutation` runs `bun test` with the `bunfig.toml` of a workspace package.** Bun reads `bunfig.toml` only from its working folder. Fallow ran each test file from the project root, so the `[test] preload` of a package never ran and the baseline failed. Fallow now starts each test file in the folder of the nearest `bunfig.toml` between the test file and the root, as `cd <package> && bun test` does. For the tests of such a package, `process.cwd()` is the package folder, and Bun loads the `.env` files of the package folder. A project with only a root `bunfig.toml` runs as before. (#5286)
+
+- **A file that an Nx target or a CI command runs without its extension is no longer reported as unused.** `node scripts/build` in a `project.json` `nx:run-commands` target, a Vite+ task or a CI workflow step now credits `scripts/build.js` (and `scripts/build.prod` credits `scripts/build.prod.js`), and `tsx scripts/seed` credits `scripts/seed.ts`. These commands now resolve a file argument without an extension, as `package.json` scripts already did. Only `.js`, `.ts` and their module variants are tried, so `bash scripts/deploy.sh` does not credit `scripts/deploy.ts`, and `node scripts/theme` does not credit `scripts/theme.css`. A directory argument, such as `vitest run src/lib/`, is a filter and does not make the index file of the directory an entry.
+  (Closes [#5325](https://github.com/fallow-rs/fallow/issues/5325))
+
+- **The human and Markdown lines of `unused-load-data-key` now name React Router and Remix loaders.** Each line says that the key is returned from a route `load()` or `loader`, and names the `data.<key>`, `page.data.<key>` and `useLoaderData()` reads. The line no longer describes a SvelteKit-only rule.
+  (Refs [#5264](https://github.com/fallow-rs/fallow/issues/5264))
+
+- **`untested-export` no longer reports a re-export of a type as an untested runtime export.** A re-export without the `type` keyword, for example `export { PathValue } from './eager'` where `eager.ts` declares `export type PathValue = ...`, was a value export in `fallow health --coverage-gaps`. TypeScript erases such a re-export, so no test can run it. The rule now follows the re-export chain. It skips the export when the name resolves to a type alias or an interface and to no value. A class, an enum, or a `const` with a type of the same name stays a runtime export. A file that only re-exports types in this way is no longer a runtime file, and the `value_export_count` of an untested file uses the same check.
+  (Closes [#5361](https://github.com/fallow-rs/fallow/issues/5361))
+
+### Performance
+
+- **Extraction skips the call facts when no rule reads them.** Only the `constant-parameter` rule family and the `health` command read the call facts of a file. Other runs now skip the pass that collects them, so a cold `fallow dead-code` run does less work per file. The output does not change.
+
+- **A warm run after an edit that keeps the import statements no longer
+  resolves the imports of the project again.** The module graph cache now
+  holds a second hash for each file, over the facts that import resolution
+  reads. When the content of a file changed, and no import, re-export,
+  `require()` call, `import()` call or module mock of any file changed or
+  moved, the run takes the resolved imports from the cache and builds the
+  graph from the edited modules. An edit above a `require()` or `import()`
+  call moves that call, so the run resolves again. In the `--performance`
+  table a run that reuses the resolved imports shows
+  `resolve imports: 0.0ms` together with the line `graph cache not reused:
+  at least one file changed`. A project with convention auto-imports resolves again after
+  each edit, as before. The first run after the upgrade discards the old
+  graph cache once.
+
+- **A warm run no longer reads the metadata of each unchanged file a second time.** When the parse cache serves a file from its metadata alone, the cache update after the parse keeps the stored entry and makes no new metadata read for that file. Before, the update read the metadata of every file again on one thread, also on a run where no file changed.
+
+- **The scan of git hook files is fast again.** The scan reads a list of
+  candidate files (husky, lefthook, simple-git-hooks, lint-staged and agent
+  hook configs) for the project root and for each workspace. The bounded
+  read of each candidate resolved the path again, and a missing candidate
+  took several path resolutions. The scan now resolves the read scope once
+  for each root, and a missing candidate costs one `lstat` call. On a
+  checkout of `vuejs/core`, the `script analysis` row of `--performance`
+  goes from about 63 ms to about 9 ms. Each bounded read of a missing
+  project file, for example a missing `tsconfig.json`, also takes fewer path
+  resolutions, and the check of a workspace member `package.json` that is a
+  plain file takes two `lstat` calls. A link that leaves the project, a
+  dangling link, a file that is not a regular file and a file that is too
+  large are still refused.
+  (Closes [#5320](https://github.com/fallow-rs/fallow/issues/5320))
+
+- **A run without a reader skips the feature flag walk and the component
+  contract scans.** The parse walked each file for feature flags and
+  collected the component contracts of each file, also when no rule or
+  report of the run read them. Now only `fallow flags`, the HTML output of
+  `fallow viz` and the `absent-component-prop` rule turn these scans on. The
+  parse cache records which entries hold the facts, so a later run that reads
+  them parses only the files whose entry lacks them. The output does not
+  change.
+
+- **The fallow binaries use the mimalloc allocator on every platform.** Before, only the Linux musl binaries used it. The parallel analysis makes many small allocations, and mimalloc handles them with less CPU time than the system allocators. On macOS, a cold `dead-code` run with all threads used 9% to 29% less CPU time on four public projects. Peak memory rises by a fixed amount of about 12 to 25 MiB on a multi-core machine. On the largest project (about 700 MiB peak), peak memory rose by 5% to 7%. The Linux binaries turn off the eager arena commit of mimalloc, as the musl binaries already did, because it raises peak memory on Linux.
+
+- **The plugin stage is faster on large monorepos.** Fallow looks for some plugin config files in folders that the file walk skips, such as hidden folders. It does this in each folder that holds a source file. Before, each of these lookups did a full path check, also when the folder did not exist. Now one `stat` call rules out a missing folder first. On next.js, the plugin stage of a cold `dead-code` run takes about 60% less time, and the full run about 20% less. The results do not change.
+
+- **The Linux x64 musl, Linux arm64 glibc, macOS x64 and Windows x64 binaries now use profile-guided optimization.** On the held-out benchmark projects, these binaries need less CPU time than the same builds without it: Linux x64 musl 12.4% less, Linux arm64 glibc 14.2% less, macOS x64 10.2% less, and Windows x64 4.1% less. The Linux x64 glibc and macOS arm64 binaries already used it.
+
+- **Plugin detection is faster in monorepos with many workspaces.** For each workspace, some plugins look for their config file anywhere below the workspace root. Before, each of these checks compared every folder of the project with the workspace root. Now each check reads only the folders of that workspace. On babel (174 workspaces), the plugin stage of a cold `dead-code` run takes about 38% less time. The results do not change.
+
+### Security
+
+- **Fallow reads project files only inside the project scope.** Each reader below the project root now reads a file only when it resolves to a regular file inside the root, with a size limit. A file or a link that leads out of the root counts as missing. This applies to SARIF snippets, CI suggestions, the diff-risk rules of `fallow audit`, `fallow migrate`, baselines, snapshots, saved mutation reports, coverage inputs, V8 scripts, plugin config probes, CI workflow, hook and infrastructure readers. A path that you name outside the project stays allowed.
+- **A cached graph is used only when its structure is valid.** Fallow rebuilds the graph when the cache has a module list that differs from the discovered files, or an index that is out of bounds.
+- **The input files of `fallow ci`, the build directory of `coverage upload-source-maps` and the vendor directory of `ci-template gitlab --vendor` must not lead out of the working directory or the repository through a link.**
+- **The type-aware companion reads files only inside the analysis root**, inside a `node_modules` directory at or above it, and inside the compiler package. A project config that leads out of the root is dropped. A semantic response path that leads above the root is refused.
+- **External plugin globs stay inside the project on every route**, also for the coverage upload. `fallow plugin-check` no longer evaluates the detection of a plugin that fails validation.
+
 ## [3.49.0] - 2026-11-25
 
 ### Added
@@ -18912,7 +19144,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--changed-since` and `--fail-on-issues` for CI
 - Cross-workspace resolution for npm/yarn/pnpm workspaces
 
-[unreleased]: https://github.com/fallow-rs/fallow/compare/v3.49.0...HEAD
+[unreleased]: https://github.com/fallow-rs/fallow/compare/v3.50.0...HEAD
+[3.50.0]: https://github.com/fallow-rs/fallow/compare/v3.49.0...v3.50.0
 [3.49.0]: https://github.com/fallow-rs/fallow/compare/v3.48.0...v3.49.0
 [3.48.0]: https://github.com/fallow-rs/fallow/compare/v3.47.0...v3.48.0
 [3.47.0]: https://github.com/fallow-rs/fallow/compare/v3.46.0...v3.47.0
