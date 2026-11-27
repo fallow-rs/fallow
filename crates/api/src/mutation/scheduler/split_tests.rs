@@ -1,4 +1,4 @@
-use super::super::super::protocol::{Adopted, WorkerMode};
+use super::super::super::protocol::Adopted;
 use super::*;
 
 const FILES: [&str; 4] = [
@@ -31,10 +31,6 @@ fn dry_of(files: &[String]) -> DryRunResult {
         unloaded_paths: Vec::new(),
         file_setup_ms: BTreeMap::new(),
         duplicate_test_ids: Vec::new(),
-        worker_mode: Some(WorkerMode {
-            files: files.to_vec(),
-            reused: false,
-        }),
     };
     for file in files {
         let rank = FILES.iter().position(|known| known == file).unwrap_or(0);
@@ -77,9 +73,10 @@ fn wide_script(
         Request::Reload => Ok(Response::Reloaded(Reloaded {
             method: ReloadMethod::Noop,
         })),
-        Request::Shutdown | Request::Replay(_) | Request::Record { .. } => {
-            Err(LinkFault::Protocol("no response".to_owned()))
-        }
+        Request::Shutdown
+        | Request::Replay(_)
+        | Request::Record { .. }
+        | Request::CheckWorkers(_) => Err(LinkFault::Protocol("no response".to_owned())),
     }
 }
 

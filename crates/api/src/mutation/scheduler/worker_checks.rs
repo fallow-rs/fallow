@@ -399,6 +399,8 @@ mod tests {
             confirmation: None,
             first_tests: Vec::new(),
             retry_extra_ms: 0,
+            estimate_ms: 0,
+            part: None,
         });
         checks.count_jobs(&retry);
         assert_eq!(
