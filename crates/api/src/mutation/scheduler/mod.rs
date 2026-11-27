@@ -25,6 +25,7 @@ use reserve::{CompanionStart, PhaseDeadline, Retry};
 use retry_set::{confirmation_tests, fastest_first, retried_status, retry_extra_ms, whole_files};
 
 mod adopt;
+mod check_parts;
 mod classification;
 pub mod clock;
 pub(super) mod control;

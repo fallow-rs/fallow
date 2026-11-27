@@ -1380,6 +1380,11 @@ at least `--setup-timeout`. The scheduler uses control runs in two places:
 
 1. The self-check. After the dry run and before the first mutant job, the
    first companion runs the tests of the first job as a control run.
+   When the tests of the first job are in the dry-run shares of more than
+   one companion, each of these companions runs its own tests as a control
+   run, at the same time, with the timeout of the whole job. The parts give
+   one result: a fault, a timeout or a run with no executed test in any part
+   stops the run as below, and the failed tests of all parts add up.
    - The control run passes when each requested test runs and passes, with
      no error.
    - When no test ran, the run path is broken. The run stops with exit

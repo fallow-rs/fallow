@@ -123,30 +123,48 @@ fn kill_by(files: &'static [&'static str]) -> impl Fn(&RunRequest) -> Response +
     }
 }
 
-/// The companions that run m1 at the same time. A run of m1 waits up to
-/// [`MEET_WAIT`] for a run of m1 on a second companion, so the test sees two
-/// companions at once only when the mutant runs on two workers.
+/// Runs that wait for each other. A run waits up to [`MEET_WAIT`] for a run
+/// on another companion. The meeting holds only when two companions had a
+/// run in flight at the same moment, so runs one after the other never meet.
 #[derive(Default)]
 struct Meeting {
-    companions: Mutex<FxHashSet<usize>>,
-    met: std::sync::Condvar,
+    state: Mutex<MeetingState>,
+    changed: std::sync::Condvar,
+}
+
+#[derive(Default)]
+struct MeetingState {
+    /// The companions with a run in flight.
+    in_flight: Vec<usize>,
+    /// True after two companions had a run in flight at the same moment.
+    met: bool,
 }
 
 const MEET_WAIT: Duration = Duration::from_secs(5);
 
 impl Meeting {
+    #[expect(
+        clippy::significant_drop_tightening,
+        reason = "the guard moves into the wait of the condition variable"
+    )]
     fn join(&self, companion: usize) {
-        let mut companions = self.companions.lock().expect("companions");
-        companions.insert(companion);
-        self.met.notify_all();
-        let _met = self
-            .met
-            .wait_timeout_while(companions, MEET_WAIT, |companions| companions.len() < 2)
-            .expect("companions");
+        let mut state = self.state.lock().expect("meeting");
+        state.in_flight.push(companion);
+        if state.in_flight.iter().any(|other| *other != companion) {
+            state.met = true;
+        }
+        self.changed.notify_all();
+        let (mut state, _) = self
+            .changed
+            .wait_timeout_while(state, MEET_WAIT, |state| !state.met)
+            .expect("meeting");
+        if let Some(at) = state.in_flight.iter().position(|other| *other == companion) {
+            state.in_flight.remove(at);
+        }
     }
 
-    fn count(&self) -> usize {
-        self.companions.lock().expect("companions").len()
+    fn met(&self) -> bool {
+        self.state.lock().expect("meeting").met
     }
 }
 
@@ -167,7 +185,7 @@ fn the_test_files_of_a_wide_mutant_run_on_more_than_one_idle_worker() {
     let outcome = run_schedule(&spawner, &wide_plan(), &config(4)).expect("run");
 
     assert!(
-        meeting.count() > 1,
+        meeting.met(),
         "two companions run the mutant at the same time"
     );
     let result = &outcome.results["m1"];
@@ -327,4 +345,127 @@ fn a_static_mutant_splits_only_with_fresh_modules_for_each_run() {
         let whole = runs.iter().all(|(_, tests)| tests.len() == FILES.len());
         assert_eq!(whole, !fresh, "fresh modules {fresh}: {runs:?}");
     }
+}
+
+/// The control runs of the self-check, with the companion of each.
+fn self_check_controls(spawner: &FakeSpawner) -> Vec<(usize, Vec<String>)> {
+    spawner
+        .controls()
+        .into_iter()
+        .map(|(index, run)| (index, run.test_ids))
+        .collect()
+}
+
+#[test]
+fn the_self_check_of_a_wide_first_job_runs_on_each_companion_that_holds_its_tests() {
+    let meeting = Arc::new(Meeting::default());
+    let met = Arc::clone(&meeting);
+    let spawner = wide_spawner(VITEST_CAPS, |run| {
+        run_result(run, RunStatus::Survived, None)
+    })
+    .with_control(move |index, run| {
+        met.join(index);
+        Ok(passing_control(run))
+    });
+    let outcome = run_schedule(&spawner, &wide_plan(), &config(4)).expect("run");
+
+    assert!(
+        meeting.met(),
+        "two companions run the self-check at the same time"
+    );
+    let controls = self_check_controls(&spawner);
+    assert!(
+        controls.iter().all(|(index, _)| *index < FILES.len()),
+        "only the companions of the first dry run check: {controls:?}"
+    );
+    assert!(
+        controls.iter().all(|(_, tests)| tests.len() == 1),
+        "each companion checks the tests of its own share: {controls:?}"
+    );
+    let mut checked: Vec<String> = controls.into_iter().flat_map(|(_, tests)| tests).collect();
+    checked.sort();
+    let all: Vec<String> = FILES.iter().map(|file| file_test_id(file)).collect();
+    assert_eq!(checked, all, "the self-check covers each test of the job");
+    assert_eq!(status(&outcome, "m1"), MutantStatus::Survived);
+}
+
+#[test]
+fn a_test_that_fails_in_one_part_of_the_self_check_is_a_baseline_failure() {
+    let failing = file_test_id("test/c.test.ts");
+    let spawner = wide_spawner(VITEST_CAPS, |run| {
+        run_result(run, RunStatus::Survived, None)
+    })
+    .with_control(move |_, run| {
+        if run.test_ids.contains(&failing) {
+            return Ok(run_result(run, RunStatus::Killed, Some(&failing)));
+        }
+        Ok(passing_control(run))
+    });
+    let outcome = run_schedule(&spawner, &wide_plan(), &config(4)).expect("run");
+
+    let failing = file_test_id("test/c.test.ts");
+    let result = &outcome.results["m1"];
+    assert_eq!(result.status, MutantStatus::Survived);
+    assert!(!result.covering_tests.contains(&failing));
+    assert_eq!(result.covering_tests.len(), FILES.len() - 1);
+    assert!(
+        outcome
+            .baseline_failures
+            .iter()
+            .any(|failure| failure.test_id.as_ref() == Some(&failing)),
+        "{:?}",
+        outcome.baseline_failures
+    );
+}
+
+#[test]
+fn a_fault_in_one_part_of_the_self_check_stops_the_run() {
+    let broken = file_test_id("test/b.test.ts");
+    let spawner = wide_spawner(VITEST_CAPS, |run| {
+        run_result(run, RunStatus::Survived, None)
+    })
+    .with_control(move |_, run| {
+        if run.test_ids.contains(&broken) {
+            return Err(LinkFault::Protocol("bad line".to_owned()));
+        }
+        Ok(passing_control(run))
+    });
+    let error = run_schedule(&spawner, &wide_plan(), &config(4)).expect_err("stop");
+
+    let ScheduleError::RunPath { message, .. } = &error else {
+        panic!("expected a run path error, got {error:?}");
+    };
+    assert!(message.contains("self-check"), "{message}");
+    assert!(
+        spawner
+            .runs()
+            .iter()
+            .all(|(_, run)| run.mutant_id.is_none())
+    );
+}
+
+#[test]
+fn a_part_of_the_self_check_that_executes_no_test_stops_the_run() {
+    let empty = file_test_id("test/d.test.ts");
+    let spawner = wide_spawner(VITEST_CAPS, |run| {
+        run_result(run, RunStatus::Survived, None)
+    })
+    .with_control(move |_, run| {
+        if run.test_ids.contains(&empty) {
+            let Response::Run(mut result) = run_result(run, RunStatus::Survived, None) else {
+                unreachable!("run_result gives a run result");
+            };
+            result.tests.clear();
+            result.tests_executed = 0;
+            result.status = RunStatus::RuntimeError;
+            return Ok(Response::Run(result));
+        }
+        Ok(passing_control(run))
+    });
+    let error = run_schedule(&spawner, &wide_plan(), &config(4)).expect_err("stop");
+
+    let ScheduleError::RunPath { message, .. } = &error else {
+        panic!("expected a run path error, got {error:?}");
+    };
+    assert!(message.contains("executes no tests"), "{message}");
 }
