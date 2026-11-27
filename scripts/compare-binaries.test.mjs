@@ -23,9 +23,10 @@ const runScript = (args) =>
     timeout: 30_000,
   });
 
-// A fake fallow binary that prints JSON with a volatile timing field. A
-// `security` run prints `findings` when `extra` is set, and the exit code is
-// `exitCode` for that run.
+// A fake fallow binary that prints JSON with a volatile timing field. Like
+// fallow, it prints `next_steps` that depend on local state (here a random
+// value) unless `FALLOW_SUGGESTIONS=off`. A `security` run prints `findings`
+// when `extra` is set, and the exit code is `exitCode` for that run.
 const fakeBin = (dir, name, { extra = false, exitCode = 0 } = {}) => {
   const path = join(dir, name);
   writeFileSync(
@@ -36,6 +37,7 @@ const security = args[0] === "security";
 const out = { b: 1, a: { elapsed_ms: Math.random(), run_id: String(Math.random()), keep: args[0] } };
 if (security && ${extra}) out.findings = ["x"];
 if (!process.env.SKIP_FALLOW_AGENT_GUARD) out.guard = "missing";
+if (process.env.FALLOW_SUGGESTIONS !== "off") out.next_steps = [String(Math.random())];
 process.stdout.write(JSON.stringify(out));
 process.exitCode = security ? ${exitCode} : 0;
 `,

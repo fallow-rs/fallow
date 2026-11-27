@@ -38,8 +38,8 @@ Options:
   --timeout-ms N    Timeout for one run. Default: ${DEFAULT_TIMEOUT_MS}
 
 Each run uses: --root <project> ${FIXED_ARGS.join(" ")}
-and SKIP_FALLOW_AGENT_GUARD=1. The exit code is 1 on any DIFF, exit-code
-mismatch or ERROR (output that is not JSON).
+SKIP_FALLOW_AGENT_GUARD=1 and FALLOW_SUGGESTIONS=off. The exit code is 1 on
+any DIFF, exit-code mismatch or ERROR (output that is not JSON).
 `;
 
 const OPTION_SPEC = {
@@ -142,7 +142,9 @@ const runOnce = (bin, project, args, timeoutMs) => {
     encoding: "utf8",
     timeout: timeoutMs,
     maxBuffer: MAX_BUFFER,
-    env: { ...process.env, SKIP_FALLOW_AGENT_GUARD: "1" },
+    // The next steps read local state, such as the Impact history that each
+    // run adds to, so the base and head runs can print different steps.
+    env: { ...process.env, SKIP_FALLOW_AGENT_GUARD: "1", FALLOW_SUGGESTIONS: "off" },
   });
   const wallMs = Number(process.hrtime.bigint() - started) / 1e6;
   const stderr = proc.stderr ?? "";
