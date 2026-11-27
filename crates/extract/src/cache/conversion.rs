@@ -736,24 +736,26 @@ pub fn cached_to_module_opts(
 /// comes from `std::fs::metadata()` at parse time and enables fast cache
 /// validation on subsequent runs.
 ///
-/// `call_facts_extracted` is `true` when the run parsed the module with its
-/// call facts. Only then does the entry store them. A run that reads no call
-/// facts passes `false`, so it does not pay their encode, and the entry
-/// records that the facts are absent.
+/// `extracted` names the optional facts that the run parsed the module with.
+/// The entry records each of them as present. A run that reads no call facts
+/// does not pay their encode, and the entry records that the facts are
+/// absent.
 #[must_use]
 pub fn module_to_cached(
     module: &crate::ModuleInfo,
     fingerprint: fallow_types::source_fingerprint::SourceFingerprint,
-    complexity_extracted: bool,
-    call_facts_extracted: bool,
+    extracted: crate::ParseNeeds,
 ) -> CachedModule {
     let mut cached = module_to_cached_payload(module);
-    cached.call_facts =
-        call_facts_extracted.then(|| encode_call_facts(module.function_contracts.as_deref()));
+    cached.call_facts = extracted
+        .call_facts
+        .then(|| encode_call_facts(module.function_contracts.as_deref()));
     cached.mtime_ns = fingerprint.mtime_ns;
     cached.ctime_ns = fingerprint.ctime_ns;
     cached.file_size = fingerprint.file_size;
-    cached.complexity_extracted = complexity_extracted;
+    cached.complexity_extracted = extracted.complexity;
+    cached.flags_extracted = extracted.flags;
+    cached.component_contracts_extracted = extracted.component_contracts;
     cached
 }
 
@@ -821,6 +823,7 @@ fn module_to_cached_payload(module: &crate::ModuleInfo) -> CachedModule {
         line_offsets: module.line_offsets.clone(),
         complexity: module.complexity.clone(),
         complexity_extracted: false,
+        flags_extracted: false,
         flag_uses: module.flag_uses.clone(),
         flag_registry_facts: module.flag_registry_facts.clone(),
         class_heritage: module.class_heritage.clone(),
@@ -866,6 +869,7 @@ fn module_to_cached_payload(module: &crate::ModuleInfo) -> CachedModule {
         triple_slash_reference_paths: module.triple_slash_reference_paths.clone(),
         jsx_runtime_from_config: module.jsx_runtime_from_config,
         component_props: module.component_props.clone(),
+        component_contracts_extracted: false,
         component_contracts: module.component_contracts.clone(),
         effect_facts: module.effect_facts.clone(),
         call_facts: None,
@@ -912,8 +916,10 @@ pub fn module_to_cached_from_parts(
     module_to_cached(
         module,
         fallow_types::source_fingerprint::SourceFingerprint::new(mtime_ns, file_size),
-        !module.complexity.is_empty(),
-        true,
+        crate::ParseNeeds {
+            complexity: !module.complexity.is_empty(),
+            ..crate::ParseNeeds::ALL
+        },
     )
 }
 
@@ -927,18 +933,23 @@ fn encode_call_facts(facts: Option<&fallow_types::extract::FunctionContractFacts
 
 /// Reconstruct a [`ModuleInfo`](crate::ModuleInfo) for a cache hit.
 ///
-/// Returns `None` when `need_call_facts` is `true` and the entry cannot give
-/// the call facts: the run that wrote it did not record them, or the blob
-/// does not decode. The caller then parses the file again, so a run that
-/// reads call facts never sees a module whose facts are missing.
+/// Returns `None` when the entry cannot give a fact that `needs` asks for:
+/// the run that wrote it did not collect the fact, or the call facts blob
+/// does not decode. The caller then parses the file again, so a run never
+/// sees a module whose needed facts are missing.
 #[must_use]
 pub fn cached_hit_to_module(
     cached: &CachedModule,
     file_id: fallow_types::discover::FileId,
-    need_complexity: bool,
-    need_call_facts: bool,
+    needs: crate::ParseNeeds,
 ) -> Option<crate::ModuleInfo> {
-    let facts = if need_call_facts {
+    if (needs.complexity && !cached.complexity_extracted)
+        || (needs.flags && !cached.flags_extracted)
+        || (needs.component_contracts && !cached.component_contracts_extracted)
+    {
+        return None;
+    }
+    let facts = if needs.call_facts {
         match cached_call_facts(cached) {
             CachedCallFacts::Usable(facts) => facts,
             CachedCallFacts::Unusable => return None,
@@ -946,7 +957,7 @@ pub fn cached_hit_to_module(
     } else {
         None
     };
-    let mut module = cached_to_module_opts(cached, file_id, need_complexity, false);
+    let mut module = cached_to_module_opts(cached, file_id, needs.complexity, false);
     module.function_contracts = facts;
     Some(module)
 }

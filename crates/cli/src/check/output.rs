@@ -606,6 +606,7 @@ mod tests {
         fallow_config::ResolvedConfig {
             extraction_mode: fallow_types::shared_state::ExtractionMode::Standard,
             call_facts_requested: false,
+            feature_flags_requested: false,
             shared_state_allowlist: Vec::new(),
             detection_config_digest: String::new(),
             legacy_glob_groups: Vec::new(),

@@ -168,10 +168,11 @@ pub fn run_flags(opts: &FlagsOptions<'_>) -> ExitCode {
         Err(code) => return code,
     };
 
-    let (run, config) = match load_flags_config(opts) {
+    let (run, mut config) = match load_flags_config(opts) {
         Ok(loaded) => loaded,
         Err(code) => return code,
     };
+    config.feature_flags_requested = true;
     if let Err(code) = check_vendor_key_prefix(vendor_export.as_ref(), &config, opts) {
         return code;
     }

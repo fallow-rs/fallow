@@ -140,8 +140,10 @@ fn build_viz_data_from_options(opts: &VizOptions<'_>) -> Result<VizData, ExitCod
 
     // The Security lens reports candidates, so it needs the advisory rules on.
     // Text formats emit the import graph alone and never read them.
+    // The HTML output also holds the feature flag report.
     if opts.format == VizFormat::Html {
         enable_security_rules(&mut config);
+        config.feature_flags_requested = true;
     }
 
     // Coverage feeds the Health lens through the shared precedence order

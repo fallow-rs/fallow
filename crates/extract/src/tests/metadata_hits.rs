@@ -9,6 +9,8 @@ use crate::{ParseNeeds, parse_all_files, parse_all_files_with_mode};
 const NO_FACTS: ParseNeeds = ParseNeeds {
     complexity: false,
     call_facts: false,
+    flags: false,
+    component_contracts: false,
 };
 
 fn source_file(root: &std::path::Path, name: &str, source: &str) -> DiscoveredFile {
@@ -39,8 +41,11 @@ fn second_parse(
         &files[0].path,
         module,
         fingerprint_of(&metadata),
-        false,
-        false,
+        ParseNeeds {
+            flags: true,
+            component_contracts: true,
+            ..NO_FACTS
+        },
     );
 
     parse_all_files_with_mode(
@@ -77,7 +82,7 @@ fn a_hit_that_compared_the_content_hash_is_not_a_metadata_hit() {
 fn an_entry_without_the_complexity_of_the_run_is_not_a_metadata_hit() {
     let needs = ParseNeeds {
         complexity: true,
-        call_facts: false,
+        ..NO_FACTS
     };
     let second = second_parse(SourceFingerprint::from_metadata, needs);
     assert!(second.metadata_hits.is_empty());
@@ -86,8 +91,8 @@ fn an_entry_without_the_complexity_of_the_run_is_not_a_metadata_hit() {
 #[test]
 fn an_entry_without_the_call_facts_of_the_run_is_not_a_metadata_hit() {
     let needs = ParseNeeds {
-        complexity: false,
         call_facts: true,
+        ..NO_FACTS
     };
     let second = second_parse(SourceFingerprint::from_metadata, needs);
     assert!(second.metadata_hits.is_empty());

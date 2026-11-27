@@ -10,7 +10,7 @@ use crate::MemberKind;
 /// extraction semantics change, and give the reason in the commit message and
 /// the CHANGELOG. A stale version serves old extraction results from a warm
 /// cache. The `assert_cached_type_size!` guards below catch shape changes.
-pub(super) const CACHE_VERSION: u32 = 501;
+pub(super) const CACHE_VERSION: u32 = 502;
 
 /// Duplication token cache version. Bump it when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes, and give the
@@ -202,6 +202,11 @@ pub struct CachedModule {
     /// hit on a rich entry and a complexity-blind run can refuse to downgrade
     /// one.
     pub complexity_extracted: bool,
+    /// Whether the run that wrote the entry walked the module for feature
+    /// flags. When `false`, `flag_uses` and `flag_registry_facts` are empty
+    /// because the walk did not run, and a run that reads flags parses the
+    /// file again.
+    pub flags_extracted: bool,
     /// Feature flag use sites.
     pub flag_uses: Vec<fallow_types::extract::FlagUse>,
     /// Flag-key registries and registry reads.
@@ -309,6 +314,10 @@ pub struct CachedModule {
     /// Round-trips so the `unused-component-prop` detector sees them on
     /// warm-cache loads.
     pub component_props: Vec<fallow_types::extract::ComponentProp>,
+    /// Whether the run that wrote the entry collected the component
+    /// contracts. When `false`, `component_contracts` is `None` because the
+    /// scan did not run, and a run that reads them parses the file again.
+    pub component_contracts_extracted: bool,
     /// Framework-neutral input contracts and inspected caller evidence.
     pub component_contracts: Option<Box<fallow_types::extract::ComponentContractFacts>>,
     /// Effect layer, tagged error and `catchTag` facts.

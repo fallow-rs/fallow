@@ -507,6 +507,32 @@ A consumer of these facts reads them together with other facts:
   escapes, but the consumer treats a module that a template host imports for
   side effects as a template host too.
 
+
+### Optional scans: feature flags and component contracts
+
+Two more scans run only for a reader. `ParseNeeds` names each optional fact
+(complexity, call facts, feature flags, component contracts), and the engine
+builds it from the config in `session_parse::parse_needs`:
+
+| Fact | Module fields | Reader | Config predicate |
+|---|---|---|---|
+| Feature flags | `flag_uses`, `flag_registry_facts` | `fallow flags`, the flags API and MCP tool, `viz --format html` | `reads_feature_flags`, set by `feature_flags_requested` |
+| Component contracts | `component_contracts` | `absent-component-prop` (off by default) | `reads_component_contracts`, the rule globally or in an override |
+
+A surface that reports feature flags sets `feature_flags_requested` before
+the session parses. The engine flag entry points assert this in debug
+builds. When a fact is off, the parse skips its scan: the flag walk of the
+program and of the JSX retry, the semantic contract collection of each
+script host, and the template contract scans of Vue, Svelte and Glimmer.
+`parse_source_without_bom` clears `component_contracts`, because the HTML
+host collects its template contracts outside the gate.
+
+`CachedModule.flags_extracted` and `CachedModule.component_contracts_extracted`
+record whether the writer ran each scan. `cached_hit_to_module` refuses an
+entry that lacks a fact of the run, and `record_module` keeps the facts that
+an earlier run stored and the current run did not extract. The warm parse
+store compares the full `ParseNeeds` with `ParseNeeds::covers`.
+
 ## Embedded-source and import regression boundaries
 
 Asset references in HTML, JSX and HTML tagged templates must come from literal

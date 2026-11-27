@@ -76,48 +76,8 @@ pub fn parse_source_to_module_unbounded(
     );
     if is_glimmer_file(path) {
         crate::visitor::mark_template_callers(&mut module);
-        for range in crate::glimmer::find_template_ranges(source) {
-            let (start, end) = (range.start, range.end);
-            let mut callers = crate::sfc_template::component_contracts::collect(
-                &source[start..end],
-                &module.imports,
-                fallow_types::extract::ComponentFramework::Ember,
-                start as u32,
-                module
-                    .component_contracts
-                    .as_deref()
-                    .map_or(&[], |facts| facts.spread_bindings.as_slice()),
-                module
-                    .component_contracts
-                    .as_deref()
-                    .map_or(&[], |facts| facts.aliases.as_slice()),
-            );
-            let (reads, incomplete, dynamic) =
-                crate::sfc_template::glimmer::collect_argument_reads(&source[start..end]);
-            if dynamic {
-                callers
-                    .incomplete_frameworks
-                    .push(fallow_types::extract::ComponentFramework::Ember);
-            }
-            if let Some(facts) = &mut module.component_contracts {
-                let owners: Vec<_> = facts
-                    .template_owners
-                    .iter()
-                    .filter(|owner| owner.start <= start as u32 && end as u32 <= owner.end)
-                    .collect();
-                if let [owner] = owners.as_slice() {
-                    for declaration in &mut facts.declarations {
-                        if declaration.component_span == owner.component_span
-                            && declaration.framework
-                                == fallow_types::extract::ComponentFramework::Ember
-                        {
-                            declaration.is_used |= reads.contains(&declaration.name);
-                            declaration.incomplete |= incomplete;
-                        }
-                    }
-                }
-            }
-            crate::component_contracts::merge(&mut module.component_contracts, callers, 0, None);
+        if options.component_contracts {
+            crate::glimmer::apply_template_contracts(&mut module, source);
         }
     }
     module.iconify_prefixes = crate::iconify::extract_iconify_prefixes(path, source);
@@ -275,7 +235,7 @@ fn parse_source_to_module_inner(
     need_complexity: bool,
     options: &crate::module_parse::ExtractionOptions<'_>,
 ) -> ModuleInfo {
-    let flag_patterns = options.flag_patterns;
+    let flag_patterns = options.flags.then_some(options.flag_patterns);
     let gates = options.gates();
     if let Some(module) =
         parse_non_js_source_to_module(file_id, path, source, content_hash, need_complexity, gates)
@@ -357,7 +317,7 @@ struct JsxRetryOrJsdocInput<'a> {
     comments: &'a [Comment],
     source: &'a str,
     export_statements: &'a [oxc_span::Span],
-    flag_patterns: &'a FlagPatterns,
+    flag_patterns: Option<&'a FlagPatterns>,
     gates: crate::module_parse::ExtractionGates,
 }
 
@@ -411,7 +371,7 @@ fn compute_primary_complexity_and_flags(
     inline_template_findings: &[crate::visitor::InlineTemplateFinding],
     line_offsets: &[u32],
     need_complexity: bool,
-    flag_patterns: &FlagPatterns,
+    flag_patterns: Option<&FlagPatterns>,
 ) -> (Vec<FunctionComplexity>, ExtractedFlags) {
     let mut complexity = if need_complexity {
         crate::complexity::compute_complexity(program, parser_source, line_offsets)
@@ -422,7 +382,9 @@ fn compute_primary_complexity_and_flags(
         append_inline_template_complexity(&mut complexity, inline_template_findings, line_offsets);
     }
 
-    let flags = crate::flags::extract_flags(program, line_offsets, flag_patterns);
+    let flags = flag_patterns.map_or_else(ExtractedFlags::default, |patterns| {
+        crate::flags::extract_flags(program, line_offsets, patterns)
+    });
     (complexity, flags)
 }
 
@@ -586,7 +548,7 @@ struct JsxRetryInput<'a> {
     total_extracted: usize,
     need_complexity: bool,
     line_offsets: &'a [u32],
-    flag_patterns: &'a FlagPatterns,
+    flag_patterns: Option<&'a FlagPatterns>,
     gates: crate::module_parse::ExtractionGates,
     primary_error_count: u32,
 }
@@ -638,11 +600,11 @@ fn parse_with_jsx_retry(input: &JsxRetryInput<'_>) -> Option<JsxRetryParse> {
         input.line_offsets,
         &extractor,
     );
-    let flags = crate::flags::extract_flags(
-        &retry_return.program,
-        input.line_offsets,
-        input.flag_patterns,
-    );
+    let flags = input
+        .flag_patterns
+        .map_or_else(ExtractedFlags::default, |patterns| {
+            crate::flags::extract_flags(&retry_return.program, input.line_offsets, patterns)
+        });
     let parsed_suppressions =
         crate::suppress::parse_suppressions(&retry_return.program.comments, input.source);
     let export_statements = crate::jsdoc_attach::export_statement_spans(&retry_return.program);
@@ -1545,6 +1507,7 @@ fn report_unreferenced_import_equals_bindings(
 struct SemanticReferenceCandidates<'a> {
     mode: fallow_types::shared_state::ExtractionMode,
     call_facts: bool,
+    component_contracts: bool,
     module_bindings: &'a rustc_hash::FxHashSet<Span>,
     subclass_bindings: &'a rustc_hash::FxHashSet<Span>,
     callback_captures: &'a rustc_hash::FxHashSet<Span>,
@@ -1741,7 +1704,11 @@ fn compute_semantic_usage_with_candidates(
         import_binding_references,
         namespace_member_uses,
         unreferenced_import_equals_bindings: import_equals.unreferenced,
-        component_contracts: crate::component_contracts::collect(&semantic, imports, exports),
+        component_contracts: if candidates.component_contracts {
+            crate::component_contracts::collect(&semantic, imports, exports)
+        } else {
+            fallow_types::extract::ComponentContractFacts::default()
+        },
         effect_facts: crate::effect_facts::collect(&semantic, program, imports, exports),
         shared_state: crate::shared_state::collect(&semantic, imports, candidates.mode),
         function_contracts: if candidates.call_facts {
@@ -1979,6 +1946,7 @@ pub fn compute_import_binding_usage(
             mode: fallow_types::shared_state::ExtractionMode::Standard,
             // Only the import binding usage of this probe has a reader.
             call_facts: false,
+            component_contracts: true,
             module_bindings: &rustc_hash::FxHashSet::default(),
             subclass_bindings: &rustc_hash::FxHashSet::default(),
             callback_captures: &rustc_hash::FxHashSet::default(),

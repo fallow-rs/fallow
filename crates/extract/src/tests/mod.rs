@@ -12,6 +12,7 @@ mod mdx;
 mod metadata_hits;
 mod nesting;
 mod object_pattern_defaults;
+mod optional_scans;
 mod regex_compile;
 mod sfc;
 mod sfc_blocks;

@@ -1849,6 +1849,8 @@ fn call_facts_follow_the_extraction_option() {
                     flag_patterns: &fallow_types::extract::FlagPatterns::default(),
                     mode: fallow_types::shared_state::ExtractionMode::Standard,
                     call_facts,
+                    flags: true,
+                    component_contracts: true,
                 },
             );
             assert_eq!(

@@ -473,7 +473,9 @@ pub(crate) fn parse_sfc_to_module_with_mode(
 
     append_template_asset_imports(source, &mut combined);
     dedup_import_binding_lists(&mut combined);
-    apply_component_contracts(kind, source, &mut combined);
+    if gates.component_contracts {
+        apply_component_contracts(kind, source, &mut combined);
+    }
 
     combined
 }
@@ -576,8 +578,11 @@ fn empty_sfc_module(file_id: FileId, source: &str, content_hash: u64) -> ModuleI
     })
 }
 
+#[path = "sfc_component_contracts.rs"]
+mod component_contracts_apply;
 #[path = "sfc_script_merge.rs"]
 mod script_merge;
+use component_contracts_apply::apply_component_contracts;
 pub(crate) use script_merge::translate_script_complexity;
 use script_merge::{
     SfcScriptMergeInput, SharedScopeReferences, credit_shared_scope_references,
@@ -2014,62 +2019,4 @@ export const foo = 1;
                 [0];
         assert!(info.svelte_listened_events.contains(&"save".to_string()));
     }
-}
-
-fn apply_component_contracts(kind: SfcKind, source: &str, combined: &mut ModuleInfo) {
-    let framework = match kind {
-        SfcKind::Vue => fallow_types::extract::ComponentFramework::Vue,
-        SfcKind::Svelte => fallow_types::extract::ComponentFramework::Svelte,
-    };
-    let callers = crate::sfc_template::component_contracts::collect(
-        &mask_non_markup_regions(source),
-        &combined.imports,
-        framework,
-        0,
-        combined
-            .component_contracts
-            .as_deref()
-            .map_or(&[], |facts| facts.spread_bindings.as_slice()),
-        combined
-            .component_contracts
-            .as_deref()
-            .map_or(&[], |facts| facts.aliases.as_slice()),
-    );
-    crate::component_contracts::merge(&mut combined.component_contracts, callers, 0, None);
-    if let Some(facts) = &mut combined.component_contracts {
-        let credited: FxHashSet<String> = facts
-            .declarations
-            .iter()
-            .flat_map(|prop| [prop.local.clone(), prop.name.clone()])
-            .collect();
-        let usage = collect_template_usage_with_bound_targets(
-            kind,
-            source,
-            &credited,
-            &FxHashMap::default(),
-            &FxHashMap::default(),
-        );
-        for declaration in &mut facts.declarations {
-            declaration.is_used |= usage.used_bindings.contains(&declaration.local)
-                || usage.member_accesses.iter().any(|access| {
-                    access.object == declaration.local && access.member == declaration.name
-                });
-        }
-    }
-    if let Some(facts) = &mut combined.component_contracts {
-        for declaration in &mut facts.declarations {
-            if let Some(prop) = combined
-                .component_props
-                .iter()
-                .find(|prop| prop.name == declaration.name)
-            {
-                declaration.is_used |= prop.used_in_template;
-            }
-            declaration.incomplete |= combined.has_props_attrs_fallthrough
-                || combined.has_define_expose
-                || combined.has_define_model;
-        }
-    }
-
-    crate::component_contracts::attach_sfc_default_export(combined);
 }

@@ -240,6 +240,10 @@ pub struct ResolvedConfig {
     /// shallow directories section of `fallow health` reads the module-scope
     /// functions from them. Set before the session parses.
     pub call_facts_requested: bool,
+    /// The run reads the feature flag facts of the modules: the feature flag
+    /// report of `fallow flags` and of the HTML `viz` output. Set before the
+    /// session parses.
+    pub feature_flags_requested: bool,
     /// Exact global root/slot pairs omitted from the inventory.
     pub shared_state_allowlist: Vec<[String; 2]>,
     /// Package names and package-name globs excluded from both
@@ -1089,6 +1093,7 @@ impl FallowConfig {
             cache_config_hash: cache.config_hash,
             extraction_mode: fallow_types::shared_state::ExtractionMode::Standard,
             call_facts_requested: false,
+            feature_flags_requested: false,
             shared_state_allowlist: self.shared_state_allowlist,
             ignore_dependencies: IgnoreDependencyMatcher::compile(&self.ignore_dependencies),
             ignore_binaries: IgnoreDependencyMatcher::compile(&self.ignore_binaries),
@@ -1291,6 +1296,33 @@ impl ResolvedConfig {
     #[must_use]
     pub fn reads_call_facts(&self) -> bool {
         self.call_facts_requested || self.constant_parameters_enabled()
+    }
+
+    /// Whether the run reads the feature flag facts of the modules. Only a
+    /// surface that reports feature flags sets
+    /// [`Self::feature_flags_requested`]; no rule reads them.
+    ///
+    /// A run for which this is `false` does not walk the modules for flags.
+    /// The parse cache records which entries hold the flag facts.
+    #[must_use]
+    pub const fn reads_feature_flags(&self) -> bool {
+        self.feature_flags_requested
+    }
+
+    /// Whether the run reads the component contracts of the modules: the
+    /// `absent-component-prop` rule is on, globally or in an override.
+    ///
+    /// A run for which this is `false` does not collect the contracts. The
+    /// parse cache records which entries hold them.
+    #[must_use]
+    pub fn reads_component_contracts(&self) -> bool {
+        self.rules.absent_component_props != crate::Severity::Off
+            || self.overrides.iter().any(|overrides| {
+                overrides
+                    .rules
+                    .absent_component_props
+                    .is_some_and(|severity| severity != crate::Severity::Off)
+            })
     }
 
     /// Whether the `constant-parameter` rule is on, globally or in an

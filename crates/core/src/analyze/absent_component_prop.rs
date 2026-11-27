@@ -8,7 +8,6 @@ use crate::graph::{
 use crate::resolve::{ResolvedImport, ResolvedModule};
 use crate::results::{AbsentComponentProp, ComponentPropCallSite};
 use crate::suppress::IssueKind;
-use fallow_config::Severity;
 use fallow_types::extract::{
     ComponentFramework, ComponentPropDeclaration, ComponentReference, ExportName, ImportedName,
     ModuleInfo, angular_template_member_names,
@@ -761,14 +760,8 @@ fn framework_name(framework: ComponentFramework) -> &'static str {
 
 /// Run the rule when it is on for any path, and store the findings.
 pub(super) fn populate(input: &mut super::FrameworkSpecificFindingsInput<'_>) {
-    if input.config.rules.absent_component_props == Severity::Off
-        && !input.config.overrides.iter().any(|overrides| {
-            overrides
-                .rules
-                .absent_component_props
-                .is_some_and(|severity| severity != Severity::Off)
-        })
-    {
+    // The parse collects the contracts under the same predicate.
+    if !input.config.reads_component_contracts() {
         return;
     }
     let findings = find_absent_component_props(&AbsentPropInput {

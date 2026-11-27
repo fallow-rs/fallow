@@ -2684,27 +2684,74 @@ fn fingerprint() -> fallow_types::source_fingerprint::SourceFingerprint {
 
 #[test]
 fn an_entry_without_call_facts_records_that_they_are_absent() {
-    let cached = module_to_cached(&module_with_call_facts(), fingerprint(), false, false);
+    let cached = module_to_cached(
+        &module_with_call_facts(),
+        fingerprint(),
+        crate::ParseNeeds {
+            complexity: false,
+            call_facts: false,
+            flags: true,
+            component_contracts: true,
+        },
+    );
     assert!(cached.call_facts.is_none());
-    let module = cached_hit_to_module(&cached, FileId(0), false, false)
-        .expect("a run that reads no call facts hits the entry");
+    let module = cached_hit_to_module(
+        &cached,
+        FileId(0),
+        crate::ParseNeeds {
+            complexity: false,
+            call_facts: false,
+            flags: false,
+            component_contracts: false,
+        },
+    )
+    .expect("a run that reads no call facts hits the entry");
     assert!(module.function_contracts.is_none());
     assert!(
-        cached_hit_to_module(&cached, FileId(0), false, true).is_none(),
+        cached_hit_to_module(
+            &cached,
+            FileId(0),
+            crate::ParseNeeds {
+                complexity: false,
+                call_facts: true,
+                flags: false,
+                component_contracts: false
+            }
+        )
+        .is_none(),
         "a run that reads call facts must parse the file again"
     );
 }
 
 #[test]
 fn a_run_without_call_facts_does_not_decode_the_blob() {
-    let cached = module_to_cached(&module_with_call_facts(), fingerprint(), false, true);
+    let cached = module_to_cached(
+        &module_with_call_facts(),
+        fingerprint(),
+        crate::ParseNeeds {
+            complexity: false,
+            call_facts: true,
+            flags: true,
+            component_contracts: true,
+        },
+    );
     assert!(
         cached
             .call_facts
             .as_deref()
             .is_some_and(|blob| !blob.is_empty())
     );
-    let module = cached_hit_to_module(&cached, FileId(0), false, false).expect("hit");
+    let module = cached_hit_to_module(
+        &cached,
+        FileId(0),
+        crate::ParseNeeds {
+            complexity: false,
+            call_facts: false,
+            flags: false,
+            component_contracts: false,
+        },
+    )
+    .expect("hit");
     assert!(module.function_contracts.is_none());
     assert!(
         cached_to_module_opts(&cached, FileId(0), false, false)
@@ -2721,19 +2768,70 @@ fn a_module_with_no_call_facts_gets_an_empty_blob() {
         "export type A = string;\n",
     );
     assert!(module.function_contracts.is_none());
-    let cached = module_to_cached(&module, fingerprint(), false, true);
+    let cached = module_to_cached(
+        &module,
+        fingerprint(),
+        crate::ParseNeeds {
+            complexity: false,
+            call_facts: true,
+            flags: true,
+            component_contracts: true,
+        },
+    );
     assert_eq!(cached.call_facts.as_deref(), Some(&[][..]));
-    let restored = cached_hit_to_module(&cached, FileId(0), false, true)
-        .expect("an empty blob gives usable facts");
+    let restored = cached_hit_to_module(
+        &cached,
+        FileId(0),
+        crate::ParseNeeds {
+            complexity: false,
+            call_facts: true,
+            flags: false,
+            component_contracts: false,
+        },
+    )
+    .expect("an empty blob gives usable facts");
     assert!(restored.function_contracts.is_none());
 }
 
 #[test]
 fn a_call_facts_blob_that_does_not_decode_is_a_miss() {
-    let mut cached = module_to_cached(&module_with_call_facts(), fingerprint(), false, true);
+    let mut cached = module_to_cached(
+        &module_with_call_facts(),
+        fingerprint(),
+        crate::ParseNeeds {
+            complexity: false,
+            call_facts: true,
+            flags: true,
+            component_contracts: true,
+        },
+    );
     cached.call_facts = Some(vec![0xff; 3].into_boxed_slice());
-    assert!(cached_hit_to_module(&cached, FileId(0), false, true).is_none());
-    assert!(cached_hit_to_module(&cached, FileId(0), false, false).is_some());
+    assert!(
+        cached_hit_to_module(
+            &cached,
+            FileId(0),
+            crate::ParseNeeds {
+                complexity: false,
+                call_facts: true,
+                flags: false,
+                component_contracts: false
+            }
+        )
+        .is_none()
+    );
+    assert!(
+        cached_hit_to_module(
+            &cached,
+            FileId(0),
+            crate::ParseNeeds {
+                complexity: false,
+                call_facts: false,
+                flags: false,
+                component_contracts: false
+            }
+        )
+        .is_some()
+    );
 }
 
 #[test]
@@ -2741,7 +2839,17 @@ fn a_reader_of_call_facts_adds_them_to_an_entry_without_them() {
     let module = module_with_call_facts();
     let path = Path::new("/project/src/format.ts");
     let mut store = CacheStore::new(Path::new("/project"));
-    assert!(store.record_module(path, &module, fingerprint(), false, false));
+    assert!(store.record_module(
+        path,
+        &module,
+        fingerprint(),
+        crate::ParseNeeds {
+            complexity: false,
+            call_facts: false,
+            flags: true,
+            component_contracts: true
+        }
+    ));
     assert!(
         store
             .get_by_path_only(path)
@@ -2750,12 +2858,42 @@ fn a_reader_of_call_facts_adds_them_to_an_entry_without_them() {
             .is_none()
     );
     assert!(
-        !store.record_module(path, &module, fingerprint(), false, false),
+        !store.record_module(
+            path,
+            &module,
+            fingerprint(),
+            crate::ParseNeeds {
+                complexity: false,
+                call_facts: false,
+                flags: true,
+                component_contracts: true
+            }
+        ),
         "an unchanged entry that gains nothing stays as it is"
     );
-    assert!(store.record_module(path, &module, fingerprint(), false, true));
+    assert!(store.record_module(
+        path,
+        &module,
+        fingerprint(),
+        crate::ParseNeeds {
+            complexity: false,
+            call_facts: true,
+            flags: true,
+            component_contracts: true
+        }
+    ));
     let entry = store.get_by_path_only(path).expect("entry");
-    let restored = cached_hit_to_module(entry, FileId(0), false, true).expect("facts stored");
+    let restored = cached_hit_to_module(
+        entry,
+        FileId(0),
+        crate::ParseNeeds {
+            complexity: false,
+            call_facts: true,
+            flags: false,
+            component_contracts: false,
+        },
+    )
+    .expect("facts stored");
     assert_eq!(restored.function_contracts, module.function_contracts);
 }
 
@@ -2764,7 +2902,17 @@ fn a_run_without_call_facts_keeps_the_stored_facts() {
     let module = module_with_call_facts();
     let path = Path::new("/project/src/format.ts");
     let mut store = CacheStore::new(Path::new("/project"));
-    assert!(store.record_module(path, &module, fingerprint(), false, true));
+    assert!(store.record_module(
+        path,
+        &module,
+        fingerprint(),
+        crate::ParseNeeds {
+            complexity: false,
+            call_facts: true,
+            flags: true,
+            component_contracts: true
+        }
+    ));
     let blob = store
         .get_by_path_only(path)
         .expect("entry")
@@ -2774,14 +2922,34 @@ fn a_run_without_call_facts_keeps_the_stored_facts() {
     let mut without_facts = module.clone();
     without_facts.function_contracts = None;
     let moved = fallow_types::source_fingerprint::SourceFingerprint::new(11, 20);
-    assert!(store.record_module(path, &without_facts, moved, false, false));
+    assert!(store.record_module(
+        path,
+        &without_facts,
+        moved,
+        crate::ParseNeeds {
+            complexity: false,
+            call_facts: false,
+            flags: true,
+            component_contracts: true
+        }
+    ));
     assert_eq!(
         store.get_by_path_only(path).expect("entry").call_facts,
         blob
     );
 
     assert!(
-        store.record_module(path, &without_facts, moved, true, false),
+        store.record_module(
+            path,
+            &without_facts,
+            moved,
+            crate::ParseNeeds {
+                complexity: true,
+                call_facts: false,
+                flags: true,
+                component_contracts: true
+            }
+        ),
         "a run that adds complexity rewrites the entry"
     );
     let entry = store.get_by_path_only(path).expect("entry");
