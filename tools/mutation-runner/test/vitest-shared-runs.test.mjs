@@ -105,6 +105,7 @@ for (const { packageName, version } of VITEST_MAJORS) {
       writeFileSync(pidLog, "");
       const result = await shared.run("m9", [FIRST, SECOND]);
       assert.equal(result.status, "survived", JSON.stringify(result));
+      assert.equal(result.worker_mode, "reused", JSON.stringify(result));
       const pids = new Set(readFileSync(pidLog, "utf8").trim().split("\n"));
       assert.equal(pids.size, 1, `one worker for both files, got ${[...pids].join(", ")}`);
     });
@@ -120,7 +121,12 @@ for (const { packageName, version } of VITEST_MAJORS) {
     test("a control run gets a new worker process", async () => {
       await shared.run("m9", [FIRST, SECOND]);
       writeFileSync(pidLog, "");
-      await shared.run(null, [FIRST, SECOND]);
+      const control = await shared.run(null, [FIRST, SECOND]);
+      assert.equal(
+        control.worker_mode,
+        "shared",
+        "a control run shares the worker, not the process",
+      );
       await shared.run("m9", [FIRST, SECOND]);
       const pids = new Set(readFileSync(pidLog, "utf8").trim().split("\n"));
       assert.equal(pids.size, 2, "the control run does not use the reused process");
@@ -140,6 +146,7 @@ for (const { packageName, version } of VITEST_MAJORS) {
       writeFileSync(pidLog, "");
       const result = await noHit.run("m1", [NOHIT_FIRST, NOHIT_PLAIN]);
       assert.equal(result.status, "survived", JSON.stringify(result));
+      assert.equal(result.worker_mode, "isolated", JSON.stringify(result));
       const pids = new Set(readFileSync(pidLog, "utf8").trim().split("\n"));
       assert.equal(pids.size, 2, `one worker for each file, got ${[...pids].join(", ")}`);
     });
@@ -154,6 +161,7 @@ for (const { packageName, version } of VITEST_MAJORS) {
       assert.equal(control.status, "survived", JSON.stringify(control));
       const result = await storeLeak.run("m30", [STORE_A, STORE_B]);
       assert.equal(result.status, "survived", JSON.stringify(result));
+      assert.equal(result.worker_mode, "isolated", "the result comes from the isolated run again");
     });
 
     test("a module cache of an earlier mutant run does not hide a later mutant", async () => {
@@ -171,6 +179,7 @@ for (const { packageName, version } of VITEST_MAJORS) {
       for (let run = 0; run < 3; run += 1) {
         const result = await registry.run("m9", [REGISTRY_A, REGISTRY_B]);
         assert.equal(result.status, "survived", JSON.stringify(result));
+        assert.equal(result.worker_mode, "shared", JSON.stringify(result));
       }
       const counts = new Map();
       for (const pid of readFileSync(pidLog, "utf8").trim().split("\n")) {

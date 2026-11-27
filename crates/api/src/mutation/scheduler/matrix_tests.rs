@@ -35,6 +35,7 @@ fn all_failed(run: &RunRequest) -> Response {
             .collect(),
         unhandled_errors: Vec::new(),
         loop_timeout: false,
+        worker_mode: None,
     })
 }
 

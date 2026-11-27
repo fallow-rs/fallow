@@ -230,6 +230,7 @@ fn run_result(run: &RunRequest, status: RunStatus, killed_by: Option<&str>) -> R
         tests,
         unhandled_errors: Vec::new(),
         loop_timeout: false,
+        worker_mode: None,
     })
 }
 
@@ -559,6 +560,7 @@ fn fail_closed_a_survived_claim_without_full_evidence_is_a_runtime_error() {
                 tests: Vec::new(),
                 unhandled_errors: Vec::new(),
                 loop_timeout: false,
+                worker_mode: None,
             })
         }),
         ("one of two tests", |run| {
@@ -576,6 +578,7 @@ fn fail_closed_a_survived_claim_without_full_evidence_is_a_runtime_error() {
                 }],
                 unhandled_errors: Vec::new(),
                 loop_timeout: false,
+                worker_mode: None,
             })
         }),
         ("a failed test", |run| {
@@ -601,6 +604,7 @@ fn fail_closed_a_survived_claim_without_full_evidence_is_a_runtime_error() {
                 ],
                 unhandled_errors: Vec::new(),
                 loop_timeout: false,
+                worker_mode: None,
             })
         }),
         ("another mutant", |run| {
@@ -618,6 +622,7 @@ fn fail_closed_a_survived_claim_without_full_evidence_is_a_runtime_error() {
                 tests: Vec::new(),
                 unhandled_errors: Vec::new(),
                 loop_timeout: false,
+                worker_mode: None,
             })
         }),
     ];
@@ -662,6 +667,7 @@ fn a_kill_by_an_unhandled_error_has_no_killer() {
                     file: Some("test/a.test.ts".to_owned()),
                 }],
                 loop_timeout: false,
+                worker_mode: None,
             }))
         },
     ));
@@ -2294,6 +2300,7 @@ fn load_failure(run: &RunRequest) -> Response {
             file: None,
         }],
         loop_timeout: false,
+        worker_mode: None,
     })
 }
 
@@ -2390,6 +2397,7 @@ fn t2_fails_in_control(run: &RunRequest) -> Response {
         tests,
         unhandled_errors: Vec::new(),
         loop_timeout: false,
+        worker_mode: None,
     })
 }
 
@@ -2723,6 +2731,7 @@ fn a_timeout_of_the_self_check_is_reported_as_a_timeout_not_as_a_broken_run_path
                 tests: Vec::new(),
                 unhandled_errors: Vec::new(),
                 loop_timeout: false,
+                worker_mode: None,
             }))
         }),
         ("a watchdog timeout", |_| Err(LinkFault::Timeout)),
@@ -2852,6 +2861,7 @@ fn only_t1_passes_in_control(run: &RunRequest) -> Response {
         tests,
         unhandled_errors: Vec::new(),
         loop_timeout: false,
+        worker_mode: None,
     })
 }
 

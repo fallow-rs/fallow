@@ -101,6 +101,7 @@ fn killed_by(run: &RunRequest, killers: &[String]) -> Response {
         tests,
         unhandled_errors: Vec::new(),
         loop_timeout: false,
+        worker_mode: None,
     })
 }
 

@@ -318,6 +318,7 @@ fn outcome(results: &[(&str, MutantStatus, bool)], keys: &[(&str, &str)]) -> Sch
             .collect::<FxHashMap<_, _>>(),
         promoted: Vec::new(),
         targets: Vec::new(),
+        worker_modes: None,
     }
 }
 

@@ -660,6 +660,7 @@ mod tests {
             cache_keys: FxHashMap::default(),
             promoted: Vec::new(),
             targets: Vec::new(),
+            worker_modes: None,
         }
     }
 

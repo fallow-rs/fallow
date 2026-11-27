@@ -1860,6 +1860,37 @@ is absent when the runner states no fact.
 `runner` is absent when no companion started, for example in a project with
 no test files.
 
+## Worker modes
+
+`runner.worker_modes` tells how the Vitest companion used worker processes
+for the mutant runs. It has one object for each mode, with `runs` (the number
+of mutant runs) and `duration_ms` (the sum of their run times).
+
+- `isolated`: each covering test file of the run had a new worker process.
+- `shared`: the test files of the run shared one new worker process (see
+  [Vitest shared workers](#vitest-shared-workers)).
+- `reused`: the test files of the run shared the kept worker process of the
+  companion (see [Vitest reused workers](#vitest-reused-workers)).
+
+Each `run` request with a mutant that gives a `run_result` counts one time,
+also when the scheduler rejects the result. A mutant can send more than one
+request: the retry of a survivor, the run again after a check of the taken
+tests, and the second request of the target mode. A run with no mutant (a
+control run) does not count. A request that the watchdog stops gives no
+`run_result` and does not count.
+
+The companion can repeat a shared run inside one request, for example in
+isolated workers after a kill in a later test file. That request counts one
+time, in the mode of the run that gave its result. Its `duration_ms` includes
+the repeat.
+
+The object is absent when no mutant run stated a mode: the runner is
+`node:test` or `bun test`, the result cache or the journal gave each result,
+or no run gave a result. The values depend on the host load, the schedule and
+the cache, so do not compare them in a gate. A high `isolated` value explains
+slow mutant runs. The shared-worker check decides the mode (see
+[Vitest shared workers](#vitest-shared-workers)).
+
 ## Result cache
 
 A run stores the result of each `killed` mutant and each `survived` mutant

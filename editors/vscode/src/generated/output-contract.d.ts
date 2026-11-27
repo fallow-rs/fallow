@@ -22581,6 +22581,11 @@ concurrency: number
  * counted. Absent when the runner states no fact.
  */
 notes?: string[]
+/**
+ * The mutant runs and their time in each worker mode of the runner.
+ * Absent when no mutant run stated a mode.
+ */
+worker_modes?: (MutationWorkerModes | null)
 }
 /**
  * The JavaScript runtime that ran the companion.
@@ -22594,6 +22599,28 @@ name: string
  * The version that the runtime reports.
  */
 version: string
+}
+/**
+ * The mutant runs and their time in each worker mode. The values depend on
+ * the host and on the schedule, so a gate must not compare them.
+ */
+export interface MutationWorkerModes {
+isolated: MutationWorkerModeUse
+shared: MutationWorkerModeUse
+reused: MutationWorkerModeUse
+}
+/**
+ * The mutant runs of one worker mode.
+ */
+export interface MutationWorkerModeUse {
+/**
+ * The number of mutant runs in this mode.
+ */
+runs: number
+/**
+ * The sum of the run times that the runner reported, in milliseconds.
+ */
+duration_ms: number
 }
 /**
  * The result cache facts of a run.

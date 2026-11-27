@@ -354,6 +354,22 @@ pub struct RunResult {
     /// budget.
     #[serde(default)]
     pub loop_timeout: bool,
+    /// How the companion used worker processes for the run. A runner that
+    /// has one mode leaves it out.
+    #[serde(default)]
+    pub worker_mode: Option<RunWorkerMode>,
+}
+
+/// How a run used worker processes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RunWorkerMode {
+    /// Each test file of the run had a new worker.
+    Isolated,
+    /// The test files of the run shared one new worker.
+    Shared,
+    /// The test files shared one worker process that an earlier run kept.
+    Reused,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]

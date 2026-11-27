@@ -225,12 +225,15 @@ pub(super) type ControlCell = Arc<Mutex<Option<ControlVerdict>>>;
 /// that failed in a control run, each with the message of its baseline
 /// failure: each later mutant run leaves them out. It also keeps the first
 /// failure of each test that did not pass in a restarted companion, with its
-/// reason and its error, for the baseline failure of that test.
+/// reason and its error, for the baseline failure of that test. Each worker
+/// of the run reads the memo, so it also counts the worker mode of each
+/// mutant run.
 #[derive(Default)]
 pub(super) struct ControlMemo {
     entries: Mutex<FxHashMap<Vec<String>, ControlCell>>,
     pub(super) failed_tests: Mutex<BTreeMap<String, String>>,
     restarted_failures: Mutex<BTreeMap<String, RestartedFailure>>,
+    pub(super) modes: super::modes::WorkerModeTally,
 }
 
 /// Why a test did not pass in a restarted companion, and its first error.

@@ -1307,6 +1307,7 @@ fn a_typecheck_note_says_that_type_level_kills_are_not_counted() {
         },
         concurrency: 1,
         notes: vec!["typecheck-not-run".to_owned()],
+        worker_modes: None,
     });
     let text = run_text(&noted, &OPTIONS);
     assert!(

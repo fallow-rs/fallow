@@ -17,7 +17,7 @@ use fallow_output::{
     MutationCacheOutput, MutationPlanOutput, MutationPlanSchemaVersion, MutationReport,
     MutationResumeOutput, MutationRunnerOutput, MutationRuntimeOutput, MutationSchemaVersion,
     MutationScopeKind, MutationScopeOutput, MutationTimings, MutationUnmatchedPath,
-    MutationWorktreeCheck,
+    MutationWorkerModeUse, MutationWorkerModes, MutationWorktreeCheck,
 };
 use fallow_types::envelope::ElapsedMs;
 use rustc_hash::FxHashSet;
@@ -45,6 +45,7 @@ use crate::mutation::run_dir::{RunFile, write_run_dir};
 use crate::mutation::runner_select::{Runner, select_runner};
 use crate::mutation::runner_version::{plan_runner, runner_version_help};
 use crate::mutation::scheduler::clock::SystemClock;
+use crate::mutation::scheduler::modes::ModeUse;
 use crate::mutation::scheduler::{
     OutcomeJournal, ResultLookup, ScheduleConfig, ScheduleError, ScheduleIssue, ScheduleOutcome,
     SchedulePlan, ScheduledMutant, run_schedule_with_progress,
@@ -1160,6 +1161,13 @@ pub(super) fn init_options(
     }
 }
 
+const fn mode_use(counts: ModeUse) -> MutationWorkerModeUse {
+    MutationWorkerModeUse {
+        runs: counts.runs,
+        duration_ms: counts.duration_ms,
+    }
+}
+
 /// The runner facts of the report. `None` when no companion started.
 fn runner_output(
     outcome: &ScheduleOutcome,
@@ -1182,6 +1190,11 @@ fn runner_output(
             .filter(|note| manifest.ready_notes.contains(note))
             .cloned()
             .collect(),
+        worker_modes: outcome.worker_modes.map(|counts| MutationWorkerModes {
+            isolated: mode_use(counts.isolated),
+            shared: mode_use(counts.shared),
+            reused: mode_use(counts.reused),
+        }),
     })
 }
 

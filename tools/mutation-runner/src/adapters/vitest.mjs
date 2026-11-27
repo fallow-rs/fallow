@@ -1227,6 +1227,16 @@ export const createAdapter = async (init) => {
     };
   };
 
+  /**
+   * The worker mode of one run: `reused` when a mutant run keeps the worker
+   * process of the run before it, `shared` when its test files share one
+   * worker, else `isolated`.
+   */
+  const workerModeOf = (request, { shared, reusable }) => {
+    if (!shared) return "isolated";
+    return reusable && request.bail && request.mutant_id !== null ? "reused" : "shared";
+  };
+
   const runRequested = async (request, requested, { shared, reusable }) => {
     let testIdByTask;
     const specifications = () => {
@@ -1243,7 +1253,9 @@ export const createAdapter = async (init) => {
       shared,
       reusable,
     });
-    return { result, ...describeRun(request, requested, testIdByTask, result, started) };
+    const described = describeRun(request, requested, testIdByTask, result, started);
+    const workerMode = workerModeOf(request, { shared, reusable });
+    return { result, ...described, body: { ...described.body, worker_mode: workerMode } };
   };
 
   /**

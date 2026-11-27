@@ -379,8 +379,9 @@ pub use mutation::{
     MutationTasksScope, MutationTasksSummary, MutationTestKillRow, MutationTimings,
     MutationTypecheckOutput, MutationTypecheckSkip, MutationTypecheckSkipReason,
     MutationUnmatchedPath, MutationVerdict, MutationVerdictInput, MutationVerdictJoin,
-    MutationVerdictKind, MutationVerdictSchemaVersion, MutationWorktreeCheck, SAMPLED_OUT_REASON,
-    SKIPPED_TESTS_CODE, serialize_mutation_inspect_json_output, serialize_mutation_json_output,
+    MutationVerdictKind, MutationVerdictSchemaVersion, MutationWorkerModeUse, MutationWorkerModes,
+    MutationWorktreeCheck, SAMPLED_OUT_REASON, SKIPPED_TESTS_CODE,
+    serialize_mutation_inspect_json_output, serialize_mutation_json_output,
     serialize_mutation_plan_json_output, serialize_mutation_tasks_json_output,
 };
 pub use mutation_ci::{
