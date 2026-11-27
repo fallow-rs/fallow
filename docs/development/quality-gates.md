@@ -295,6 +295,12 @@ Focused integration checks:
   hand-written corpus in `tests/benchmark-corpus/` and exits non-zero below the
   committed floor in `results/accuracy-baseline.json`. Runs in `verify:full`.
   The floor is a regression tripwire, not a published accuracy claim.
+- `npm run check:self-analysis` for detection changes: it runs the `--root`
+  dogfood steps of the CI `Fallow Self Analysis` job (`dead-code`, `health`
+  and `dupes` on `editors/vscode` and `npm/fallow`) with `cargo run`. It reads
+  the steps from `.github/workflows/ci.yml`, so it runs the same commands as
+  CI. A change that reports more findings fails this job and no other gate.
+  Needs the `editors/vscode` install. Runs in `verify:full`.
 
 Both companion parity checks look for a sibling of the main checkout. In a
 linked Git worktree, the main checkout is the clone that owns the worktree.
