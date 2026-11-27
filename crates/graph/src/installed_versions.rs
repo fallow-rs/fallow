@@ -61,7 +61,7 @@ impl InstalledVersions {
                     .or_insert_with(|| has_bun_lockfile(&root.join(owner)))
             })
             .filter_map(|manifest| {
-                let content = std::fs::read(root.join(manifest)).ok()?;
+                let content = read_manifest(root, manifest)?;
                 Some(InstalledVersion {
                     manifest: manifest.clone(),
                     version: version_of(&content),
@@ -70,6 +70,14 @@ impl InstalledVersions {
             .collect();
         entries.sort_unstable_by(|a, b| a.manifest.cmp(&b.manifest));
         Self { entries }
+    }
+
+    /// True when each stored manifest path is a key that
+    /// [`manifest_key`] can give (see [`is_manifest_key`]).
+    pub(crate) fn has_manifest_keys(&self) -> bool {
+        self.entries
+            .iter()
+            .all(|entry| is_manifest_key(&entry.manifest))
     }
 
     /// The number of stored manifests.
@@ -88,8 +96,8 @@ impl InstalledVersions {
     #[must_use]
     pub(crate) fn any_changed(&self, root: &Path) -> bool {
         let check = |entry: &InstalledVersion| {
-            !std::fs::read(root.join(&entry.manifest))
-                .is_ok_and(|content| version_of(&content) == entry.version)
+            read_manifest(root, &entry.manifest)
+                .is_none_or(|content| version_of(&content) != entry.version)
         };
         if self.entries.len() < PARALLEL_MIN {
             return self.entries.iter().any(check);
@@ -113,6 +121,37 @@ fn owner_dir(manifest: &str) -> &str {
 fn has_bun_lockfile(dir: &Path) -> bool {
     dir.ancestors()
         .any(|dir| BUN_LOCKFILES.iter().any(|name| dir.join(name).is_file()))
+}
+
+/// Read the manifest `manifest` (root-relative) when it is a regular file of
+/// at most [`fallow_types::read_guard::DEFAULT_MAX_READ_BYTES`] bytes. A
+/// package below `node_modules` can be a link out of the root, as a pnpm
+/// install makes, so the read has no root check.
+fn read_manifest(root: &Path, manifest: &str) -> Option<Vec<u8>> {
+    fallow_types::read_guard::read_bytes_bounded(
+        &root.join(manifest),
+        fallow_types::read_guard::DEFAULT_MAX_READ_BYTES,
+    )
+    .ok()
+}
+
+/// True when `key` has the shape that [`manifest_key`] gives: zero or more
+/// `..` steps, then only normal components, with a `node_modules` component
+/// right after the `..` steps when there are any, a `node_modules` component
+/// in any case, and `package.json` as the last component.
+pub(crate) fn is_manifest_key(key: &str) -> bool {
+    let components: Vec<Component<'_>> = Path::new(key).components().collect();
+    let parents = components
+        .iter()
+        .take_while(|component| **component == Component::ParentDir)
+        .count();
+    let rest = &components[parents..];
+    (parents == 0 || rest.first() == Some(&node_modules()))
+        && rest
+            .iter()
+            .all(|component| matches!(component, Component::Normal(_)))
+        && rest.contains(&node_modules())
+        && rest.last() == Some(&Component::Normal("package.json".as_ref()))
 }
 
 fn version_of(content: &[u8]) -> Option<String> {
@@ -184,6 +223,27 @@ mod tests {
         assert_eq!(key("/repo/app/package.json"), None);
         assert_eq!(key("/repo/app/node_modules/a/index.js"), None);
         assert_eq!(key("/repo/other/node_modules/a/package.json"), None);
+    }
+
+    #[test]
+    fn manifest_keys_have_the_shape_that_manifest_key_gives() {
+        for key in [
+            "node_modules/a/package.json",
+            "../node_modules/@s/b/package.json",
+            "packages/ui/node_modules/a/node_modules/b/package.json",
+        ] {
+            assert!(is_manifest_key(key), "{key}");
+        }
+        for key in [
+            "",
+            "package.json",
+            "/repo/node_modules/a/package.json",
+            "node_modules/a/index.js",
+            "node_modules/../../outside/package.json",
+            "../outside/node_modules/a/package.json",
+        ] {
+            assert!(!is_manifest_key(key), "{key}");
+        }
     }
 
     #[test]

@@ -181,6 +181,17 @@ impl MissedProbes {
         self.dirs.par_iter().any(check)
     }
 
+    /// True when each stored directory and name is a plain path below the
+    /// root (see [`is_plain_relative`]) and each name is one component.
+    pub(crate) fn has_plain_paths(&self) -> bool {
+        self.dirs.iter().all(|entry| {
+            (entry.dir.is_empty() || is_plain_relative(&entry.dir))
+                && entry.names.iter().all(|name| {
+                    is_plain_relative(name) && Path::new(name).components().count() == 1
+                })
+        })
+    }
+
     /// The missed paths, root-relative with forward slashes.
     pub fn paths(&self) -> impl Iterator<Item = String> + '_ {
         self.dirs.iter().flat_map(|entry| {
@@ -329,6 +340,15 @@ fn is_below_node_modules(relative: &Path) -> bool {
     relative
         .components()
         .any(|component| component == Component::Normal("node_modules".as_ref()))
+}
+
+/// True when `relative` names a path below the root: it is not empty and
+/// has only normal components, so no root, prefix or `..` step.
+pub(crate) fn is_plain_relative(relative: &str) -> bool {
+    !relative.is_empty()
+        && Path::new(relative)
+            .components()
+            .all(|component| matches!(component, Component::Normal(_)))
 }
 
 /// True when a path of `found` (root-relative) does not exist below `root`
