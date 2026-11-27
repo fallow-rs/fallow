@@ -20,7 +20,6 @@ fn file_test(file: &str, id: &str, status: TestStatus) -> DryTest {
 /// load, so a path that no file loads stays in each report.
 pub(super) fn dry_of(files: &[String], failing: Option<&str>) -> DryRunResult {
     let mut dry = DryRunResult {
-        worker_mode: None,
         tests: Vec::new(),
         hits: BTreeMap::new(),
         static_hits: Vec::new(),
@@ -68,9 +67,11 @@ pub(super) fn shard_spawner(failing: Option<&'static str>) -> FakeSpawner {
         Request::Reload => Ok(Response::Reloaded(Reloaded {
             method: ReloadMethod::Noop,
         })),
-        Request::Shutdown | Request::Replay(_) | Request::Record { .. } | Request::Adopt(_) => {
-            Err(LinkFault::Protocol("no response".to_owned()))
-        }
+        Request::Shutdown
+        | Request::Replay(_)
+        | Request::Record { .. }
+        | Request::Adopt(_)
+        | Request::CheckWorkers(_) => Err(LinkFault::Protocol("no response".to_owned())),
     })
 }
 

@@ -1632,11 +1632,19 @@ test run.
 ### Vitest shared workers
 
 Vitest starts one worker for each test file of a run when module isolation
-is on (the default). After the dry run, the adapter runs the same test files
-once more with `isolate: false`, with no active mutant. When each test gives
-the same status in both runs, and the shared run has no error outside a test
-that the isolated run does not have, the companion runs its later mutant and
-control runs with `isolate: false`.
+is on (the default). The scheduler decides for each set of covering test
+files whether its runs can share one worker. A set of files that 3 or more
+mutants share gets a check: a `check_workers` request with each test that a
+mutant of the set runs. The first check of a phase holds each such set, so
+it costs about one shared run of the covering tests of the phase. The
+companion runs the tests with no active mutant in one worker with
+`isolate: false`. When each test passes, as in the dry run, and the run has
+no error outside a test, the later mutant runs of that set use
+`isolate: false`. The scheduler keeps the mode for the run and sends it with
+each `run` request of the set, also to the other companions. A run with a
+test that the check did not run keeps a new worker for each file, and a
+later phase with new tests for the set (the retry of a survivor) gets a new
+check.
 
 - Vitest then gives the test files of the run that have the same project,
   environment and `sequence.groupOrder` to one worker. Each run still
@@ -1652,38 +1660,47 @@ control runs with `isolate: false`.
 - A mutant can also stay `survived` when global state of an earlier file
   of the worker hides it. This error lowers the score and never raises it.
   The retry of a survivor shares a worker in the same way.
-- A test that depends on a fresh worker for each file in the dry run, for
-  example a global that another test file sets, makes the two dry runs
-  differ. The companion then keeps isolated runs.
-- When any project has `isolate: false`, or the dry run has one test
-  specification, the companion does not share workers. A project in browser
-  mode keeps its own setting.
-- The check repeats the test files of the dry run that a later run can
-  select, and `duration_ms` of the dry run includes both runs. A later run
-  selects only covering tests, so the check leaves out each file with no
-  test that hits a mutant. When a test of the dry run hits a module-level
-  mutant, the check repeats each file. The check is skipped when the
-  isolated dry run takes more than 45 seconds. A failed shared run keeps
-  isolated runs.
+- A test that depends on a fresh worker for each file, for example a
+  global that another test file sets, fails in the check. When the check
+  held more than one set, each set then gets a check of its own, so only
+  the runs of a set with such a test keep a new worker for each file.
+- The check of a set finds only the interactions between the test files of
+  that set. That is enough for a shared worker: it holds the files of one
+  run, so two files that no run has together never share it.
+- A set that fewer than 3 mutants share gets no check, and its runs keep a
+  new worker for each file. While one worker checks a set, the other workers
+  run that set with a new worker for each file. A check that gives no answer
+  restarts the companion, and the set keeps isolated runs for the rest of
+  the run. No check starts after the time budget ends.
+- When any project has `isolate: false`, the companion does not share
+  workers. A project in browser mode keeps its own setting.
+- The dry run runs each test file one time. The check costs about two runs
+  of the checked tests of each set, in the time of the mutant runs.
 
 ### Vitest reused workers
 
-When the shared-worker check passes, the companion also keeps one Vitest
-worker process for many mutant runs. Vitest stops the worker of a run when
+When the check of a set passes in a reused process, the companion also
+keeps one Vitest worker process for many mutant runs of that set and of other
+sets with that mode. Vitest stops the worker of a run when
 the run ends, and a new process costs more CPU than most mutant runs. A
 custom pool of the adapter (`adapters/vitest-reuse.mjs`) wraps the `forks`
 or `threads` worker of Vitest and answers its `start` and `stop` messages
 itself, so the next mutant run gets the same process.
 
-- The check runs the dry-run files two more times in one reused process,
-  with no active mutant. The first round shares one worker for all files in
-  a fresh process, so it also decides the shared workers above. When it
-  differs from the isolated dry run, the plain shared check of the section
-  above decides, and each run gets a new process. The second round loads
-  each module a second time in the same process. When a test then gives
-  another status, for example because a module fails when it loads a second
-  time, the companion shares workers within a run but keeps a new process
-  for each run.
+- The check runs the tests of the set two times in one reused process,
+  with no active mutant. The first round shares one worker for all files of
+  the set in a new process, so it also decides the shared workers above.
+  When a test fails there, the plain shared check of the section above
+  decides, and each run gets a new process. The second round loads each
+  module a second time in the same process. When a test then fails, for
+  example because a module fails when it loads a second time, the runs of
+  the set share a worker but get a new process for each run.
+- A reused process holds the runs of more than one set. The guards below
+  keep the state of one run out of the next run. State that no guard sees,
+  for example a module that Node loaded itself, can still reach the next
+  run. So a kill counts only when the test file also detects the mutant in
+  a new worker, when it is the first run of a set after a run of another
+  set in the same process.
 - Only mutant runs with bail use the reused process. Dry runs, control runs
   and runs without bail (`--kill-matrix`) start a new worker.
 - Vitest sends the active mutant with each run. At the start of each test

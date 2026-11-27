@@ -29,13 +29,14 @@ const startOn = async (fixture, configPath, env = {}) => {
   });
   assert.equal(ready.type, "ready", JSON.stringify(ready));
   assert.equal(ready.capabilities.adopt, true);
-  const run = (mutantId, testIds) =>
+  const run = (mutantId, testIds, extra = {}) =>
     request({
       type: "run",
       mutant_id: mutantId,
       test_ids: testIds,
       timeout_ms: 10_000,
       bail: true,
+      ...extra,
     });
   return { companion, request, run };
 };
@@ -46,7 +47,6 @@ const adoptBody = (dryRun) => ({
   tests: dryRun.tests
     .filter((entry) => entry.status === "pass")
     .map(({ test_id, index }) => ({ test_id, index })),
-  worker_modes: dryRun.worker_mode === undefined ? [] : [dryRun.worker_mode],
 });
 
 const outcome = ({ status, killed_by }) => ({ status, killed_by });
@@ -81,10 +81,7 @@ for (const { packageName, version } of VITEST_MAJORS) {
         dryRun.tests.every((entry) => entry.status !== "pass" || typeof entry.index === "object"),
         JSON.stringify(dryRun.tests),
       );
-      assert.deepEqual(dryRun.worker_mode?.files, [
-        "shared/first.test.ts",
-        "shared/second.test.ts",
-      ]);
+      assert.equal(dryRun.worker_mode, undefined, "the dry run decides no worker mode");
 
       const unknown = await second.run("m1", [FIRST]);
       assert.equal(unknown.type, "error", "a companion with no dry run and no adopt knows no test");
@@ -106,11 +103,17 @@ for (const { packageName, version } of VITEST_MAJORS) {
         );
       }
 
+      const checked = await second.request({
+        type: "check_workers",
+        test_ids: [FIRST, SECOND],
+        timeout_ms: 10_000,
+      });
+      assert.equal(checked.worker_mode, "reused", "a companion checks the tests that it took");
       writeFileSync(pidLog, "");
-      const survived = await second.run("m9", [FIRST, SECOND]);
+      const survived = await second.run("m9", [FIRST, SECOND], { worker_mode: "reused" });
       assert.equal(survived.status, "survived", JSON.stringify(survived));
       const pids = new Set(readFileSync(pidLog, "utf8").trim().split("\n"));
-      assert.equal(pids.size, 1, "the taken worker mode shares one worker for both files");
+      assert.equal(pids.size, 1, "the checked worker mode shares one worker for both files");
     });
 
     test("a taken test keeps its project", async () => {
@@ -134,13 +137,11 @@ for (const { packageName, version } of VITEST_MAJORS) {
       const refused = await companion.request({
         type: "adopt",
         tests: [{ test_id: FIRST }],
-        worker_modes: [],
       });
       assert.deepEqual([refused.type, refused.error?.code], ["error", "bad-request"]);
       const wrongTypes = await companion.request({
         type: "adopt",
         tests: [{ test_id: FIRST, index: { project: "", module: 1, task: null } }],
-        worker_modes: [],
       });
       assert.deepEqual([wrongTypes.type, wrongTypes.error?.code], ["error", "bad-request"]);
     });

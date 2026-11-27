@@ -55,6 +55,20 @@ pub struct RunRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub loop_budget_ms: Option<u64>,
     pub bail: bool,
+    /// The worker mode that a `check_workers` request proved for these
+    /// tests. `None` sends no field: each test file gets its own worker.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub worker_mode: Option<RunWorkerMode>,
+}
+
+/// The body of a `check_workers` request: run `test_ids` with no active
+/// mutant in one shared worker, and give the worker mode that later runs of
+/// these tests can use.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct CheckWorkersRequest {
+    pub test_ids: Vec<String>,
+    /// The timeout of each test in one round of the check.
+    pub timeout_ms: u64,
 }
 
 /// The body of a `replay` request (replay contract 1): call `export` of
@@ -84,22 +98,11 @@ pub struct AdoptedTest {
     pub index: serde_json::Value,
 }
 
-/// The worker mode that the dry run of one companion proved for its test
-/// files: these files can share one worker in a mutant or control run, and
-/// with `reused`, a mutant run can keep that worker process.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct WorkerMode {
-    pub files: Vec<String>,
-    #[serde(default)]
-    pub reused: bool,
-}
-
 /// The body of an `adopt` request: the tests that the companion can run
-/// without a dry run of its own, and the worker modes of their files.
+/// without a dry run of its own.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct AdoptRequest {
     pub tests: Vec<AdoptedTest>,
-    pub worker_modes: Vec<WorkerMode>,
 }
 
 /// One request.
@@ -118,6 +121,8 @@ pub enum Request {
     /// Gives the companion index entries of tests from the dry run of
     /// another companion, so that it can run them with no dry run.
     Adopt(AdoptRequest),
+    /// Decides the worker mode of later runs of a set of tests.
+    CheckWorkers(CheckWorkersRequest),
     Run(RunRequest),
     Reload,
     Replay(ReplayRequest),
@@ -130,6 +135,7 @@ impl Request {
             Self::Init(_) => "init",
             Self::DryRun { .. } => "dry_run",
             Self::Adopt(_) => "adopt",
+            Self::CheckWorkers(_) => "check_workers",
             Self::Run(_) => "run",
             Self::Reload => "reload",
             Self::Replay(_) => "replay",
@@ -144,6 +150,7 @@ impl Request {
             Self::Init(_) => Some("ready"),
             Self::DryRun { .. } => Some("dry_run_result"),
             Self::Adopt(_) => Some("adopted"),
+            Self::CheckWorkers(_) => Some("workers_checked"),
             Self::Run(_) => Some("run_result"),
             Self::Reload => Some("reloaded"),
             Self::Replay(_) => Some("replay_result"),
@@ -164,6 +171,7 @@ impl Request {
                 Ok(serde_json::json!({ "test_files": test_files }))
             }
             Self::Adopt(body) => serde_json::to_value(body),
+            Self::CheckWorkers(body) => serde_json::to_value(body),
             Self::Run(body) => serde_json::to_value(body),
             Self::Replay(body) => serde_json::to_value(body),
             Self::Reload | Self::Shutdown => Ok(serde_json::Value::Null),
@@ -193,6 +201,9 @@ pub struct Capabilities {
     /// The adapter answers an `adopt` request: a companion can run a test
     /// from the dry run of another companion of the same run.
     pub adopt: bool,
+    /// The adapter answers a `check_workers` request and reads the
+    /// `worker_mode` of a `run` request.
+    pub worker_check: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -269,10 +280,6 @@ pub struct DryRunResult {
     /// these ids is not reliable. An older companion leaves it out.
     #[serde(default)]
     pub duplicate_test_ids: Vec<String>,
-    /// The test files that the dry run proved can share a worker, when it
-    /// proved any. An adapter with the `adopt` capability sends it.
-    #[serde(default)]
-    pub worker_mode: Option<WorkerMode>,
 }
 
 /// The body of an `adopted` response.
@@ -280,6 +287,13 @@ pub struct DryRunResult {
 pub struct Adopted {
     /// The count of tests that the companion added to its index.
     pub tests: usize,
+}
+
+/// The body of a `workers_checked` response.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+pub struct WorkersChecked {
+    /// The mode that later runs of the checked tests can use.
+    pub worker_mode: RunWorkerMode,
 }
 
 /// The body of a `record_result` response.
@@ -361,7 +375,7 @@ pub struct RunResult {
 }
 
 /// How a run used worker processes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RunWorkerMode {
     /// Each test file of the run had a new worker.
@@ -441,6 +455,7 @@ pub enum Response {
     Ready(Ready),
     DryRun(DryRunResult),
     Adopted(Adopted),
+    WorkersChecked(WorkersChecked),
     Run(RunResult),
     Reloaded(Reloaded),
     Replay(ReplayResult),
@@ -550,6 +565,7 @@ pub fn decode_response(
         "ready" => Response::Ready(serde_json::from_value(value).map_err(body)?),
         "dry_run_result" => Response::DryRun(serde_json::from_value(value).map_err(body)?),
         "adopted" => Response::Adopted(serde_json::from_value(value).map_err(body)?),
+        "workers_checked" => Response::WorkersChecked(serde_json::from_value(value).map_err(body)?),
         "run_result" => Response::Run(serde_json::from_value(value).map_err(body)?),
         "reloaded" => Response::Reloaded(serde_json::from_value(value).map_err(body)?),
         "replay_result" => Response::Replay(serde_json::from_value(value).map_err(body)?),
@@ -744,6 +760,7 @@ mod tests {
             timeout_ms: 6500,
             loop_budget_ms: Some(650),
             bail: true,
+            worker_mode: None,
         })
         .to_line(1, 3);
         assert_eq!(
@@ -756,6 +773,7 @@ mod tests {
             timeout_ms: 6500,
             loop_budget_ms: None,
             bail: true,
+            worker_mode: None,
         })
         .to_line(1, 4);
         assert_eq!(

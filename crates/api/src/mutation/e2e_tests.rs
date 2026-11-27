@@ -698,6 +698,104 @@ mod end_to_end {
         (project, root)
     }
 
+    /// A Vitest project with two pairs of test files that fail when the other
+    /// file of the pair ran before them in the same worker (a global that
+    /// each file sets). The files of `pair/` cover the same mutants, so one
+    /// mutant run has both. The files of `solo/` cover other mutants, so no
+    /// mutant run has both.
+    fn global_pair_project(package: &Path) -> (tempfile::TempDir, PathBuf) {
+        let project = tempfile::tempdir().expect("dir");
+        let root = dunce::canonicalize(project.path()).expect("root");
+        let pair_test = |own: &str, other: &str, call: &str| {
+            format!(
+                "import {{ expect, test }} from \"vitest\";\nimport {{ add, isPositive, mul, sub }} from \"../src/calc\";\n\ntest(\"needs a fresh worker\", () => {{\n  const state = globalThis as Record<string, unknown>;\n  expect(state.{other}).toBeUndefined();\n  state.{own} = true;\n  {call}\n}});\n"
+            )
+        };
+        let files = [
+            (
+                "package.json",
+                r#"{"name":"global-pair","private":true,"type":"module"}"#.to_owned(),
+            ),
+            (
+                "vitest.config.mjs",
+                "export default { test: { include: [\"pair/**/*.test.ts\", \"solo/**/*.test.ts\"] } };\n".to_owned(),
+            ),
+            (
+                "src/calc.ts",
+                "export const add = (a: number, b: number): number => a + b;\nexport const sub = (a: number, b: number): number => a - b;\nexport const mul = (a: number, b: number): number => a * b;\nexport const isPositive = (n: number): boolean => n > 0;\n".to_owned(),
+            ),
+            (
+                "pair/a.test.ts",
+                pair_test("pairA", "pairB", "expect(add(2, 3)).toBe(5);\n  isPositive(1);"),
+            ),
+            (
+                "pair/b.test.ts",
+                pair_test("pairB", "pairA", "expect(add(4, 3)).toBe(7);"),
+            ),
+            (
+                "solo/c.test.ts",
+                pair_test("soloC", "soloD", "expect(sub(7, 2)).toBe(5);"),
+            ),
+            (
+                "solo/d.test.ts",
+                pair_test("soloD", "soloC", "expect(mul(2, 3)).toBe(6);"),
+            ),
+            (".gitignore", "node_modules\n".to_owned()),
+        ];
+        for (file, contents) in files {
+            let target = root.join(file);
+            fs::create_dir_all(target.parent().expect("parent")).expect("dir");
+            fs::write(&target, contents).expect("write");
+        }
+        fs::create_dir_all(root.join("node_modules")).expect("dir");
+        std::os::unix::fs::symlink(
+            package.join("node_modules/vitest"),
+            root.join("node_modules/vitest"),
+        )
+        .expect("symlink");
+        commit_all(&root);
+        (project, root)
+    }
+
+    #[test]
+    fn test_files_that_need_a_fresh_worker_keep_the_isolated_verdicts() {
+        let Some(package) = companion_fixture() else {
+            return;
+        };
+        let (_project, root) = global_pair_project(&package);
+
+        let report = run_mutation(&options(
+            &root,
+            MutationRunScope::Paths(vec![PathBuf::from("src/calc.ts")]),
+        ))
+        .expect("the run completes");
+
+        assert!(report.errors.is_empty(), "{:#?}", report.errors);
+        assert!(
+            report.baseline_failures.is_empty(),
+            "{:#?}",
+            report.baseline_failures
+        );
+        for mutant in &report.mutants {
+            let in_positive = mutant.location.function.as_deref() == Some("isPositive");
+            let expected = if in_positive {
+                MutantStatus::Survived
+            } else {
+                MutantStatus::Killed
+            };
+            assert_eq!(mutant.status, expected, "{mutant:#?}");
+        }
+        let modes = report
+            .runner
+            .as_ref()
+            .and_then(|runner| runner.worker_modes)
+            .expect("the runs state a worker mode");
+        assert!(
+            modes.isolated.runs > 0 && modes.reused.runs > 0,
+            "the pair runs isolated, each solo file in the reused worker: {modes:?}"
+        );
+    }
+
     /// A Vitest project where a test reads a value that an earlier test of
     /// its file cached (issue #3670). The dry run attributes the hit of the
     /// cache initializer only to the first test.

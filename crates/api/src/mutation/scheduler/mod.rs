@@ -37,6 +37,7 @@ mod retry_set;
 mod split;
 pub mod targets;
 mod window;
+mod worker_checks;
 use adopt::{Proven, TestIndex};
 use classification::{attempt_record, is_load_kill, kill_kind, matrix_evidence};
 use dry_facts::{DryRunFacts, covering_tests, read_dry_run, record_dry_run, reported_duplicates};
@@ -626,12 +627,17 @@ impl<'a> Worker<'a> {
         if tests.is_empty() {
             return Ok(self.no_tests_left(job, dropped_tests));
         }
+        let worker_mode = match self.worker_mode_for(job, &tests, caps) {
+            worker_checks::ModeStep::Mode(mode) => mode,
+            worker_checks::ModeStep::Restart => return self.attempt_tests(job, caps, bail),
+        };
         let request = Request::Run(RunRequest {
             mutant_id: Some(job.id.clone()),
             test_ids: tests.clone(),
             timeout_ms: job.timeout_ms,
             loop_budget_ms: Some(job.loop_budget_ms),
             bail,
+            worker_mode,
         });
         let watchdog = Duration::from_millis(job.watchdog_ms());
         let taken = self.taken_of(&tests);
@@ -949,6 +955,7 @@ impl<'a> Worker<'a> {
             timeout_ms,
             loop_budget_ms: None,
             bail: false,
+            worker_mode: None,
         });
         let watchdog = Duration::from_millis(timeout_ms + job.setup_ms + WATCHDOG_GRACE_MS);
         let Some(link) = self.link.as_mut() else {
@@ -1427,6 +1434,8 @@ fn run_phase(
         .max(1)
         .min(split::capacity(&jobs, runner.index.is_some(), runner.caps).max(1));
     let total = jobs.len();
+    let jobs: VecDeque<Job> = jobs.into();
+    runner.memo.checks.count_jobs(&jobs);
     let mut primaries = primaries;
     shutdown_all(primaries.split_off(workers.min(primaries.len())));
     let mut held: Vec<Option<Vec<String>>> =
@@ -1436,7 +1445,7 @@ fn run_phase(
     report(0);
     let phase = Phase {
         workers,
-        jobs: Mutex::new(jobs.into()),
+        jobs: Mutex::new(jobs),
         held: Mutex::new(held),
         attempts: Mutex::new(Vec::new()),
         fatal: Mutex::new(None),
@@ -1892,7 +1901,7 @@ pub fn run_schedule_with_progress(
         &mut outcome,
         phase.links,
     )?;
-    let index = TestIndex::new(runner.caps, &phase.result, phase.modes);
+    let index = TestIndex::new(runner.caps, &phase.result);
     runner.index = index.as_ref();
     let context = JobContext {
         dry_files: &dry_files,

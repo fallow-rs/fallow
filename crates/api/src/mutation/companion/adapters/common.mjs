@@ -126,21 +126,21 @@ const isAdoptedTest = (test) =>
   test.test_id.length > 0 &&
   isPlainObject(test.index);
 
-const isWorkerMode = (mode) =>
-  isPlainObject(mode) &&
-  isStringList(mode.files) &&
-  (mode.reused === undefined || typeof mode.reused === "boolean");
-
-/** Checks an `adopt` request: the taken tests and the worker modes of their files. */
+/** Checks an `adopt` request: the taken tests. */
 export const validateAdopt = (request) => {
   expectRequest(
     Array.isArray(request.tests) && request.tests.every(isAdoptedTest),
     "tests must be a list of objects with a test_id and an index object",
   );
-  expectRequest(
-    Array.isArray(request.worker_modes) && request.worker_modes.every(isWorkerMode),
-    "worker_modes must be a list of objects with a files list and an optional reused flag",
-  );
+};
+
+/** The worker modes that a `run` request can name. */
+const WORKER_MODES = new Set(["isolated", "shared", "reused"]);
+
+/** Checks a `check_workers` request: the tests and the timeout of each round. */
+export const validateCheckWorkers = (request) => {
+  expectRequest(isNonEmptyStringList(request.test_ids), "test_ids must be a non-empty list");
+  expectRequest(isPositiveInteger(request.timeout_ms), "timeout_ms must be a positive integer");
 };
 
 /** Checks a `record` request: the optional test files, as for a dry run. */
@@ -185,6 +185,10 @@ export const validateRun = (request) => {
   expectRequest(
     request.loop_budget_ms === undefined || isPositiveInteger(request.loop_budget_ms),
     "loop_budget_ms must be a positive integer when present",
+  );
+  expectRequest(
+    request.worker_mode === undefined || WORKER_MODES.has(request.worker_mode),
+    "worker_mode must be isolated, shared or reused when present",
   );
 };
 

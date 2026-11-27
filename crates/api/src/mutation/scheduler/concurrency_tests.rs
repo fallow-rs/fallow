@@ -43,7 +43,10 @@ fn restarted_setup_faults_suggest_serial_runs_only_for_parallel_phases() {
                     Request::Shutdown
                     | Request::Replay(_)
                     | Request::Record { .. }
-                    | Request::Adopt(_) => Err(LinkFault::Protocol("no response".to_owned())),
+                    | Request::Adopt(_)
+                    | Request::CheckWorkers(_) => {
+                        Err(LinkFault::Protocol("no response".to_owned()))
+                    }
                 }
             });
             let outcome = run_schedule(&spawner, &plan(&ids), &config(concurrency)).expect("run");
@@ -241,7 +244,10 @@ fn retry_diagnostics_use_the_retry_phase_worker_count() {
                     Request::Shutdown
                     | Request::Replay(_)
                     | Request::Record { .. }
-                    | Request::Adopt(_) => Err(LinkFault::Protocol("no response".to_owned())),
+                    | Request::Adopt(_)
+                    | Request::CheckWorkers(_) => {
+                        Err(LinkFault::Protocol("no response".to_owned()))
+                    }
                 }
             });
             let outcome = run_schedule(&spawner, &plan(&["m1", "m2"]), &config(8)).expect("run");

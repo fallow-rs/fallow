@@ -18,8 +18,6 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::super::protocol::WorkerMode;
-
 use super::dry_phase::{DryPhase, ShareFacts, dry_phase};
 use super::*;
 
@@ -73,11 +71,6 @@ pub struct StoredDryRun {
     /// of these files has valid facts in the same run.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub bound: Vec<String>,
-    /// The worker mode that the dry run of the file proved, with each file
-    /// of that check. A run uses it only when each of these files has valid
-    /// facts in the run.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub worker_mode: Option<WorkerMode>,
 }
 
 impl StoredDryRun {
@@ -338,11 +331,6 @@ fn new_entries(
                     .map(|test| test.test_id.clone())
                     .collect(),
                 bound: claims.bound.into_iter().collect(),
-                worker_mode: phase
-                    .modes
-                    .iter()
-                    .find(|mode| mode.files.contains(&file))
-                    .cloned(),
             };
             facts.static_hits.sort_unstable();
             facts.loaded_paths.sort_unstable();
@@ -404,7 +392,6 @@ fn join(
         unloaded_paths: Vec::new(),
         file_setup_ms: BTreeMap::new(),
         duplicate_test_ids: Vec::new(),
-        worker_mode: None,
     });
     let mut loaded: FxHashSet<&str> = FxHashSet::default();
     for (file, facts) in stored {
@@ -453,21 +440,6 @@ fn join(
     joined
 }
 
-/// The stored worker modes whose files each have valid facts, once each.
-fn stored_modes(stored: &[(String, StoredDryRun)]) -> Vec<WorkerMode> {
-    let valid: FxHashSet<&str> = stored.iter().map(|(file, _)| file.as_str()).collect();
-    let mut modes: Vec<WorkerMode> = Vec::new();
-    for mode in stored
-        .iter()
-        .filter_map(|(_, facts)| facts.worker_mode.as_ref())
-    {
-        if mode.files.iter().all(|file| valid.contains(file.as_str())) && !modes.contains(mode) {
-            modes.push(mode.clone());
-        }
-    }
-    modes
-}
-
 /// The dry run of a run: the stored facts of each file with valid facts,
 /// and a new dry run of the other files on `primary` and more companions.
 /// With no file to dry-run, `primary` shuts down and no dry run starts. The
@@ -485,7 +457,6 @@ pub(super) fn joined_dry_phase(
     let universe = &config.init.path_map;
     let stored_time: Duration = stored.iter().map(|(_, facts)| facts.duration()).sum();
     outcome.dry_run_reused = stored.len();
-    let mut modes = stored_modes(&stored);
     if run.is_empty() {
         let mut primary = primary;
         primary.shutdown();
@@ -495,7 +466,6 @@ pub(super) fn joined_dry_phase(
             links: Vec::new(),
             serial: stored_time,
             shares: Vec::new(),
-            modes,
         });
     }
     progress(MutationProgress::Baseline {
@@ -505,12 +475,10 @@ pub(super) fn joined_dry_phase(
     outcome.timings.dry_run = config.clock.now().saturating_duration_since(started);
     outcome.dry_run_missed = if keys.is_empty() { 0 } else { run.len() };
     outcome.dry_run_entries = new_entries(plan, universe, &phase, &keys);
-    modes.splice(0..0, phase.modes);
     Ok(DryPhase {
         result: join(Some(phase.result), &stored, dry_files, universe),
         serial: phase.serial + stored_time,
         links: phase.links,
         shares: phase.shares,
-        modes,
     })
 }

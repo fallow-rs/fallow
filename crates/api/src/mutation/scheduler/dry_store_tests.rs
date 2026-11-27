@@ -1,6 +1,5 @@
 //! The dry run of a run with stored dry-run facts.
 
-use super::super::super::protocol::WorkerMode;
 use super::adopt_tests::{ADOPT_CAPS, Taken, adopt_plan, adopt_spawner, count_of};
 use super::shard_tests::{FILES, dry_of, dry_runs, shard_plan, shard_spawner, verdicts};
 use super::*;
@@ -333,18 +332,4 @@ fn a_warm_run_gives_new_companions_the_stored_test_index_and_worker_modes() {
         "the companions take the stored index"
     );
     assert_eq!(verdicts(&second), verdicts(&first));
-    let modes: Vec<Vec<WorkerMode>> = warm
-        .log
-        .lock()
-        .expect("log")
-        .iter()
-        .filter_map(|(_, request)| match request {
-            Request::Adopt(body) => Some(body.worker_modes.clone()),
-            _ => None,
-        })
-        .collect();
-    assert!(
-        modes.iter().all(|modes| !modes.is_empty()),
-        "the stored worker modes reach the companions: {modes:?}"
-    );
 }

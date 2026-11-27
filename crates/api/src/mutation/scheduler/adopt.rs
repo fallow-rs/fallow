@@ -4,7 +4,7 @@
 //! A runner with the `adopt` capability gives an index entry for each test of
 //! its dry run. A new companion then takes the entries of the test files of
 //! its jobs from the scheduler and runs those tests with no dry run of its
-//! own. The passing tests and the worker modes come from the first dry run.
+//! own. The passing tests come from the first dry run.
 //!
 //! A companion with no dry run has not shown that a test passes in it. A
 //! test can fail there for a reason outside the mutant, for example a file
@@ -14,25 +14,20 @@
 //! control run leaves the companion, as a test that fails in the dry run of
 //! a restarted companion does, and the job runs again without it.
 
-use super::super::protocol::{AdoptRequest, AdoptedTest, WorkerMode};
+use super::super::protocol::{AdoptRequest, AdoptedTest};
 use super::control::ADOPTED_TEST_FAILURE;
 use super::*;
 
 /// The index entries of the passing tests of the first dry run, by test
-/// file, and the worker modes of the dry runs of the shares.
+/// file.
 pub(super) struct TestIndex {
     by_file: FxHashMap<String, Vec<AdoptedTest>>,
-    modes: Vec<WorkerMode>,
 }
 
 impl TestIndex {
     /// The index of `dry`. `None` when the runner has no `adopt` capability:
     /// then each new companion does a dry run.
-    pub(super) fn new(
-        caps: Capabilities,
-        dry: &DryRunResult,
-        modes: Vec<WorkerMode>,
-    ) -> Option<Self> {
+    pub(super) fn new(caps: Capabilities, dry: &DryRunResult) -> Option<Self> {
         if !caps.adopt {
             return None;
         }
@@ -54,7 +49,7 @@ impl TestIndex {
                     });
             }
         }
-        Some(Self { by_file, modes })
+        Some(Self { by_file })
     }
 }
 
@@ -191,8 +186,7 @@ impl Worker<'_> {
     }
 
     /// Gives the companion the index entries of each file of the sorted
-    /// `need` files that it cannot run yet, with the worker modes of those
-    /// files. A test that failed in a control run stays out, and so does a
+    /// `need` files that it cannot run yet. A test that failed in a control run stays out, and so does a
     /// taken test that failed in a control run of a companion of this
     /// worker: each job without it then ends after at most one more run.
     fn adopt(&mut self, need: &[String]) -> Result<(), EnsureError> {
@@ -222,19 +216,8 @@ impl Worker<'_> {
             })
             .collect();
         if !taken.is_empty() {
-            let worker_modes = index
-                .modes
-                .iter()
-                .filter(|mode| {
-                    mode.files
-                        .iter()
-                        .any(|file| missing.binary_search(&file).is_ok())
-                })
-                .cloned()
-                .collect();
             let request = Request::Adopt(AdoptRequest {
                 tests: taken.iter().map(|(_, test)| (*test).clone()).collect(),
-                worker_modes,
             });
             let Some(link) = self.link.as_mut() else {
                 return Err(EnsureError::Fault("the companion is gone".to_owned(), None));
@@ -360,6 +343,7 @@ impl Worker<'_> {
             timeout_ms,
             loop_budget_ms: None,
             bail: false,
+            worker_mode: None,
         });
         let watchdog = Duration::from_millis(timeout_ms + job.setup_ms + WATCHDOG_GRACE_MS);
         let Some(link) = self.link.as_mut() else {
