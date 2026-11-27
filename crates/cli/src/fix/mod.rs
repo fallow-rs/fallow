@@ -210,7 +210,9 @@ fn run_fix_impl(opts: &FixOptions<'_>, fix_count: &mut usize) -> ExitCode {
             opts.config_path,
             crate::runtime_support::LoadConfigArgs {
                 output: opts.output,
-                no_cache: opts.no_cache,
+                // A run that writes edits never reads a cache entry, as the
+                // command line run does (see `run_inputs::writes_fix_edits`).
+                no_cache: opts.no_cache || !opts.dry_run,
                 threads: opts.threads,
                 production: false,
                 quiet: opts.quiet,

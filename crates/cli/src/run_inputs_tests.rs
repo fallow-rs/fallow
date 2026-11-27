@@ -203,3 +203,23 @@ fn include_entry_exports_reaches_every_analysis_config() {
         );
     }
 }
+
+#[test]
+fn a_fix_that_writes_edits_turns_the_cache_off() {
+    for argv in [
+        &["fallow", "fix", "--yes"][..],
+        &["fallow", "fix"][..],
+        &["fallow", "fix", "--yes", "src"][..],
+    ] {
+        assert_eq!(
+            inputs(argv).no_cache,
+            Some(flag(true, "--no-cache")),
+            "{argv:?}"
+        );
+    }
+    assert_eq!(inputs(&["fallow", "fix", "--dry-run"]).no_cache, None);
+    assert_eq!(
+        inputs(&["fallow", "fix", "--dry-run", "--no-cache"]).no_cache,
+        Some(flag(true, "--no-cache"))
+    );
+}
