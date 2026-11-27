@@ -448,7 +448,7 @@ runs:
         INPUT_ROOT: ${{ inputs.root }}
         INPUT_CONFIG: ${{ inputs.config }}
         INPUT_TYPE_AWARE: ${{ inputs.type-aware }}
-      run: bash ${{ github.action_path }}/action/scripts/install.sh
+      run: bash "${GITHUB_ACTION_PATH}/action/scripts/install.sh"
 
     - name: Fallow branded token
       id: fallow-token
@@ -461,7 +461,7 @@ runs:
       env:
         BRANDED_TOKEN: ${{ inputs.branded-token }}
         BROKER_URL: ${{ inputs.broker-url }}
-      run: bash ${{ github.action_path }}/action/scripts/broker-token.sh
+      run: bash "${GITHUB_ACTION_PATH}/action/scripts/broker-token.sh"
 
     # `restore-keys` are literal string-prefix matches, so `inputs.root` cannot
     # go into the key raw: the restore prefix for `root=packages/app` is
@@ -521,7 +521,7 @@ runs:
         EVENT_NAME: ${{ github.event_name }}
         GH_TOKEN: ${{ inputs.github-token }}
         GH_REPO: ${{ github.repository }}
-      run: bash ${{ github.action_path }}/action/scripts/scope.sh
+      run: bash "${GITHUB_ACTION_PATH}/action/scripts/scope.sh"
 
     # The key covers the lockfiles and the runner config files. Each run and
     # each attempt saves a new entry, and a restore takes the newest entry of
@@ -555,7 +555,7 @@ runs:
         PR_HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
         EVENT_NAME: ${{ github.event_name }}
         GH_REPO: ${{ github.repository }}
-      run: bash ${{ github.action_path }}/action/scripts/mutation.sh run
+      run: bash "${GITHUB_ACTION_PATH}/action/scripts/mutation.sh" run
 
     - name: Save mutation result cache
       if: always() && steps.mutation.outputs.cache_save == 'true'
@@ -648,7 +648,7 @@ runs:
         # the scope step, which the comment and review steps also read from
         # $GITHUB_ENV.
         FALLOW_DIFF_FILE: ${{ inputs.diff-file }}
-      run: bash ${{ github.action_path }}/action/scripts/analyze.sh
+      run: bash "${GITHUB_ACTION_PATH}/action/scripts/analyze.sh"
 
     - name: Check Code Scanning availability
       id: ghas-check
@@ -661,7 +661,7 @@ runs:
       env:
         GH_TOKEN: ${{ inputs.github-token }}
         GH_REPO: ${{ github.repository }}
-      run: bash ${{ github.action_path }}/action/scripts/check-code-scanning.sh
+      run: bash "${GITHUB_ACTION_PATH}/action/scripts/check-code-scanning.sh"
 
     - name: Upload SARIF
       if: >-
@@ -709,7 +709,7 @@ runs:
         # here would override that value.
         FALLOW_API_RETRIES: ${{ inputs.api-retries }}
         FALLOW_API_RETRY_DELAY: ${{ inputs.api-retry-delay }}
-      run: bash ${{ github.action_path }}/action/scripts/comment.sh
+      run: bash "${GITHUB_ACTION_PATH}/action/scripts/comment.sh"
 
     - name: Emit inline annotations
       if: >-
@@ -731,7 +731,7 @@ runs:
         FALLOW_SCOPED_RESULTS_FILE: ${{ inputs.artifacts-dir }}/fallow-results-scoped.json
         FALLOW_CHANGED_FILES_FILE: ${{ inputs.artifacts-dir }}/fallow-changed-files.json
         FALLOW_PR_DECISION_FILE: ${{ inputs.artifacts-dir }}/fallow-pr-decision.json
-      run: bash ${{ github.action_path }}/action/scripts/annotate.sh
+      run: bash "${GITHUB_ACTION_PATH}/action/scripts/annotate.sh"
 
     - name: Job summary
       if: always() && steps.analyze.outputs.issues != ''
@@ -758,7 +758,7 @@ runs:
         FALLOW_GATES_PASSED: ${{ steps.analyze.outputs.gates_passed }}
         FALLOW_ANALYSIS_DEGRADED: ${{ steps.analyze.outputs.analysis_degraded }}
         INPUT_MUTATION: ${{ inputs.mutation }}
-      run: bash ${{ github.action_path }}/action/scripts/summary.sh
+      run: bash "${GITHUB_ACTION_PATH}/action/scripts/summary.sh"
 
     - name: Post review comments
       id: review
@@ -791,7 +791,7 @@ runs:
         # $GITHUB_ENV (see the comment step env block).
         FALLOW_API_RETRIES: ${{ inputs.api-retries }}
         FALLOW_API_RETRY_DELAY: ${{ inputs.api-retry-delay }}
-      run: bash ${{ github.action_path }}/action/scripts/review.sh
+      run: bash "${GITHUB_ACTION_PATH}/action/scripts/review.sh"
 
     - name: Mutation testing result
       if: always() && steps.mutation.outputs.outcome != ''
@@ -799,4 +799,4 @@ runs:
       env:
         FALLOW_MUTATION_STATUS_FILE: ${{ steps.mutation.outputs.status }}
         FALLOW_MUTATION_RESULTS_FILE: ${{ steps.mutation.outputs.results }}
-      run: bash ${{ github.action_path }}/action/scripts/mutation.sh gate
+      run: bash "${GITHUB_ACTION_PATH}/action/scripts/mutation.sh" gate

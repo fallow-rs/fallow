@@ -522,7 +522,7 @@ assert_contains "$ACTION_YML" "FALLOW_MUTATION_TIME_BUDGET: \${{ inputs.mutation
 assert_contains "$ACTION_YML" "!\${{ inputs.root }}/.fallow/mutation" "action.yml keeps the mutation cache out of the analysis cache"
 assert_contains "$ACTION_YML" "if: always() && steps.mutation.outputs.cache_save == 'true'" "action.yml saves the mutation cache only when the step allows it"
 assert_contains "$ACTION_YML" "-\${{ github.run_id }}-\${{ github.run_attempt }}" "action.yml gives each run attempt its own mutation cache entry"
-assert_contains "$ACTION_YML" "run: bash \${{ github.action_path }}/action/scripts/scope.sh" "action.yml runs the scope step"
+assert_contains "$ACTION_YML" 'run: bash "${GITHUB_ACTION_PATH}/action/scripts/scope.sh"' "action.yml runs the scope step"
 assert_contains "$ACTION_YML" "  mutation-report-rendered:" "action.yml has the mutation-report-rendered output"
 assert_contains "$ACTION_YML" "INPUT_MUTATION_MIN_SCORE: \${{ inputs.mutation-min-score }}" "action.yml passes the mutation minimum to the analysis"
 assert_not_contains "$ACTION_YML" "--allow-dirty" "action.yml never passes --allow-dirty"
