@@ -419,11 +419,14 @@ const ISSUE_TRACKER: &str = "https://github.com/fallow-rs/fallow/issues";
 /// budget already ended.
 ///
 /// The check runs on a companion whose share holds each test file of the
-/// job. When no share holds them, a new companion dry-runs only those files.
-/// Gives the companions with the companion of the check first.
+/// job. When the tests are in the shares of more than one companion, each of
+/// these companions checks its own tests at the same time (see
+/// [`check_parts`]). When no share holds a test, a new companion dry-runs
+/// only the files of the job. Gives the companions with the companion of the
+/// check first.
 fn self_check(
     runner: PhaseRunner<'_>,
-    files: &[String],
+    (files, facts): (&[String], &DryRunFacts),
     ready: &Ready,
     jobs: &[Job],
     mut links: Vec<WarmLink>,
@@ -432,6 +435,16 @@ fn self_check(
     let Some(job) = jobs.first().filter(|_| !expired) else {
         return Ok((links, Vec::new()));
     };
+    if let Some(shares) = check_parts::shares(job, &links) {
+        let check = check_parts::Check {
+            runner,
+            files,
+            facts,
+            ready,
+            job,
+        };
+        return check.run(links, shares);
+    }
     let holder = links
         .iter()
         .position(|warm| holds(warm.loaded.as_deref(), &job.test_files));
@@ -456,13 +469,6 @@ fn self_check(
     let outcome = worker
         .control_run(&job.tests, job, runner.caps)
         .map(|(outcome, _)| outcome);
-    let runner_name = format!("{} {}", runner.config.runner.package, ready.runner_version);
-    let report =
-        format!("report this at {ISSUE_TRACKER} with the runner name and version ({runner_name})");
-    let stopped = ScheduleError::RunPath {
-        message: format!("the companion of {runner_name} stopped after the self-check"),
-        help: report.clone(),
-    };
     let kept = |worker: &mut Worker<'_>| {
         let link = worker.link.take()?;
         let loaded = worker
@@ -484,7 +490,7 @@ fn self_check(
                 links.insert(0, warm);
                 return Ok((links, Vec::new()));
             }
-            stopped
+            run_path_stopped(runner, ready)
         }
         Ok(ControlOutcome::Failed(fault)) if !fault.failed_tests.is_empty() => {
             runner.memo.store(&job.tests, ControlVerdict::Failed);
@@ -492,38 +498,73 @@ fn self_check(
                 links.insert(0, warm);
                 return Ok((links, fault.failed_tests));
             }
-            stopped
+            run_path_stopped(runner, ready)
         }
-        Ok(ControlOutcome::Failed(fault)) if fault.no_tests => ScheduleError::RunPath {
+        Ok(other) => run_path_error(runner, ready, job, other),
+    };
+    worker.reset();
+    shutdown_all(links);
+    Err(error)
+}
+
+/// The name and version of the runner, for a self-check error.
+fn runner_name(runner: PhaseRunner<'_>, ready: &Ready) -> String {
+    format!("{} {}", runner.config.runner.package, ready.runner_version)
+}
+
+/// The help of a self-check error that the runner must fix.
+fn report_help(runner_name: &str) -> String {
+    format!("report this at {ISSUE_TRACKER} with the runner name and version ({runner_name})")
+}
+
+/// The error when the companion of a passed self-check stopped.
+pub(super) fn run_path_stopped(runner: PhaseRunner<'_>, ready: &Ready) -> ScheduleError {
+    let runner_name = runner_name(runner, ready);
+    ScheduleError::RunPath {
+        message: format!("the companion of {runner_name} stopped after the self-check"),
+        help: report_help(&runner_name),
+    }
+}
+
+/// The error of a self-check whose control run neither passed nor failed
+/// with failed tests.
+pub(super) fn run_path_error(
+    runner: PhaseRunner<'_>,
+    ready: &Ready,
+    job: &Job,
+    outcome: ControlOutcome,
+) -> ScheduleError {
+    let runner_name = runner_name(runner, ready);
+    let report = report_help(&runner_name);
+    match outcome {
+        ControlOutcome::Passed => run_path_stopped(runner, ready),
+        ControlOutcome::Failed(fault) if fault.no_tests => ScheduleError::RunPath {
             message: format!(
                 "{runner_name} executes no tests in a mutant run: a control run of the tests of a covered mutant, with no active mutant, gave {}; each mutant would look killed",
                 fault.detail
             ),
             help: report,
         },
-        Ok(ControlOutcome::Failed(fault)) => ScheduleError::RunPath {
+        ControlOutcome::Failed(fault) => ScheduleError::RunPath {
             message: format!(
                 "{runner_name} gives no trustworthy result in a mutant run: a control run of the tests of a covered mutant, with no active mutant, gave {}, but no test failed",
                 fault.detail
             ),
             help: report,
         },
-        Ok(ControlOutcome::TimedOut(detail)) => ScheduleError::RunPath {
+        ControlOutcome::TimedOut(detail) => ScheduleError::RunPath {
             message: format!(
                 "the self-check of {runner_name} timed out: a control run of the tests of a covered mutant, with no active mutant, did not finish ({detail})"
             ),
             help: self_check_help(runner.config.runner_timeout, job.timeout_ms),
         },
-        Ok(ControlOutcome::Fault(message)) => ScheduleError::RunPath {
+        ControlOutcome::Fault(message) => ScheduleError::RunPath {
             message: format!(
                 "the self-check of {runner_name} failed: a control run with no active mutant gave no result: {message}"
             ),
             help: report,
         },
-    };
-    worker.reset();
-    shutdown_all(links);
-    Err(error)
+    }
 }
 
 /// The jobs of the mutant phase, the test files of the phase, and the
@@ -546,7 +587,8 @@ pub(super) fn checked_jobs(
     let mut first_jobs = ScheduleOutcome::empty();
     let jobs = build_jobs(plan, facts, context, &mut first_jobs);
     let links = with_known(links, facts);
-    let (links, failed) = self_check(runner, &phase_files(&jobs), context.ready, &jobs, links)?;
+    let files = phase_files(&jobs);
+    let (links, failed) = self_check(runner, (&files, facts), context.ready, &jobs, links)?;
     let (jobs, links) = if failed.is_empty() {
         outcome.results.extend(first_jobs.results);
         outcome.cache_keys.extend(first_jobs.cache_keys);
