@@ -1,4 +1,4 @@
-use super::super::super::protocol::{AdoptRequest, Adopted, WorkerMode};
+use super::super::super::protocol::{AdoptRequest, Adopted};
 use super::*;
 
 const FILES: [&str; 3] = ["test/a.test.ts", "test/b.test.ts", "test/c.test.ts"];
@@ -12,10 +12,10 @@ pub(super) const ADOPT_CAPS: Capabilities = Capabilities {
 pub(super) type Taken = Arc<Mutex<FxHashMap<usize, Vec<String>>>>;
 
 /// The dry run of `files`: `a::t1` hits m3, `b::u1` hits m2 and m3, and
-/// `c::v1` hits m1. Each passing test has an index entry, and the dry run
-/// proves a shared worker for its files. With two companions the shares are
-/// `[a, c]` and `[b]`, so m1 always runs in the companion that dry-ran its
-/// file, and the tests that another companion takes never cover it.
+/// `c::v1` hits m1. Each passing test has an index entry. With two
+/// companions the shares are `[a, c]` and `[b]`, so m1 always runs in the
+/// companion that dry-ran its file, and the tests that another companion
+/// takes never cover it.
 fn dry_of(files: &[String]) -> DryRunResult {
     let mut dry = DryRunResult {
         tests: Vec::new(),
@@ -26,10 +26,6 @@ fn dry_of(files: &[String]) -> DryRunResult {
         unloaded_paths: Vec::new(),
         file_setup_ms: BTreeMap::new(),
         duplicate_test_ids: Vec::new(),
-        worker_mode: Some(WorkerMode {
-            files: files.to_vec(),
-            reused: false,
-        }),
     };
     for file in files {
         let (id, hits): (&str, &[&str]) = match file.as_str() {
@@ -71,7 +67,7 @@ pub(super) fn adopt_spawner(caps: Capabilities, status: RunStatus, taken: &Taken
             Ok(Response::Ready(ready))
         }
         Request::DryRun { test_files } => Ok(Response::DryRun(dry_of(test_files))),
-        Request::Adopt(AdoptRequest { tests, .. }) => {
+        Request::Adopt(AdoptRequest { tests }) => {
             taken
                 .lock()
                 .expect("taken")
@@ -93,9 +89,10 @@ pub(super) fn adopt_spawner(caps: Capabilities, status: RunStatus, taken: &Taken
         Request::Reload => Ok(Response::Reloaded(Reloaded {
             method: ReloadMethod::Noop,
         })),
-        Request::Shutdown | Request::Replay(_) | Request::Record { .. } => {
-            Err(LinkFault::Protocol("no response".to_owned()))
-        }
+        Request::Shutdown
+        | Request::Replay(_)
+        | Request::Record { .. }
+        | Request::CheckWorkers(_) => Err(LinkFault::Protocol("no response".to_owned())),
     })
 }
 
@@ -171,15 +168,6 @@ fn a_job_of_two_shares_and_each_retry_take_the_test_index_with_no_second_dry_run
                 .iter()
                 .all(|test| test.index["task"] == test.test_id.as_str())
         );
-        for mode in &request.worker_modes {
-            assert!(
-                request
-                    .tests
-                    .iter()
-                    .any(|test| mode.files.iter().any(|file| test.test_id.starts_with(file))),
-                "a worker mode goes only with the tests of its files: {request:?}"
-            );
-        }
     }
 
     let serial_taken = Taken::default();

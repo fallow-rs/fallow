@@ -141,6 +141,7 @@ impl CompanionSpawner for FakeSpawner {
 
 const VITEST_CAPS: Capabilities = Capabilities {
     adopt: false,
+    worker_check: false,
     per_test_attribution: true,
     test_filter: true,
     hot_switch: true,
@@ -180,7 +181,6 @@ fn tid(id: &str) -> String {
 /// t1 (fast) hits m1, t2 (slow) and t1 hit m2, nothing hits m3.
 fn standard_dry() -> DryRunResult {
     DryRunResult {
-        worker_mode: None,
         tests: vec![
             test("t1", 2.0, TestStatus::Pass),
             test("t2", 100.0, TestStatus::Pass),
@@ -245,9 +245,11 @@ fn script(
         Request::Reload => Ok(Response::Reloaded(Reloaded {
             method: ReloadMethod::Noop,
         })),
-        Request::Shutdown | Request::Replay(_) | Request::Record { .. } | Request::Adopt(_) => {
-            Err(LinkFault::Protocol("no response".to_owned()))
-        }
+        Request::Shutdown
+        | Request::Replay(_)
+        | Request::Record { .. }
+        | Request::Adopt(_)
+        | Request::CheckWorkers(_) => Err(LinkFault::Protocol("no response".to_owned())),
     }
 }
 
@@ -1032,6 +1034,7 @@ fn a_kill_names_the_failure_kind_of_its_killing_test_or_an_error() {
         timeout_ms: 1000,
         loop_budget_ms: None,
         bail: true,
+        worker_mode: None,
     };
     let Response::Run(mut result) = run_result(&request, RunStatus::Killed, Some(&tid("t1")))
     else {
@@ -1157,7 +1160,6 @@ fn an_init_error_response_stops_the_run_with_its_message() {
 fn baseline_failures_never_decide_a_mutant() {
     let spawner = FakeSpawner::new(script(
         |_| DryRunResult {
-            worker_mode: None,
             tests: vec![
                 test("t1", 2.0, TestStatus::Fail),
                 test("t2", 3.0, TestStatus::Pass),
@@ -1265,9 +1267,11 @@ fn static_mutants_run_last_with_a_reload_around_each_when_modules_stay_loaded() 
                 ReloadMethod::Invalidate
             },
         })),
-        Request::Shutdown | Request::Replay(_) | Request::Record { .. } | Request::Adopt(_) => {
-            Err(LinkFault::Protocol("no response".to_owned()))
-        }
+        Request::Shutdown
+        | Request::Replay(_)
+        | Request::Record { .. }
+        | Request::Adopt(_)
+        | Request::CheckWorkers(_) => Err(LinkFault::Protocol("no response".to_owned())),
     });
     let outcome = run_schedule(&spawner, &plan(&["m0", "m1"]), &config(1)).expect("run");
     let runs = spawner.runs();
@@ -1737,9 +1741,11 @@ fn without_a_test_filter_a_mutant_runs_each_passing_test_of_its_covering_files()
         Request::Reload => Ok(Response::Reloaded(Reloaded {
             method: ReloadMethod::Noop,
         })),
-        Request::Shutdown | Request::Replay(_) | Request::Record { .. } | Request::Adopt(_) => {
-            Err(LinkFault::Protocol("no response".to_owned()))
-        }
+        Request::Shutdown
+        | Request::Replay(_)
+        | Request::Record { .. }
+        | Request::Adopt(_)
+        | Request::CheckWorkers(_) => Err(LinkFault::Protocol("no response".to_owned())),
     });
     let outcome = run_schedule(&spawner, &plan(&["m1"]), &config(1)).expect("run");
     assert_eq!(
@@ -1814,7 +1820,6 @@ fn no_covering_test_message_gives_a_count_and_the_first_test_only() {
 #[test]
 fn a_covering_test_that_fails_in_a_respawned_dry_run_is_a_baseline_failure() {
     let dry = |index: usize| DryRunResult {
-        worker_mode: None,
         tests: vec![
             test("t1", 2.0, TestStatus::Pass),
             test(
@@ -1903,7 +1908,6 @@ fn failed_test(id: &str, error: &str) -> DryTest {
 #[test]
 fn a_respawned_dry_run_failure_keeps_the_error_of_the_test() {
     let dry = |index: usize| DryRunResult {
-        worker_mode: None,
         tests: vec![
             test("t1", 2.0, TestStatus::Pass),
             match index {
@@ -1965,7 +1969,6 @@ fn a_respawned_dry_run_failure_keeps_the_error_of_the_test() {
 fn a_first_dry_run_failure_keeps_the_error_of_the_test() {
     let spawner = FakeSpawner::new(script(
         |_| DryRunResult {
-            worker_mode: None,
             tests: vec![
                 failed_test(
                     "t1",
@@ -2009,7 +2012,6 @@ fn a_first_dry_run_failure_keeps_the_error_of_the_test() {
 #[test]
 fn a_survivor_without_a_dropped_covering_test_is_not_a_runtime_error() {
     let dry = |index: usize| DryRunResult {
-        worker_mode: None,
         tests: vec![
             test("t1", 2.0, TestStatus::Pass),
             test(
@@ -2078,7 +2080,6 @@ fn a_survivor_without_a_dropped_covering_test_is_not_a_runtime_error() {
 #[test]
 fn a_dropped_test_cannot_be_the_killer() {
     let dry = |index: usize| DryRunResult {
-        worker_mode: None,
         tests: vec![
             test("t1", 2.0, TestStatus::Pass),
             test(
@@ -3127,9 +3128,11 @@ fn a_companion_restarted_for_a_static_mutant_dry_runs_only_the_files_of_the_muta
         Request::Reload => Ok(Response::Reloaded(Reloaded {
             method: ReloadMethod::RestartRequired,
         })),
-        Request::Shutdown | Request::Replay(_) | Request::Record { .. } | Request::Adopt(_) => {
-            Err(LinkFault::Protocol("no response".to_owned()))
-        }
+        Request::Shutdown
+        | Request::Replay(_)
+        | Request::Record { .. }
+        | Request::Adopt(_)
+        | Request::CheckWorkers(_) => Err(LinkFault::Protocol("no response".to_owned())),
     });
     let plan = two_file_plan(&[("m1", "src/a.ts"), ("m_a", "src/a.ts")]);
     let outcome = run_schedule(&spawner, &plan, &config(1)).expect("run");
@@ -3165,9 +3168,11 @@ fn a_kept_companion_with_a_narrow_dry_run_restarts_for_tests_outside_it() {
                 ReloadMethod::Invalidate
             },
         })),
-        Request::Shutdown | Request::Replay(_) | Request::Record { .. } | Request::Adopt(_) => {
-            Err(LinkFault::Protocol("no response".to_owned()))
-        }
+        Request::Shutdown
+        | Request::Replay(_)
+        | Request::Record { .. }
+        | Request::Adopt(_)
+        | Request::CheckWorkers(_) => Err(LinkFault::Protocol("no response".to_owned())),
     });
     let plan = two_file_plan(&[("m1", "src/a.ts"), ("m_a", "src/a.ts"), ("m_b", "src/b.ts")]);
     let outcome = run_schedule(&spawner, &plan, &config(1)).expect("run");
@@ -3547,3 +3552,6 @@ mod split_tests;
 
 #[path = "dry_store_tests.rs"]
 mod dry_store_tests;
+
+#[path = "worker_checks_tests.rs"]
+mod worker_checks_tests;

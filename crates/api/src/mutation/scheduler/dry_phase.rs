@@ -5,7 +5,6 @@
 //! then starts the mutant phase with the tests of its share, so no companion
 //! dry-runs a file again for a job that its share holds.
 
-use super::super::protocol::WorkerMode;
 use super::*;
 
 /// A companion after its dry run.
@@ -88,20 +87,9 @@ pub(super) struct DryPhase {
     /// The sum of the dry-run times of the shares: the time of one dry run
     /// of each file. The timeout of a later dry run scales with it.
     pub(super) serial: Duration,
-    /// The worker mode that the dry run of each share proved.
-    pub(super) modes: Vec<WorkerMode>,
     /// The facts of each share. A recheck of failed files gives one share
     /// of each file with the merged facts.
     pub(super) shares: Vec<ShareFacts>,
-}
-
-/// Takes the worker mode of each dry run that proved one for a file.
-fn take_modes(results: &mut [DryRunResult]) -> Vec<WorkerMode> {
-    results
-        .iter_mut()
-        .filter_map(|dry| dry.worker_mode.take())
-        .filter(|mode| !mode.files.is_empty())
-        .collect()
 }
 
 type ShareRun = Result<(Box<dyn CompanionLink>, DryRunResult, Duration), ScheduleError>;
@@ -140,9 +128,6 @@ pub(super) fn dry_phase(
     let shares = share_files(dry_files, config.concurrency);
     if shares.len() == 1 {
         let (link, result, serial) = run_share(spawner, Some(primary), dry_files, config)?;
-        let mut results = [result];
-        let modes = take_modes(&mut results);
-        let [result] = results;
         let mut loaded = partial.then(|| dry_files.to_vec());
         if let Some(loaded) = &mut loaded {
             loaded.sort_unstable();
@@ -158,7 +143,6 @@ pub(super) fn dry_phase(
             result,
             links,
             serial,
-            modes,
             shares,
         });
     }
@@ -217,7 +201,6 @@ pub(super) fn dry_phase(
             return Err(error);
         }
     };
-    let modes = take_modes(&mut results);
     let result = merge_dry_runs(results, dry_files);
     if let Some(took) = rechecked {
         serial += took;
@@ -227,7 +210,6 @@ pub(super) fn dry_phase(
         result,
         links,
         serial,
-        modes,
         shares: facts,
     })
 }
@@ -301,9 +283,6 @@ fn without_files(dry: &mut DryRunResult, files: &BTreeSet<String>, all: bool) {
     if let Some(file_hits) = &mut dry.file_hits {
         file_hits.retain(|file, _| !files.contains(file));
     }
-    if let Some(mode) = &mut dry.worker_mode {
-        mode.files.retain(|file| !files.contains(file));
-    }
     dry.unhandled_errors.retain(|error| {
         error
             .file
@@ -328,7 +307,6 @@ fn merge_dry_runs(results: Vec<DryRunResult>, dry_files: &[String]) -> DryRunRes
         unloaded_paths: Vec::new(),
         file_setup_ms: BTreeMap::new(),
         duplicate_test_ids: Vec::new(),
-        worker_mode: None,
     };
     let mut unloaded: Option<BTreeSet<String>> = None;
     for dry in results {

@@ -113,6 +113,14 @@ const createSession = () => {
       );
       return response(request.id, "adopted", await current.adopt(request));
     },
+    check_workers: async (request) => {
+      const current = requireAdapter();
+      expectRequest(
+        typeof current.checkWorkers === "function",
+        "the runner has no worker_check capability; ready.capabilities.worker_check is false",
+      );
+      return response(request.id, "workers_checked", await current.checkWorkers(request));
+    },
     run: async (request) => response(request.id, "run_result", await requireAdapter().run(request)),
     reload: async (request) =>
       response(request.id, "reloaded", await requireAdapter().reload(request)),
