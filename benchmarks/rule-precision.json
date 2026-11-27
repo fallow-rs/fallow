@@ -227,33 +227,6 @@
       "noise_classes": []
     },
     {
-      "rule": "invalid-client-export",
-      "command": "dead-code",
-      "args": [],
-      "fallow_version": "3.49.0",
-      "reviewed_on": "2026-11-27",
-      "sample_size": 30,
-      "reviews": 2,
-      "agreement_percent": 100,
-      "projects": [
-        {
-          "project": "dub",
-          "commit": "6b463b4bdd9ed2fd9aa416f67b5b77d317b1471e",
-          "findings": 1,
-          "sampled": 1,
-          "real": 0,
-          "noise": 1,
-          "unsure": 0
-        }
-      ],
-      "noise_classes": [
-        {
-          "class": "ordinary client module export",
-          "count": 1
-        }
-      ]
-    },
-    {
       "rule": "package-cycle",
       "command": "dead-code",
       "args": [],
@@ -382,11 +355,11 @@
       "rule": "unresolved-import",
       "command": "dead-code",
       "args": [],
-      "fallow_version": "3.48.0",
+      "fallow_version": "3.50.0",
       "reviewed_on": "2026-11-25",
       "sample_size": 30,
       "reviews": 3,
-      "agreement_percent": 43,
+      "agreement_percent": 33,
       "projects": [
         {
           "project": "documenso",
@@ -395,15 +368,6 @@
           "sampled": 3,
           "real": 0,
           "noise": 3,
-          "unsure": 0
-        },
-        {
-          "project": "plane",
-          "commit": "723bb178f97b87e80a23df9eed134eb1388d7465",
-          "findings": 2,
-          "sampled": 2,
-          "real": 0,
-          "noise": 2,
           "unsure": 0
         },
         {
@@ -433,10 +397,6 @@
         {
           "class": "build output import",
           "count": 3
-        },
-        {
-          "class": "generated type import",
-          "count": 2
         },
         {
           "class": "server route URL",
@@ -470,8 +430,8 @@
       "rule": "unused-class-member",
       "command": "dead-code",
       "args": [],
-      "fallow_version": "3.49.0",
-      "reviewed_on": "2026-11-26",
+      "fallow_version": "3.50.0",
+      "reviewed_on": "2026-11-27",
       "sample_size": 30,
       "reviews": 1,
       "agreement_percent": null,
@@ -497,10 +457,10 @@
         {
           "project": "immich",
           "commit": "7b27863b13d7ec52340e87637d71a39aa8d7efc0",
-          "findings": 78,
+          "findings": 69,
           "sampled": 30,
-          "real": 5,
-          "noise": 25,
+          "real": 4,
+          "noise": 26,
           "unsure": 0
         }
       ],
@@ -510,27 +470,27 @@
           "count": 7
         },
         {
-          "class": "test fixture call",
-          "count": 7
-        },
-        {
           "class": "test use",
-          "count": 5
+          "count": 6
         },
         {
           "class": "fluent builder call",
-          "count": 3
+          "count": 5
+        },
+        {
+          "class": "test fixture call",
+          "count": 4
         },
         {
           "class": "framework lifecycle hook",
-          "count": 2
+          "count": 3
         },
         {
           "class": "framework property",
           "count": 2
         },
         {
-          "class": "indirect receiver",
+          "class": "release script",
           "count": 2
         },
         {
@@ -538,7 +498,15 @@
           "count": 2
         },
         {
+          "class": "typed test mock reference",
+          "count": 2
+        },
+        {
           "class": "dependency injection call",
+          "count": 1
+        },
+        {
+          "class": "indirect receiver",
           "count": 1
         },
         {
@@ -546,23 +514,11 @@
           "count": 1
         },
         {
-          "class": "release script",
-          "count": 1
-        },
-        {
-          "class": "required interface",
-          "count": 1
-        },
-        {
           "class": "serialized log metadata",
           "count": 1
         },
         {
-          "class": "test proxy call",
-          "count": 1
-        },
-        {
-          "class": "typed test mock reference",
+          "class": "Svelte template use",
           "count": 1
         }
       ]
@@ -571,7 +527,7 @@
       "rule": "unused-component-emit",
       "command": "dead-code",
       "args": [],
-      "fallow_version": "3.49.0",
+      "fallow_version": "3.50.0",
       "reviewed_on": "2026-11-27",
       "sample_size": 30,
       "reviews": 2,
@@ -580,25 +536,20 @@
         {
           "project": "hoppscotch",
           "commit": "6177eae1875ea4cc8fc46604d65bf85478912d85",
-          "findings": 14,
-          "sampled": 14,
+          "findings": 10,
+          "sampled": 10,
           "real": 10,
-          "noise": 4,
+          "noise": 0,
           "unsure": 0
         }
       ],
-      "noise_classes": [
-        {
-          "class": "emitted by useVModel",
-          "count": 4
-        }
-      ]
+      "noise_classes": []
     },
     {
       "rule": "unused-component-input",
       "command": "dead-code",
       "args": [],
-      "fallow_version": "3.49.0",
+      "fallow_version": "3.50.0",
       "reviewed_on": "2026-11-27",
       "sample_size": 30,
       "reviews": 2,
@@ -607,19 +558,14 @@
         {
           "project": "ghostfolio",
           "commit": "9cad9e102795aca04a6a58232a22a3fadc680383",
-          "findings": 5,
-          "sampled": 5,
+          "findings": 3,
+          "sampled": 3,
           "real": 3,
-          "noise": 2,
+          "noise": 0,
           "unsure": 0
         }
       ],
-      "noise_classes": [
-        {
-          "class": "read by Angular host binding",
-          "count": 2
-        }
-      ]
+      "noise_classes": []
     },
     {
       "rule": "unused-component-prop",
