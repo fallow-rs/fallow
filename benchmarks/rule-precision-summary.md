@@ -16,16 +16,15 @@ Reviews is the count of independent reviews; the percentage is how often the fir
 | `dead-code` | `dev-dependency-in-production` | 24 | 24 | 24 | 0 | 0 | 100% (79 to 100) | 2 (100% agree) | 3.49.0, 2026-11-27 |
 | `dead-code` | `duplicate-export` | 20 | 20 | 17 | 3 | 0 | 85% (36 to 98) | 2 (100% agree) | 3.48.0, 2026-11-25 |
 | `dead-code` | `duplicate-export-alias` | 69 | 50 | 50 | 0 | 0 | 100% (76 to 100) | 2 (100% agree) | 3.48.0, 2026-11-25 |
-| `dead-code` | `invalid-client-export` | 1 | 1 | 0 | 1 | 0 | 0% (0 to 98) | 2 (100% agree) | 3.49.0, 2026-11-27 |
 | `dead-code` | `package-cycle` | 20 | 20 | 18 | 2 | 0 | 90% (68 to 99) | 1 | 3.48.0, 2026-11-25 |
 | `dead-code` | `test-only-dependency` | 2 | 2 | 2 | 0 | 0 | 100% (16 to 100) | 1 | 3.48.0, 2026-11-25 |
 | `dead-code` | `unlisted-binary` | 1 | 1 | 0 | 1 | 0 | 0% (0 to 98) | 3 (0% agree) | 3.48.0, 2026-11-25 |
 | `dead-code` | `unlisted-dependency` | 94 | 46 | 31 | 15 | 0 | 84% (71 to 88) | 3 (83% agree) | 3.48.0, 2026-11-25 |
-| `dead-code` | `unresolved-import` | 14 | 14 | 0 | 14 | 0 | 0% (0 to 65) | 3 (43% agree) | 3.48.0, 2026-11-25 |
+| `dead-code` | `unresolved-import` | 12 | 12 | 0 | 12 | 0 | 0% (0 to 58) | 3 (33% agree) | 3.50.0, 2026-11-25 |
 | `dead-code` | `unused-catalog-entry` | 16 | 16 | 16 | 0 | 0 | 100% (79 to 100) | 1 | 3.48.0, 2026-11-25 |
-| `dead-code` | `unused-class-member` | 268 | 70 | 33 | 37 | 0 | 60% (40 to 77) | 1 | 3.49.0, 2026-11-26 |
-| `dead-code` | `unused-component-emit` | 14 | 14 | 10 | 4 | 0 | 71% (42 to 92) | 2 (100% agree) | 3.49.0, 2026-11-27 |
-| `dead-code` | `unused-component-input` | 5 | 5 | 3 | 2 | 0 | 60% (15 to 95) | 2 (100% agree) | 3.49.0, 2026-11-27 |
+| `dead-code` | `unused-class-member` | 259 | 70 | 32 | 38 | 0 | 61% (41 to 78) | 1 | 3.50.0, 2026-11-27 |
+| `dead-code` | `unused-component-emit` | 10 | 10 | 10 | 0 | 0 | 100% (69 to 100) | 2 (100% agree) | 3.50.0, 2026-11-27 |
+| `dead-code` | `unused-component-input` | 3 | 3 | 3 | 0 | 0 | 100% (29 to 100) | 2 (100% agree) | 3.50.0, 2026-11-27 |
 | `dead-code` | `unused-component-prop` | 18 | 18 | 18 | 0 | 0 | 100% (81 to 100) | 2 (100% agree) | 3.48.0, 2026-11-25 |
 | `dead-code` | `unused-dependency` | 32 | 32 | 29 | 3 | 0 | 91% (58 to 99) | 1 | 3.48.0, 2026-11-25 |
 | `dead-code` | `unused-dependency-override` | 7 | 7 | 7 | 0 | 0 | 100% (59 to 100) | 1 | 3.48.0, 2026-11-25 |
@@ -66,14 +65,11 @@ Reviews is the count of independent reviews; the percentage is how often the fir
 
 - `circular-dependency`: elided unused import (1)
 - `duplicate-export`: Svelte component instance method (3)
-- `invalid-client-export`: ordinary client module export (1)
 - `package-cycle`: Playwright fixture import (2)
 - `unlisted-binary`: Mise-managed binary (1)
 - `unlisted-dependency`: documentation example (8), Deno import map (7)
-- `unresolved-import`: documentation example (8), build output import (3), generated type import (2), server route URL (1)
-- `unused-class-member`: library contract (7), test fixture call (7), test use (5), fluent builder call (3), framework lifecycle hook (2), framework property (2), indirect receiver (2), test global storage implementation (2), dependency injection call (1), instance property call (1), release script (1), required interface (1), serialized log metadata (1), test proxy call (1), typed test mock reference (1)
-- `unused-component-emit`: emitted by useVModel (4)
-- `unused-component-input`: read by Angular host binding (2)
+- `unresolved-import`: documentation example (8), build output import (3), server route URL (1)
+- `unused-class-member`: library contract (7), test use (6), fluent builder call (5), test fixture call (4), framework lifecycle hook (3), framework property (2), release script (2), test global storage implementation (2), typed test mock reference (2), dependency injection call (1), indirect receiver (1), instance property call (1), serialized log metadata (1), Svelte template use (1)
 - `unused-dependency`: required styling peer dependency (2), imported by an extensionless CLI entry (1)
 - `unused-dev-dependency`: loaded by tool configuration (4), invoked through a package binary (1)
 - `unused-enum-member`: published SDK enum contract (29), serialized value in live type (2)
