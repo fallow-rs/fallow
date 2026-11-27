@@ -1,0 +1,11 @@
+{
+  "name": "issue-5386-vite-plus-build-inputs",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "build": "vp build"
+  },
+  "devDependencies": {
+    "vite-plus": "0.1.0"
+  }
+}

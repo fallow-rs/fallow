@@ -244,9 +244,13 @@ pub(super) fn credit_dependency_lists(
     }
 }
 
+/// The packages that turn on the Vite plugin. A Vite+ project can list only
+/// `vite-plus`, which runs Vite and reads the same `vite.config.*`.
+const ENABLERS: &[&str] = &["vite", "rolldown-vite", "vite-plus"];
+
 define_plugin!(
     struct VitePlugin => "vite",
-    enablers: &["vite", "rolldown-vite"],
+    enablers: ENABLERS,
     entry_patterns: ROOT_ENTRY_PATTERNS,
     config_patterns: CONFIG_PATTERNS,
     always_used: ALWAYS_USED,
@@ -434,6 +438,18 @@ mod tests {
     use std::path::Path;
 
     use super::*;
+
+    #[test]
+    fn vite_plus_dependency_enables_the_vite_plugin() {
+        let root = Path::new("/project");
+        for dep in ["vite", "rolldown-vite", "vite-plus"] {
+            assert!(
+                VitePlugin.is_enabled_with_deps(&[dep.to_string()], root),
+                "{dep} must enable the Vite plugin"
+            );
+        }
+        assert!(!VitePlugin.is_enabled_with_deps(&["vitest".to_string()], root));
+    }
 
     #[test]
     fn resolve_config_ssr_external() {

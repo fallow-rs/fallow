@@ -695,6 +695,9 @@ object only.
 Vite+ keeps the config of each tool that it bundles in `vite.config.*`.
 Each block goes to the code that reads the same tool elsewhere:
 
+- `build`, `environments`, `resolve` and `root`: the Vite plugin. A
+  `vite-plus` dependency enables it, so the build inputs, `build.lib.entry`
+  and the default Vite entries count for a project that lists no `vite`.
 - `test`: the Vitest plugin. A `vite-plus` dependency enables it.
 - `pack`: the Vite+ plugin. Each `entry` is a runtime entry point. `pack` is
   one tsdown config or an array of them.
