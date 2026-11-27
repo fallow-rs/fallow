@@ -19,6 +19,17 @@ use super::types::{
     EVICTION_TARGET_BPS, EVICTION_TRIGGER_BPS,
 };
 
+/// True when the line offsets of `module` are empty, as for a module with
+/// no position data, or have the shape that
+/// [`fallow_types::extract::compute_line_offsets`] gives: a first offset of
+/// 0, then strictly rising offsets. The cache directory is a path in the
+/// checkout, so the loader checks the offsets before a position lookup uses
+/// them.
+fn has_valid_line_offsets(module: &CachedModule) -> bool {
+    module.line_offsets.first().is_none_or(|first| *first == 0)
+        && module.line_offsets.windows(2).all(|pair| pair[0] < pair[1])
+}
+
 /// The name of the cache file in the cache directory.
 const CACHE_FILE: &str = "cache.bin";
 
@@ -232,6 +243,10 @@ impl CacheStore {
                 "Cache header and payload declare different format versions, rebuilding"
             );
             return Err(CacheRejection::VersionMismatch);
+        }
+        if !store.entries.values().all(has_valid_line_offsets) {
+            tracing::warn!("Cache file holds malformed line offsets, rebuilding");
+            return Err(CacheRejection::Undecodable);
         }
         if store.config_hash != expected_config_hash {
             tracing::warn!(

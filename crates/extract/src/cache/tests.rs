@@ -3127,3 +3127,28 @@ fn cache_load_refuses_a_cache_file_link_out_of_the_cache_dir() {
     let _ = std::fs::remove_dir_all(&dir);
     let _ = std::fs::remove_dir_all(&outside);
 }
+
+/// The line offsets of a cached module convert byte offsets to lines. A
+/// cache file from a clone can hold any value, so a store with a list that
+/// does not start at 0 or does not rise is refused.
+#[test]
+fn cache_load_refuses_a_module_with_malformed_line_offsets() {
+    for offsets in [vec![3, 9], vec![0, 9, 4], vec![0, 9, 9]] {
+        let dir = test_cache_dir("malformed_line_offsets");
+        let mut store = CacheStore::new(Path::new(""));
+        store.insert(
+            Path::new("a.ts"),
+            CachedModule {
+                line_offsets: offsets.clone(),
+                ..empty_cached_module()
+            },
+        );
+        store.save(at(&dir), 0, DEFAULT_CACHE_MAX_SIZE).unwrap();
+        assert_eq!(
+            CacheStore::load(at(&dir), Path::new(""), 0, DEFAULT_CACHE_MAX_SIZE).err(),
+            Some(CacheRejection::Undecodable),
+            "{offsets:?}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}

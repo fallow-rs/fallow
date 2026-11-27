@@ -656,6 +656,9 @@ pub fn compute_line_offsets(source: &str) -> Vec<u32> {
 }
 
 /// Convert a byte offset to a 1-based line number and 0-based byte column.
+///
+/// `line_offsets` comes from [`compute_line_offsets`]: it starts at 0 and is
+/// sorted. A list of another shape gives a clamped position and no panic.
 #[must_use]
 #[expect(
     clippy::cast_possible_truncation,
@@ -667,8 +670,8 @@ pub fn byte_offset_to_line_col(line_offsets: &[u32], byte_offset: u32) -> (u32, 
         Err(idx) => idx.saturating_sub(1),
     };
     let line = line_idx as u32 + 1;
-    let col = byte_offset - line_offsets[line_idx];
-    (line, col)
+    let line_start = line_offsets.get(line_idx).copied().unwrap_or(0);
+    (line, byte_offset.saturating_sub(line_start))
 }
 
 /// True when `name` identifies a synthetic template-family complexity unit:
