@@ -142,6 +142,7 @@ mod health_css_finding_line_tests;
 mod health_css_runtime_class_tests;
 mod health_css_template_markup_tests;
 mod health_cyclomatic_policy_tests;
+mod health_decorator_metadata_tests;
 mod health_diagnostic_tests;
 mod health_group_trend_tests;
 mod health_mutation_report_tests;

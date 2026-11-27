@@ -1031,7 +1031,7 @@ pub struct DefaultImportWholeObjectUseFact {
 
 #[path = "extract_semantic.rs"]
 mod semantic;
-pub use semantic::SemanticFact;
+pub use semantic::{DecoratorMetadataReferenceFact, SemanticFact};
 
 pub use crate::extract_namespace_member_uses::{HolderValueFact, NamespaceMemberUseFact};
 

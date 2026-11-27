@@ -141,8 +141,28 @@ pub enum SemanticFact {
     /// A named interface that a module-local interface extends.
     /// Appended because bitcode encodes enum variants by ordinal.
     InterfaceExtends(InterfaceExtendsFact),
-    /// The file holds at least one decorator. Under `emitDecoratorMetadata`,
-    /// TypeScript then turns some type annotations into runtime references.
+    /// A local name that the decorator metadata of a class member reads at
+    /// runtime when `emitDecoratorMetadata` is on.
     /// Appended because bitcode encodes enum variants by ordinal.
-    HasDecorators,
+    DecoratorMetadataReference(DecoratorMetadataReferenceFact),
+}
+
+/// A local name that TypeScript emits in `design:type`,
+/// `design:paramtypes` or `design:returntype` metadata.
+///
+/// TypeScript emits metadata for a decorated class (its constructor
+/// parameters), a decorated method or a method with a decorated parameter
+/// (its parameters and its return type), a decorated accessor (its type),
+/// and a decorated property (its type). A type reference emits the root of
+/// its name. A union or intersection of one name emits that name. A
+/// generic type emits only its outer name, so `Promise<Dto>` does not emit
+/// `Dto`.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, bitcode::Encode, bitcode::Decode)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct DecoratorMetadataReferenceFact {
+    /// The local binding that the metadata reads.
+    pub local: String,
+    /// TypeScript emits the name only without `strictNullChecks`: the
+    /// annotation is a union of the name with `null` or `undefined`.
+    pub without_strict_null_checks: bool,
 }

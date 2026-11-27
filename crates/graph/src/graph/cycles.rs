@@ -8,7 +8,7 @@ use rustc_hash::FxHashSet;
 
 use fallow_types::discover::FileId;
 
-use super::import_elision::{ImportElision, ImporterElision};
+use super::import_elision::{DecoratorMetadata, ImportElision, ImporterElision};
 use super::types::ModuleNode;
 use super::{ImportedSymbol, ModuleGraph};
 
@@ -67,9 +67,11 @@ impl ModuleGraph {
     /// files into one SCC and cannot use a slot of the per-SCC cycle cap.
     #[must_use]
     pub fn find_cycles_with(&self, options: CycleOptions) -> Vec<Vec<FileId>> {
-        self.find_cycles_accepting(options, &mut |_| ImportElision::RemoveUnread, &mut |_| {
-            false
-        })
+        self.find_cycles_accepting(
+            options,
+            &mut |_| ImportElision::RemoveUnread(DecoratorMetadata::Off),
+            &mut |_| false,
+        )
         .cycles
     }
 
@@ -1740,7 +1742,7 @@ mod tests {
         let graph = build_cycle_graph(5, &edges);
         let all = graph.find_cycles_accepting(
             super::CycleOptions::default(),
-            &mut |_| super::ImportElision::RemoveUnread,
+            &mut |_| super::ImportElision::RemoveUnread(super::DecoratorMetadata::Off),
             &mut |_| false,
         );
         assert_eq!(all.cycles.len(), super::MAX_CYCLES_PER_SCC);
@@ -1749,7 +1751,7 @@ mod tests {
         let mut offered = 0;
         let rest = graph.find_cycles_accepting(
             super::CycleOptions::default(),
-            &mut |_| super::ImportElision::RemoveUnread,
+            &mut |_| super::ImportElision::RemoveUnread(super::DecoratorMetadata::Off),
             &mut |cycle| {
                 offered += 1;
                 cycle.len() == 2

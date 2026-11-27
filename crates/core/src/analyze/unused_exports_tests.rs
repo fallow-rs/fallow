@@ -2037,6 +2037,7 @@ fn collect_usages_collapses_namespaces_at_one_physical_site() {
             kind: ReferenceKind::NamedImport,
             namespace,
             import_span: Span::new(0, 10),
+            decorator_metadata: None,
         })
         .collect();
     graph.modules_mut()[0].exports = vec![export];
@@ -2052,6 +2053,7 @@ fn named_import_from(file: u32, start: u32, end: u32) -> SymbolReference {
         kind: ReferenceKind::NamedImport,
         namespace: ExportNamespace::Value,
         import_span: Span::new(start, end),
+        decorator_metadata: None,
     }
 }
 

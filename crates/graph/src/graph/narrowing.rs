@@ -115,6 +115,7 @@ pub(super) struct ReferenceSite {
     from_file: FileId,
     import_span: oxc_span::Span,
     path: Option<ReferencePathId>,
+    decorator_metadata: Option<super::MetadataEmit>,
 }
 
 impl ReferenceSite {
@@ -127,6 +128,7 @@ impl ReferenceSite {
             from_file,
             import_span,
             path,
+            decorator_metadata: None,
         }
     }
 
@@ -140,6 +142,7 @@ impl ReferenceSite {
             from_file: source_id,
             import_span: symbol.import_span,
             path: reference_paths.direct(target_id, symbol.mechanism),
+            decorator_metadata: symbol.decorator_metadata(),
         }
     }
 }
@@ -302,6 +305,9 @@ fn attach_reference(
                 kind,
                 namespace,
                 import_span: site.import_span,
+                decorator_metadata: site
+                    .decorator_metadata
+                    .filter(|_| namespace == ExportNamespace::Type),
             },
             site.path,
         );
@@ -377,6 +383,7 @@ pub(super) fn create_synthetic_exports_for_star_re_exports_at_site(
                         kind: ReferenceKind::NamespaceImport,
                         namespace,
                         import_span: site.import_span,
+                        decorator_metadata: None,
                     },
                     site.path,
                 );
@@ -395,6 +402,7 @@ pub(super) fn create_synthetic_exports_for_star_re_exports_at_site(
                 kind: ReferenceKind::NamespaceImport,
                 namespace,
                 import_span: site.import_span,
+                decorator_metadata: None,
             }],
             reference_paths: site.path.map(|path| vec![Some(path)]).unwrap_or_default(),
             members: Vec::new(),

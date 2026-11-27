@@ -11,7 +11,7 @@ use rustc_hash::FxHashSet;
 use super::types::{
     ReferencePathId, ReferencePathNode, ReferenceRouteGraphId, ReferenceRouteNodeId,
 };
-use super::{ExportNamespace, ExportSymbol, ModuleGraph, TestReachabilityIndex};
+use super::{ExportSymbol, ModuleGraph, TestReachabilityIndex};
 
 /// How tests reach one export.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -95,7 +95,7 @@ impl ModuleGraph {
                 .references
                 .iter()
                 .enumerate()
-                .filter(|(_, reference)| reference.namespace == ExportNamespace::Value)
+                .filter(|(_, reference)| self.reference_runs_export(reference))
         };
 
         let mut covered = false;

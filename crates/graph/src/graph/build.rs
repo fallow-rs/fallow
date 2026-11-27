@@ -505,8 +505,12 @@ fn build_module_node(
         re_exports: re_export_edges,
         flags: ModuleNode::flags_from(entry_point_ids.contains(&file.id), false, has_cjs_exports),
     };
-    if resolved.is_some_and(|m| m.semantic_facts.contains(&SemanticFact::HasDecorators)) {
-        node.set_has_decorators();
+    if resolved.is_some_and(|m| {
+        m.semantic_facts
+            .iter()
+            .any(|fact| matches!(fact, SemanticFact::DecoratorMetadataReference(_)))
+    }) {
+        node.set_has_decorator_metadata();
     }
     (
         node,
@@ -746,6 +750,7 @@ impl ModuleGraph {
                 re_export_cycles: Vec::new(),
                 namespace_escapes: Vec::new(),
                 effective_exports: super::effective_exports::EffectiveExportIndex::default(),
+                decorator_metadata_elision: FxHashMap::default(),
             },
             namespace_features,
         )

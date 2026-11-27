@@ -1,0 +1,3 @@
+### Fixed
+
+- **`untested-export` follows test paths through decorator metadata.** Under `emitDecoratorMetadata`, TypeScript emits the parameter and return types of a decorated class member as runtime references. A test that imports such a class now covers the classes that those types name. Fallow follows the TypeScript rules: only decorated members, only the outer name of a generic type (`Promise<Dto>` does not reach `Dto`), no `import type`, and no `null` union under `strictNullChecks`. Cycle detection now uses the same rules, so an import that the metadata does not read no longer counts as a cycle edge (#5362).

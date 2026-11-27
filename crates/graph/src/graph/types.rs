@@ -52,7 +52,7 @@ const FLAG_TEST_REACHABLE: u8 = 1 << 3;
 const FLAG_CJS_EXPORTS: u8 = 1 << 4;
 const FLAG_CONSUMER_CHECKED: u8 = 1 << 5;
 const FLAG_FIXTURE_ENTRY: u8 = 1 << 6;
-const FLAG_DECORATORS: u8 = 1 << 7;
+const FLAG_DECORATOR_METADATA: u8 = 1 << 7;
 
 impl ModuleNode {
     /// Whether this module is an entry point.
@@ -126,15 +126,16 @@ impl ModuleNode {
         self.flags & FLAG_TEST_REACHABLE != 0
     }
 
-    /// Whether this module holds a decorator.
+    /// Whether the decorator metadata of this module emits an import binding.
     #[inline]
-    pub(crate) const fn has_decorators(&self) -> bool {
-        self.flags & FLAG_DECORATORS != 0
+    pub(crate) const fn has_decorator_metadata(&self) -> bool {
+        self.flags & FLAG_DECORATOR_METADATA != 0
     }
 
-    /// Record that this module holds a decorator.
-    pub(crate) const fn set_has_decorators(&mut self) {
-        self.flags |= FLAG_DECORATORS;
+    /// Record that the decorator metadata of this module emits an import
+    /// binding.
+    pub(crate) const fn set_has_decorator_metadata(&mut self) {
+        self.flags |= FLAG_DECORATOR_METADATA;
     }
 
     /// Whether this module has CJS exports (module.exports / exports.*).
@@ -298,6 +299,10 @@ pub struct SymbolReference {
     /// Used by the LSP to locate references for Code Lens navigation.
     #[serde(with = "crate::cache::span_serde")]
     pub import_span: oxc_span::Span,
+    /// How the decorator metadata of `from_file` emits the imported binding,
+    /// for a type reference. The compiler options of `from_file` decide
+    /// whether the metadata reads the export at runtime (issue #5362).
+    pub decorator_metadata: Option<super::MetadataEmit>,
 }
 
 /// Compact identifier for an interned reference path.
@@ -1035,6 +1040,7 @@ mod tests {
                         kind: ReferenceKind::NamedImport,
                         namespace: ExportNamespace::Value,
                         import_span: oxc_span::Span::default(),
+                        decorator_metadata: None,
                     })
                     .collect(),
                 reference_paths: paths.to_vec(),
@@ -1062,6 +1068,7 @@ mod tests {
                     kind: ReferenceKind::NamedImport,
                     namespace: ExportNamespace::Value,
                     import_span: oxc_span::Span::default(),
+                    decorator_metadata: None,
                 })
                 .collect(),
             reference_paths: Vec::new(),
@@ -1216,6 +1223,7 @@ mod tests {
                     kind: ReferenceKind::NamedImport,
                     namespace: ExportNamespace::Value,
                     import_span: oxc_span::Span::default(),
+                    decorator_metadata: None,
                 },
                 None,
             );
@@ -1258,6 +1266,7 @@ mod tests {
             kind: ReferenceKind::NamedImport,
             namespace: ExportNamespace::Value,
             import_span: oxc_span::Span::default(),
+            decorator_metadata: None,
         };
         export.push_reference(reference, None);
         let tracked = ReferencePathId::from_index(4);

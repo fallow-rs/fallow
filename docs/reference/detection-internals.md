@@ -616,7 +616,7 @@ error by suppressing a downstream detector.
   stops at an asset reference. A new consumer that walks edges must pick one
   of these predicates instead of reading the variants.
 - Cycle detection does not count an import that TypeScript removes from its
-  output (issues #5262 and #5309, `ModuleGraph::is_removed_import`). Only a
+  output (issues #5262, #5309 and #5362, `ModuleGraph::is_removed_import`). Only a
   static ES import of a named or default binding in a `.ts`, `.tsx`, `.mts`
   or `.cts` file can go away. Each edge symbol records how the importer uses
   the binding (`BindingUse`): as a value, only in type positions, or not at
@@ -624,19 +624,41 @@ error by suppressing a downstream detector.
   import. Otherwise the import goes away when its name resolves only in the
   type namespace of the target, or when the file uses it only as a type or
   not at all. Two exceptions keep such an import: a `.tsx` importer, where
-  the binding can be the JSX factory of the classic runtime, and a file with
-  a decorator under `emitDecoratorMetadata`, where a type annotation can
-  become a runtime reference (`SemanticFact::HasDecorators`). The rule
+  the binding can be the JSX factory of the classic runtime, and a binding
+  that decorator metadata reads (see "Decorator metadata" below). The rule
   follows tsc, esbuild and swc. A Babel setup with `onlyRemoveTypeImports`
   keeps more imports, and its config is not read.
 - The tsconfig of the importer gives the `ImportElision`: `Keep` under
   `verbatimModuleSyntax`, `preserveValueImports`, or
-  `importsNotUsedAsValues` with `preserve` or `error`; `KeepDecoratedTypes`
-  under `emitDecoratorMetadata`; else `RemoveUnread`. The nearest
+  `importsNotUsedAsValues` with `preserve` or `error`, else `RemoveUnread`.
+  Each variant carries the `DecoratorMetadata` options: `On` under
+  `emitDecoratorMetadata`, with the value of `strictNullChecks` (default:
+  `strict`), else `Off`. The reader is
+  `crates/core/src/graph_build/import_elision_configs.rs`. The nearest
   `tsconfig.json`, its `tsconfig.*.json` siblings and the in-root configs
-  that its `references` name decide, and the strictest wins. A Deno config,
-  a config that does not parse and a file outside the root keep imports.
+  that its `references` name decide, and the config that keeps more
+  imports wins. A Deno config, a config that does not parse and a file
+  outside the root keep imports and give `Off`.
   Namespace, side-effect and re-export edges always stay.
+- Decorator metadata (issue #5362). Extraction records each local name that
+  TypeScript emits in `design:type`, `design:paramtypes` or
+  `design:returntype` (`SemanticFact::DecoratorMetadataReference`,
+  `visitor/decorator_metadata.rs`). Only a class declaration emits metadata:
+  the constructor parameters of a decorated class or of a class with a
+  decorated constructor parameter, the parameters and the return type of a
+  decorated method or of a method with a decorated parameter, the type of a
+  decorated accessor, and the type of a decorated property. A type reference
+  emits the root of its name, and a generic type emits only its outer name,
+  so `Promise<Dto>` does not emit `Dto`. A union, an intersection or a
+  conditional type emits a name only when each member emits the same plain
+  identifier. `never` does not count, and `null` and `undefined` do not
+  count only without `strictNullChecks`. A binding that the file uses only in
+  type positions and that the metadata emits gets
+  `BindingUse::DecoratorMetadata`. An `import type` never does.
+  `ImportElision::reads_decorator_metadata` decides for both cycles and test
+  reach whether the compiler options of the importer keep it. A name that
+  resolves only in the type namespace of the target (an interface) emits
+  `Object`, so its import still goes away.
 - `new URL("./x.ts", import.meta.url)` names a module that a path loader can
   run, so the edge credits the `default` export of the target and no other
   export. The edge credits only the file in three cases: a direct argument of
@@ -664,9 +686,14 @@ error by suppressing a downstream detector.
 
 ## Value references and test reach
 
-`ModuleGraph::is_test_reference_covered` accepts only a reference with
+`ModuleGraph::is_test_reference_covered` accepts only a reference that runs
+the export (`ModuleGraph::reference_runs_export`): a reference with
 `namespace == ExportNamespace::Value`. A type reference never runs the
-export, so it never gives test coverage. The graph attaches a type reference
+export, so it never gives test coverage. The exception is a type reference
+that decorator metadata reads (`SymbolReference::decorator_metadata`) when
+the compiler options of the referencing file keep it. The persisted graph
+does not track `tsconfig.json`, so core reads those options after each build
+and each cache load (`ModuleGraph::read_decorator_metadata_options`). The graph attaches a type reference
 for `import type`, for a `type` specifier, and for a plain `import` whose
 binding the file uses only in type positions (`desired_import_namespaces` in
 `narrowing.rs`).

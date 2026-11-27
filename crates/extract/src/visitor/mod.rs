@@ -10,6 +10,7 @@ use dynamic_import_shapes::*;
 mod bound_member_accesses;
 mod callee_uses;
 mod declarations;
+mod decorator_metadata;
 mod helpers;
 mod independent_this;
 mod local_class_heritage;
@@ -660,8 +661,6 @@ pub(crate) struct ModuleInfoExtractor {
     package_resolve_sites: Vec<(String, Span)>,
     pub(crate) member_accesses: Vec<MemberAccess>,
     semantic_facts: Vec<SemanticFact>,
-    /// Whether [`SemanticFact::HasDecorators`] is already in `semantic_facts`.
-    recorded_decorator: bool,
     /// Inner calls of a fluent chain that its outermost call already walked.
     fluent_chain_inner_calls: FxHashSet<Span>,
     pending_computed_enum_key_uses: Vec<PendingComputedEnumKeyUse>,
