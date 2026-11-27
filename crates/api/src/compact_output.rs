@@ -323,21 +323,27 @@ impl<'a> CompactLineBuilder<'a> {
     fn push_unused_dependency_lines(&mut self) {
         for dep in &self.results.unused_dependencies {
             self.lines.push(format!(
-                "unused-dep:{}{}",
+                "unused-dep:{}:{}:{}{}",
+                self.rel(&dep.dep.path),
+                dep.dep.line,
                 dep.dep.package_name,
                 compact_caveat_field(&dep.reachability_caveats)
             ));
         }
         for dep in &self.results.unused_dev_dependencies {
             self.lines.push(format!(
-                "unused-devdep:{}{}",
+                "unused-devdep:{}:{}:{}{}",
+                self.rel(&dep.dep.path),
+                dep.dep.line,
                 dep.dep.package_name,
                 compact_caveat_field(&dep.reachability_caveats)
             ));
         }
         for dep in &self.results.unused_optional_dependencies {
             self.lines.push(format!(
-                "unused-optionaldep:{}{}",
+                "unused-optionaldep:{}:{}:{}{}",
+                self.rel(&dep.dep.path),
+                dep.dep.line,
                 dep.dep.package_name,
                 compact_caveat_field(&dep.reachability_caveats)
             ));
@@ -410,8 +416,14 @@ impl<'a> CompactLineBuilder<'a> {
 
     fn push_secondary_dependency_lines(&mut self) {
         for dep in &self.results.unlisted_dependencies {
-            self.lines
-                .push(format!("unlisted-dep:{}", dep.dep.package_name));
+            for site in &dep.dep.imported_from {
+                self.lines.push(format!(
+                    "unlisted-dep:{}:{}:{}",
+                    self.rel(&site.path),
+                    site.line,
+                    dep.dep.package_name
+                ));
+            }
         }
         for binary in &self.results.unlisted_binaries {
             for site in &binary.binary.used_in {
@@ -424,20 +436,38 @@ impl<'a> CompactLineBuilder<'a> {
             }
         }
         for dup in &self.results.duplicate_exports {
-            self.lines
-                .push(format!("duplicate-export:{}", dup.export.export_name));
+            for loc in &dup.export.locations {
+                self.lines.push(format!(
+                    "duplicate-export:{}:{}:{}",
+                    self.rel(&loc.path),
+                    loc.line,
+                    dup.export.export_name
+                ));
+            }
         }
         for dep in &self.results.type_only_dependencies {
-            self.lines
-                .push(format!("type-only-dep:{}", dep.dep.package_name));
+            self.lines.push(format!(
+                "type-only-dep:{}:{}:{}",
+                self.rel(&dep.dep.path),
+                dep.dep.line,
+                dep.dep.package_name
+            ));
         }
         for dep in &self.results.test_only_dependencies {
-            self.lines
-                .push(format!("test-only-dep:{}", dep.dep.package_name));
+            self.lines.push(format!(
+                "test-only-dep:{}:{}:{}",
+                self.rel(&dep.dep.path),
+                dep.dep.line,
+                dep.dep.package_name
+            ));
         }
         for dep in &self.results.dev_dependencies_in_production {
-            self.lines
-                .push(format!("dev-dep-in-prod:{}", dep.dep.package_name));
+            self.lines.push(format!(
+                "dev-dep-in-prod:{}:{}:{}",
+                self.rel(&dep.dep.path),
+                dep.dep.line,
+                dep.dep.package_name
+            ));
         }
     }
 
@@ -1598,7 +1628,7 @@ mod tests {
             vec![
                 "unused-file:src/dead.ts,caveat=incomplete-import-graph",
                 "unused-export:src/lib.ts:3:needed,caveat=incomplete-file-analysis+incomplete-import-graph",
-                "unused-dep:left-pad,caveat=incomplete-import-graph",
+                "unused-dep:package.json:5:left-pad,caveat=incomplete-import-graph",
                 "unused-enum-member:src/lib.ts:7:Mode.Legacy,caveat=incomplete-import-graph",
                 "unused-class-member:src/lib.ts:7:Widget.render,caveat=incomplete-import-graph",
                 "unused-store-member:src/lib.ts:7:useCart.subtotal,caveat=incomplete-import-graph",
@@ -1873,6 +1903,123 @@ mod tests {
         assert_eq!(
             build_compact_lines(&results, &root),
             vec!["namespace-escape:src/app.ts:3:Formats".to_owned()]
+        );
+    }
+
+    #[test]
+    fn compact_dependency_and_duplicate_export_lines_include_locations_and_fanout() {
+        use fallow_types::output_dead_code::{
+            DevDependencyInProductionFinding, DuplicateExportFinding, TestOnlyDependencyFinding,
+            TypeOnlyDependencyFinding, UnlistedDependencyFinding, UnusedDependencyFinding,
+            UnusedDevDependencyFinding, UnusedOptionalDependencyFinding,
+        };
+        use fallow_types::results::{
+            DependencyLocation, DevDependencyInProduction, DuplicateExport, DuplicateLocation,
+            ImportSite, TestOnlyDependency, TypeOnlyDependency, UnlistedDependency,
+            UnusedDependency,
+        };
+
+        let root = PathBuf::from("/project");
+        let mut results = AnalysisResults::default();
+
+        results.unused_dependencies.push(
+            UnusedDependencyFinding::with_actions(UnusedDependency {
+                package_name: "lodash".to_string(),
+                location: DependencyLocation::Dependencies,
+                path: root.join("package.json"),
+                line: 5,
+                used_in_workspaces: Vec::new(),
+                declared_and_imported_in: Vec::new(),
+            }),
+        );
+        results.unused_dev_dependencies.push(
+            UnusedDevDependencyFinding::with_actions(UnusedDependency {
+                package_name: "jest".to_string(),
+                location: DependencyLocation::DevDependencies,
+                path: root.join("package.json"),
+                line: 6,
+                used_in_workspaces: Vec::new(),
+                declared_and_imported_in: Vec::new(),
+            }),
+        );
+        results.unused_optional_dependencies.push(
+            UnusedOptionalDependencyFinding::with_actions(UnusedDependency {
+                package_name: "fsevents".to_string(),
+                location: DependencyLocation::OptionalDependencies,
+                path: root.join("package.json"),
+                line: 7,
+                used_in_workspaces: Vec::new(),
+                declared_and_imported_in: Vec::new(),
+            }),
+        );
+        results.unlisted_dependencies.push(
+            UnlistedDependencyFinding::with_actions(UnlistedDependency {
+                package_name: "chalk".to_string(),
+                imported_from: vec![
+                    ImportSite {
+                        path: root.join("src/a.ts"),
+                        line: 2,
+                        col: 0,
+                    },
+                    ImportSite {
+                        path: root.join("src/b.ts"),
+                        line: 4,
+                        col: 0,
+                    },
+                ],
+            }),
+        );
+        results.duplicate_exports.push(
+            DuplicateExportFinding::with_actions(DuplicateExport {
+                export_name: "Button".to_string(),
+                locations: vec![
+                    DuplicateLocation {
+                        path: root.join("src/a.ts"),
+                        line: 10,
+                    },
+                    DuplicateLocation {
+                        path: root.join("src/b.ts"),
+                        line: 20,
+                    },
+                ],
+            }),
+        );
+        results.type_only_dependencies.push(
+            TypeOnlyDependencyFinding::with_actions(TypeOnlyDependency {
+                package_name: "zod".to_string(),
+                path: root.join("package.json"),
+                line: 8,
+            }),
+        );
+        results.test_only_dependencies.push(
+            TestOnlyDependencyFinding::with_actions(TestOnlyDependency {
+                package_name: "msw".to_string(),
+                path: root.join("package.json"),
+                line: 9,
+            }),
+        );
+        results.dev_dependencies_in_production.push(
+            DevDependencyInProductionFinding::with_actions(DevDependencyInProduction {
+                package_name: "express".to_string(),
+                path: root.join("package.json"),
+                line: 10,
+            }),
+        );
+
+        assert_eq!(
+            build_compact_lines(&results, &root),
+            vec![
+                "unused-dep:package.json:5:lodash".to_owned(),
+                "unused-devdep:package.json:6:jest".to_owned(),
+                "unused-optionaldep:package.json:7:fsevents".to_owned(),
+                "unlisted-dep:src/a.ts:2:chalk".to_owned(),
+                "unlisted-dep:src/b.ts:4:chalk".to_owned(),
+                "duplicate-export:src/a.ts:10:Button".to_owned(),
+                "duplicate-export:src/b.ts:20:Button".to_owned(),
+                "type-only-dep:package.json:8:zod".to_owned(),
+                "test-only-dep:package.json:9:msw".to_owned(),
+                "dev-dep-in-prod:package.json:10:express".to_owned(),
+            ]
         );
     }
 }
