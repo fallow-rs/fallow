@@ -299,7 +299,7 @@ fn a_stored_file_keeps_its_part_of_the_measured_dry_run_time() {
 }
 
 #[test]
-fn a_warm_run_gives_new_companions_the_stored_test_index_and_worker_modes() {
+fn a_warm_run_gives_new_companions_the_stored_test_index() {
     let store = Arc::new(MemoryStore::default());
     let config = || ScheduleConfig {
         concurrency: 2,
