@@ -49,6 +49,7 @@ use crate::mutation::scheduler::{
     OutcomeJournal, ResultLookup, ScheduleConfig, ScheduleError, ScheduleIssue, ScheduleOutcome,
     SchedulePlan, ScheduledMutant, run_schedule_with_progress,
 };
+use crate::mutation::setup_timeout::longer_setup_timeout;
 use crate::mutation::transport::ProcessSpawner;
 use crate::mutation::typecheck::typecheck_survivors;
 use crate::mutation::worktree::{Exclusions, WorktreeSnapshot, canonical_path, snapshot};
@@ -767,8 +768,9 @@ fn schedule_error(
         }
     ) {
         help.push(format!(
-            "the runner setup took longer than {}s; on a slow or busy host, pass --setup-timeout with a longer duration, for example 5m",
-            setup_timeout.as_secs()
+            "the runner setup took longer than {}s; on a slow or busy host, pass --setup-timeout with a longer duration, for example {}",
+            setup_timeout.as_secs(),
+            longer_setup_timeout(setup_timeout)
         ));
     }
     if let Some(tail) = stderr_tail.filter(|tail| !tail.trim().is_empty()) {
@@ -1586,6 +1588,7 @@ mod tests {
         assert!(help.contains("longer than 120s"), "{help}");
         assert!(help.contains("--setup-timeout"), "{help}");
         assert!(help.contains("companion stderr:\nvitest started"), "{help}");
+        assert!(help.contains("for example 5m"), "{help}");
 
         let other = schedule_error(
             &ScheduleError::Setup {
@@ -1597,6 +1600,27 @@ mod tests {
             Duration::from_secs(120),
         );
         assert_eq!(other.help, None);
+    }
+
+    #[test]
+    fn a_setup_watchdog_error_suggests_a_longer_value_than_the_one_that_failed() {
+        for (failed, example) in [(3, "5m"), (300, "10m"), (900, "30m"), (3600, "2h")] {
+            let error = schedule_error(
+                &ScheduleError::Setup {
+                    message: "the mutation companion dry_run failed".to_owned(),
+                    stderr_tail: None,
+                    timed_out: true,
+                },
+                vitest_range(),
+                Duration::from_secs(failed),
+            );
+            let help = error.help.as_deref().unwrap_or_default();
+            assert!(help.contains(&format!("longer than {failed}s")), "{help}");
+            assert!(
+                help.contains(&format!("for example {example}")),
+                "{failed}s: {help}"
+            );
+        }
     }
 
     #[test]

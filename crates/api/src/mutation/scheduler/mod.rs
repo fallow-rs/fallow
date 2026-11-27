@@ -18,6 +18,7 @@ use super::protocol::{
     Capabilities, DryRunResult, DryTest, InitRequest, LinkFault, Ready, ReloadMethod, Request,
     Response, RunRequest, RunResult, RunStatus, TestStatus,
 };
+use super::setup_timeout::{self_check_help, setup_timeout_hint};
 use super::transport::{CompanionLink, CompanionSpawner, SpawnFailure};
 use super::{MutationProgress, MutationProgressSink};
 use reserve::PhaseDeadline;
@@ -1451,16 +1452,6 @@ fn retry_status(first: MutantStatus, job: &Job, retry: &Attempt) -> MutantStatus
     }
 }
 
-/// The hint for a setup watchdog fault of a restarted companion. The run
-/// continues, so the hint goes into the mutant error.
-fn setup_timeout_hint(fault: &LinkFault) -> &'static str {
-    if matches!(fault, LinkFault::Timeout) {
-        "; on a slow or busy host, pass --setup-timeout with a longer duration"
-    } else {
-        ""
-    }
-}
-
 /// The companion error code for a runner version outside the manifest range.
 const RUNNER_VERSION_CODE: &str = "runner-version";
 
@@ -1804,7 +1795,7 @@ fn self_check(
             message: format!(
                 "the self-check of {runner_name} timed out: a control run of the tests of a covered mutant, with no active mutant, did not finish ({detail})"
             ),
-            help: "on a slow or busy host, pass --setup-timeout with a longer duration, for example 5m, or run on a less loaded host".to_owned(),
+            help: self_check_help(runner.config.runner_timeout, job.timeout_ms),
         },
         Ok(ControlOutcome::Fault(message)) => ScheduleError::RunPath {
             message: format!(

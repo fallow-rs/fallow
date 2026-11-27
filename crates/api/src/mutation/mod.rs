@@ -22,6 +22,7 @@ pub(crate) mod run_dir;
 pub(crate) mod runner_select;
 pub(crate) mod runner_version;
 pub(crate) mod scheduler;
+pub(crate) mod setup_timeout;
 pub(crate) mod transport;
 pub(crate) mod typecheck;
 pub(crate) mod verdicts;
