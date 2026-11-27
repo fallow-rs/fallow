@@ -202,7 +202,7 @@ fn journal_result(config: &ScheduleConfig, job: &Job, result: &CachedResult) {
 /// kill get a retry, and each other status runs again in a later run.
 pub(super) fn journal_first_run(config: &ScheduleConfig, job: &Job, attempt: &Attempt) {
     let final_status = match attempt.status {
-        MutantStatus::Killed => !retries_unique_kill(config, job, attempt),
+        MutantStatus::Killed => !retries_unique_kill(config.target_full, job, attempt),
         MutantStatus::NotKilledByTarget => true,
         _ => false,
     };

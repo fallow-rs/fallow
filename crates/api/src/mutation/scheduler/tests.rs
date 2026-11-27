@@ -1606,6 +1606,54 @@ fn a_time_budget_keeps_time_to_confirm_the_survivors_of_the_first_pass() {
 }
 
 #[test]
+fn a_time_budget_reserves_the_retry_dry_run_not_the_first_dry_run() {
+    let ids: Vec<String> = (1..=20).map(|index| format!("m{index}")).collect();
+    let refs: Vec<&str> = ids.iter().map(String::as_str).collect();
+    let clock = FakeClock::new();
+    let (dry_clock, run_clock) = (Arc::clone(&clock), Arc::clone(&clock));
+    let hit_ids = ids.clone();
+    let spawner = FakeSpawner::new(script(
+        move |index| {
+            // The first dry run is long: a slow test file that no mutant
+            // needs. The retry companion dry-runs only the test file of
+            // the suspects: 2 + 100 ms of tests and 50 ms of file setup.
+            let took = if index == 0 { 10_000 } else { 152 };
+            dry_clock.advance(Duration::from_millis(took));
+            DryRunResult {
+                hits: BTreeMap::from([(tid("t1"), hit_ids.clone()), (tid("t2"), hit_ids.clone())]),
+                file_setup_ms: BTreeMap::from([("test/a.test.ts".to_owned(), 50.0)]),
+                ..standard_dry()
+            }
+        },
+        move |_, run| {
+            run_clock.advance(Duration::from_millis(100));
+            Ok(run_result(run, RunStatus::Survived, None))
+        },
+    ));
+    let started = clock.now();
+    let budget = Duration::from_secs(13);
+    let config = budgeted_config(&clock, budget);
+    let outcome = run_schedule(&spawner, &plan(&refs), &config).expect("run");
+    // The retry phase of k survivors needs 152 ms of dry run of the
+    // suspect file and k * 100 ms of retries, with a quarter margin, and the
+    // mean run reserves 2 * 100 ms. The 12th run ends at 11,200 ms, and
+    // 11,200 + 1.25 * (152 + 1,200) + 200 passes the deadline. A reserve
+    // with the 10,000 ms of the first dry run stops after the first run.
+    let pending = ids
+        .iter()
+        .filter(|id| outcome.results[*id].status == MutantStatus::Pending)
+        .count();
+    assert_eq!(pending, 8, "the first pass runs until its reserve is full");
+    assert!(outcome.unretried.is_empty(), "{:?}", outcome.unretried);
+    assert_eq!(outcome.timings.mutants, Duration::from_millis(1_200));
+    assert_eq!(
+        clock.now().saturating_duration_since(started),
+        Duration::from_millis(12_552),
+        "the retries end inside the budget"
+    );
+}
+
+#[test]
 fn a_dry_run_hit_on_a_statically_unreached_mutant_runs_it_and_reports_the_miss() {
     let spawner = FakeSpawner::new(script(
         |_| DryRunResult {
