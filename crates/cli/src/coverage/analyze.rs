@@ -26,7 +26,7 @@ use crate::coverage::cloud_rows;
 use crate::coverage::upload_common::parse_git_remote_to_project_id;
 use crate::coverage::upload_inventory::extension_supported;
 use crate::health::HealthOptions;
-use crate::health::optimization_target::{StaticCost, optimization_target};
+use crate::health::optimization_target::StaticCost;
 use crate::{
     error::{emit_error, emit_input_error},
     exit_codes::exit_invalid_input,
@@ -1017,93 +1017,6 @@ pub(super) fn cloud_observation_days(
         })
 }
 
-pub(super) fn collect_called_cloud_function(
-    entries: &mut CloudMergeEntries,
-    function: &CloudRuntimeFunction,
-    local: &StaticFunctionInfo,
-    min_invocations_hot: u64,
-) {
-    if let Some(invocations) = function.hit_count
-        && invocations >= min_invocations_hot
-    {
-        entries
-            .hot_paths
-            .push(cloud_hot_path(local, invocations, function));
-    }
-    if let Some(invocations) = function.hit_count {
-        entries
-            .synthesized_blast_radius
-            .push(cloud_blast_radius(local, invocations, function));
-        entries
-            .synthesized_importance
-            .push(cloud_importance(local, invocations));
-    }
-}
-
-fn cloud_hot_path(
-    local: &StaticFunctionInfo,
-    invocations: u64,
-    function: &CloudRuntimeFunction,
-) -> RuntimeCoverageHotPath {
-    RuntimeCoverageHotPath {
-        id: stable_runtime_id("hot", &local.path, &local.name, local.start_line),
-        stable_id: Some(local.stable_id.clone()),
-        path: local.path.clone(),
-        function: local.name.clone(),
-        line: local.start_line,
-        end_line: local.end_line,
-        invocations,
-        percentile: 100,
-        actions: Vec::new(),
-        optimization_target: local
-            .cost
-            .map(|cost| optimization_target(invocations, cost, None)),
-        cloud_context: cloud_rows::cloud_context(&function.extra),
-    }
-}
-
-fn cloud_blast_radius(
-    local: &StaticFunctionInfo,
-    invocations: u64,
-    function: &CloudRuntimeFunction,
-) -> fallow_output::RuntimeCoverageBlastRadiusEntry {
-    let weighted = invocations.saturating_mul(u64::from(local.caller_count));
-    fallow_output::RuntimeCoverageBlastRadiusEntry {
-        id: stable_runtime_id("blast", &local.path, &local.name, local.start_line),
-        stable_id: Some(local.stable_id.clone()),
-        file: local.path.clone(),
-        function: local.name.clone(),
-        line: local.start_line,
-        caller_count: local.caller_count,
-        caller_count_weighted_by_traffic: weighted,
-        deploys_touched: Some(function.deployments_observed),
-        risk_band: blast_radius_risk_band(local.caller_count, weighted),
-        cloud_context: None,
-    }
-}
-
-fn cloud_importance(
-    local: &StaticFunctionInfo,
-    invocations: u64,
-) -> (fallow_output::RuntimeCoverageImportanceEntry, Option<u32>) {
-    let owner_count = local.owner_count.unwrap_or(0);
-    (
-        fallow_output::RuntimeCoverageImportanceEntry {
-            id: stable_runtime_id("importance", &local.path, &local.name, local.start_line),
-            stable_id: Some(local.stable_id.clone()),
-            file: local.path.clone(),
-            function: local.name.clone(),
-            line: local.start_line,
-            invocations,
-            cyclomatic: local.cyclomatic,
-            owner_count,
-            importance_score: 0.0,
-            reason: importance_reason(invocations, local.cyclomatic, local.owner_count),
-        },
-        local.owner_count,
-    )
-}
-
 pub(super) fn cloud_finding(
     function: &CloudRuntimeFunction,
     local: &StaticFunctionInfo,
@@ -1188,7 +1101,11 @@ fn rank_importance(
     ranked
 }
 
-fn importance_reason(invocations: u64, cyclomatic: u32, owner_count: Option<u32>) -> String {
+pub(super) fn importance_reason(
+    invocations: u64,
+    cyclomatic: u32,
+    owner_count: Option<u32>,
+) -> String {
     let traffic = if invocations >= 1_000_000 {
         "High traffic"
     } else if invocations >= 10_000 {
@@ -1637,7 +1554,7 @@ const fn runtime_verdict_rank(verdict: RuntimeCoverageVerdict) -> u8 {
     }
 }
 
-fn stable_runtime_id(prefix: &str, path: &Path, function: &str, line: u32) -> String {
+pub(super) fn stable_runtime_id(prefix: &str, path: &Path, function: &str, line: u32) -> String {
     let file = normalize_runtime_path(path);
     match prefix {
         "hot" => fallow_cov_protocol::hot_path_id(&file, function, line),
@@ -3227,6 +3144,7 @@ export const createStore = (rows: string[]) => {
         RuntimeCoverageHotPath {
             cloud_context: None,
             id: id.to_owned(),
+            legacy_id: None,
             stable_id: None,
             path: PathBuf::from("src/a.ts"),
             function: "a".to_owned(),
@@ -3243,6 +3161,7 @@ export const createStore = (rows: string[]) => {
         RuntimeCoverageBlastRadiusEntry {
             cloud_context: None,
             id: id.to_owned(),
+            legacy_id: None,
             stable_id: None,
             file: PathBuf::from("src/a.ts"),
             function: "a".to_owned(),
@@ -3257,6 +3176,7 @@ export const createStore = (rows: string[]) => {
     fn runtime_importance(id: &str) -> RuntimeCoverageImportanceEntry {
         RuntimeCoverageImportanceEntry {
             id: id.to_owned(),
+            legacy_id: None,
             stable_id: None,
             file: PathBuf::from("src/a.ts"),
             function: "a".to_owned(),

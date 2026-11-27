@@ -260,6 +260,10 @@ pub struct CloudRuntimeFunction {
 #[derive(Debug, Clone, Deserialize)]
 pub struct CloudRuntimeBlastRadiusEntry {
     pub id: String,
+    /// The file+line ID that the cloud emitted before its line-independent
+    /// `id`, for a transition window. `None` for an older cloud.
+    #[serde(default)]
+    pub legacy_id: Option<String>,
     /// Cross-surface `FunctionIdentity` join key, read as snake_case `stable_id`
     /// when the cloud emits it on blast-radius entries. `None` until then.
     #[serde(default)]
@@ -297,6 +301,10 @@ pub enum CloudRuntimeRiskBand {
 #[derive(Debug, Clone, Deserialize)]
 pub struct CloudRuntimeImportanceEntry {
     pub id: String,
+    /// The file+line ID that the cloud emitted before its line-independent
+    /// `id`, for a transition window. `None` for an older cloud.
+    #[serde(default)]
+    pub legacy_id: Option<String>,
     /// Cross-surface `FunctionIdentity` join key, read as snake_case `stable_id`
     /// when the cloud emits it on importance entries. `None` until then.
     #[serde(default)]

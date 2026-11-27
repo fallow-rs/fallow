@@ -2871,6 +2871,7 @@ fn health_report_with_runtime_coverage(root: &Path) -> HealthReport {
         hot_paths: vec![RuntimeCoverageHotPath {
             cloud_context: None,
             id: "fallow:hot:cafebabe".to_string(),
+            legacy_id: None,
             stable_id: Some("fallow:fn:00000002".to_string()),
             path: root.join("src/hot.ts"),
             function: "hotPath".to_string(),

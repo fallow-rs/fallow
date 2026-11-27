@@ -971,6 +971,7 @@ fn health_runtime_coverage_renders_section() {
         hot_paths: vec![fallow_output::RuntimeCoverageHotPath {
             cloud_context: None,
             id: "fallow:hot:cafebabe".to_owned(),
+            legacy_id: None,
             stable_id: None,
             path: root.join("src/hot.ts"),
             function: "hotPath".to_owned(),

@@ -78,6 +78,7 @@ fn cloud_rows_take_local_structure_when_the_cloud_has_none() {
     snapshot.blast_radius = vec![
         crate::coverage::cloud_client::CloudRuntimeBlastRadiusEntry {
             id: "fallow:blast:cloud0001".to_owned(),
+            legacy_id: None,
             stable_id: Some(stable_id.clone()),
             file: "src/api.ts".to_owned(),
             function: "handler".to_owned(),
@@ -91,6 +92,7 @@ fn cloud_rows_take_local_structure_when_the_cloud_has_none() {
     ];
     snapshot.importance = vec![crate::coverage::cloud_client::CloudRuntimeImportanceEntry {
         id: "fallow:importance:cloud0001".to_owned(),
+        legacy_id: None,
         stable_id: Some(stable_id),
         file: "src/api.ts".to_owned(),
         function: "handler".to_owned(),
@@ -196,6 +198,7 @@ fn cloud_blast_row(
 ) -> crate::coverage::cloud_client::CloudRuntimeBlastRadiusEntry {
     crate::coverage::cloud_client::CloudRuntimeBlastRadiusEntry {
         id: "fallow:blast:cloud0001".to_owned(),
+        legacy_id: None,
         stable_id,
         file: "src/api.ts".to_owned(),
         function: "handler".to_owned(),
@@ -264,4 +267,52 @@ fn cloud_rows_without_stable_id_take_local_structure_by_position() {
         report.blast_radius[0].risk_band,
         RuntimeCoverageRiskBand::Medium
     );
+}
+
+/// The ids of one called function, as `coverage analyze --cloud` builds them
+/// without cloud blast-radius and importance rows.
+fn built_ids(start_line: u32) -> (String, Option<String>, String, String) {
+    let info = static_info("src/api.ts", "handler", start_line, start_line + 12);
+    let stable_id = info.stable_id.clone();
+    let static_index = static_index_with(vec![info]);
+    let mut function = cloud_function(
+        "src/api.ts",
+        "handler",
+        Some(start_line),
+        Some(start_line),
+        Some(start_line + 12),
+    );
+    function.tracking_state = CloudTrackingState::Called;
+    function.hit_count = Some(500);
+    function.stable_id = Some(stable_id);
+    let mut snapshot = cloud_context(1, 0);
+    snapshot.functions = vec![function];
+
+    let report = merge_cloud_snapshot(&snapshot, &static_index, 1).report;
+
+    (
+        report.hot_paths[0].id.clone(),
+        report.hot_paths[0].legacy_id.clone(),
+        report.blast_radius[0].id.clone(),
+        report.importance[0].id.clone(),
+    )
+}
+
+/// An edit above a function moves it to another line. Its hot-path,
+/// blast-radius and importance ids stay, and `legacy_id` keeps the
+/// file+line id of the protocol for the transition window
+/// (fallow-cloud#1597).
+#[test]
+fn cloud_join_ids_survive_a_line_move() {
+    let (hot_before, legacy_before, blast_before, importance_before) = built_ids(10);
+    let (hot_after, legacy_after, blast_after, importance_after) = built_ids(14);
+
+    assert_eq!(hot_after, hot_before);
+    assert_eq!(blast_after, blast_before);
+    assert_eq!(importance_after, importance_before);
+    assert_eq!(
+        legacy_before.as_deref(),
+        Some(fallow_cov_protocol::hot_path_id("src/api.ts", "handler", 10).as_str())
+    );
+    assert_ne!(legacy_after, legacy_before);
 }

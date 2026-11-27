@@ -15,6 +15,7 @@ pub(super) fn map_runtime_hot_paths(entries: Vec<ProtocolHotPath>) -> Vec<Runtim
         .map(|entry| RuntimeCoverageHotPath {
             cloud_context: None,
             id: entry.id,
+            legacy_id: None,
             stable_id: entry.identity.map(|identity| identity.stable_id),
             path: PathBuf::from(entry.file),
             function: entry.function,
@@ -44,6 +45,7 @@ pub(super) fn map_runtime_blast_radius(
         .map(|entry| fallow_output::RuntimeCoverageBlastRadiusEntry {
             cloud_context: None,
             id: entry.id,
+            legacy_id: None,
             stable_id: entry.identity.map(|identity| identity.stable_id),
             file: PathBuf::from(entry.file),
             function: entry.function,
@@ -76,6 +78,7 @@ pub(super) fn map_runtime_importance(
         .into_iter()
         .map(|entry| fallow_output::RuntimeCoverageImportanceEntry {
             id: entry.id,
+            legacy_id: None,
             stable_id: entry.identity.map(|identity| identity.stable_id),
             file: PathBuf::from(entry.file),
             function: entry.function,

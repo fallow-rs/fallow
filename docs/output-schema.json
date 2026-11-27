@@ -2913,6 +2913,13 @@
           "type": "string",
           "description": "Stable content-hash ID of the form `fallow:hot:<hash>`."
         },
+        "legacy_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The file+line ID of the recipe before the line-independent `id`, for a\ntransition window. Present only in `coverage analyze --cloud`, where\n`id` does not change when the function moves to another line. Match a\nstored ID against `id` or `legacy_id`. The field goes away after the\nwindow."
+        },
         "stable_id": {
           "type": [
             "string",
@@ -3009,6 +3016,13 @@
           "type": "string",
           "description": "Stable content-hash ID of the form `fallow:blast:<hash>`."
         },
+        "legacy_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The file+line ID of the recipe before the line-independent `id`, for a\ntransition window. Present only in `coverage analyze --cloud`, where\n`id` does not change when the function moves to another line. Match a\nstored ID against `id` or `legacy_id`. The field goes away after the\nwindow."
+        },
         "stable_id": {
           "type": [
             "string",
@@ -3073,6 +3087,13 @@
         "id": {
           "type": "string",
           "description": "Stable content-hash ID of the form `fallow:importance:<hash>`."
+        },
+        "legacy_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The file+line ID of the recipe before the line-independent `id`, for a\ntransition window. Present only in `coverage analyze --cloud`, where\n`id` does not change when the function moves to another line. Match a\nstored ID against `id` or `legacy_id`. The field goes away after the\nwindow."
         },
         "stable_id": {
           "type": [

@@ -911,6 +911,7 @@ mod tests {
             hot_paths: vec![RuntimeCoverageHotPath {
                 cloud_context: None,
                 id: "fallow:hot:deadbeef".to_owned(),
+                legacy_id: None,
                 stable_id: None,
                 path: PathBuf::from(path),
                 function: function.to_owned(),

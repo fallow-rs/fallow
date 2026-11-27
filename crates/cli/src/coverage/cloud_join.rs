@@ -8,11 +8,13 @@ use fallow_output::{
 };
 
 use super::analyze::{
-    StaticFunctionInfo, StaticIndex, cloud_finding, cloud_finding_decision, cloud_observation_days,
-    collect_called_cloud_function, match_cloud_function,
+    StaticFunctionInfo, StaticIndex, blast_radius_risk_band, cloud_finding, cloud_finding_decision,
+    cloud_observation_days, importance_reason, match_cloud_function, stable_runtime_id,
 };
 use super::cloud_client::{CloudRuntimeContext, CloudRuntimeFunction, CloudTrackingState};
+use super::cloud_context_ids::ContextIdResolver;
 use super::cloud_rows;
+use crate::health::optimization_target::optimization_target;
 
 /// Share of cloud runtime functions that must have a local AST counterpart
 /// before the join can issue `safe_to_delete`. Below it, the local graph
@@ -107,6 +109,12 @@ pub(super) fn collect_cloud_merge_entries(
         .iter()
         .map(|function| (function, match_cloud_function(function, static_index)))
         .collect();
+    // The cloud counts same-name functions over every function of the read,
+    // so the resolver counts every matched function, not only the called.
+    let mut ids = ContextIdResolver::default();
+    for local in matches.iter().filter_map(|(_, local)| local.as_ref()) {
+        ids.record(&local.path, &local.name);
+    }
     let join = CloudJoin {
         total: matches.len(),
         matched: matches.iter().filter(|(_, local)| local.is_some()).count(),
@@ -174,7 +182,98 @@ pub(super) fn collect_cloud_merge_entries(
             ));
         }
     }
+    ids.assign(&mut entries);
     entries
+}
+
+fn collect_called_cloud_function(
+    entries: &mut CloudMergeEntries,
+    function: &CloudRuntimeFunction,
+    local: &StaticFunctionInfo,
+    min_invocations_hot: u64,
+) {
+    if let Some(invocations) = function.hit_count
+        && invocations >= min_invocations_hot
+    {
+        entries
+            .hot_paths
+            .push(cloud_hot_path(local, invocations, function));
+    }
+    if let Some(invocations) = function.hit_count {
+        entries
+            .synthesized_blast_radius
+            .push(cloud_blast_radius(local, invocations, function));
+        entries
+            .synthesized_importance
+            .push(cloud_importance(local, invocations));
+    }
+}
+
+fn cloud_hot_path(
+    local: &StaticFunctionInfo,
+    invocations: u64,
+    function: &CloudRuntimeFunction,
+) -> RuntimeCoverageHotPath {
+    RuntimeCoverageHotPath {
+        id: stable_runtime_id("hot", &local.path, &local.name, local.start_line),
+        legacy_id: None,
+        stable_id: Some(local.stable_id.clone()),
+        path: local.path.clone(),
+        function: local.name.clone(),
+        line: local.start_line,
+        end_line: local.end_line,
+        invocations,
+        percentile: 100,
+        actions: Vec::new(),
+        optimization_target: local
+            .cost
+            .map(|cost| optimization_target(invocations, cost, None)),
+        cloud_context: cloud_rows::cloud_context(&function.extra),
+    }
+}
+
+fn cloud_blast_radius(
+    local: &StaticFunctionInfo,
+    invocations: u64,
+    function: &CloudRuntimeFunction,
+) -> fallow_output::RuntimeCoverageBlastRadiusEntry {
+    let weighted = invocations.saturating_mul(u64::from(local.caller_count));
+    fallow_output::RuntimeCoverageBlastRadiusEntry {
+        id: stable_runtime_id("blast", &local.path, &local.name, local.start_line),
+        legacy_id: None,
+        stable_id: Some(local.stable_id.clone()),
+        file: local.path.clone(),
+        function: local.name.clone(),
+        line: local.start_line,
+        caller_count: local.caller_count,
+        caller_count_weighted_by_traffic: weighted,
+        deploys_touched: Some(function.deployments_observed),
+        risk_band: blast_radius_risk_band(local.caller_count, weighted),
+        cloud_context: None,
+    }
+}
+
+fn cloud_importance(
+    local: &StaticFunctionInfo,
+    invocations: u64,
+) -> (fallow_output::RuntimeCoverageImportanceEntry, Option<u32>) {
+    let owner_count = local.owner_count.unwrap_or(0);
+    (
+        fallow_output::RuntimeCoverageImportanceEntry {
+            id: stable_runtime_id("importance", &local.path, &local.name, local.start_line),
+            legacy_id: None,
+            stable_id: Some(local.stable_id.clone()),
+            file: local.path.clone(),
+            function: local.name.clone(),
+            line: local.start_line,
+            invocations,
+            cyclomatic: local.cyclomatic,
+            owner_count,
+            importance_score: 0.0,
+            reason: importance_reason(invocations, local.cyclomatic, local.owner_count),
+        },
+        local.owner_count,
+    )
 }
 
 #[cfg(test)]
