@@ -8673,6 +8673,8 @@ reference: string
  *    values are filled in from a real, deterministically-selected finding, and
  *    any environment- or user-specific value that cannot be made concrete lives
  *    in `reason` instead. An agent can copy `command` and run it without edits.
+ *    A finding-derived value with a space or a shell character is in POSIX
+ *    single quotes, and a finding whose value has a line break gives no step.
  *
  * Both contracts are enforced by unit tests in
  * `crates/cli/src/report/suggestions.rs`.

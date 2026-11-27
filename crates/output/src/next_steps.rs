@@ -6,9 +6,10 @@
 
 use fallow_types::output::NextStep;
 use fallow_types::results::AnalysisResults;
+use std::borrow::Cow;
 use std::path::Path;
 
-use crate::{BaselineMode, BaselineScopeReasons, HealthReport, ScopeReason};
+use crate::{BaselineMode, BaselineScopeReasons, HealthReport, ScopeReason, shell_word};
 
 const MAX_NEXT_STEPS: usize = 3;
 const MUTATING_VERBS: [&str; 5] = ["fix", "init", "hooks", "migrate", "setup-hooks"];
@@ -370,6 +371,12 @@ pub fn build_audit_next_steps_input(
     }
 }
 
+/// The `--trace` argument `path:export` as one shell word, or `None` when the
+/// path or the name cannot stay on one command line.
+fn trace_target(path: &str, export_name: &str) -> Option<String> {
+    shell_word(&format!("{path}:{export_name}")).map(Cow::into_owned)
+}
+
 fn relative_command_path(path: &Path, root: &Path) -> String {
     path.strip_prefix(root)
         .unwrap_or(path)
@@ -393,6 +400,7 @@ pub fn trace_unused_export_input(
                 finding.export.export_name.clone(),
             )
         })
+        .filter(|(path, name)| trace_target(path, name).is_some())
         .min()?;
     Some(TraceUnusedExportInput {
         path: target.0,
@@ -407,17 +415,20 @@ fn trace_deprecated_export(results: &AnalysisResults, root: &Path) -> Option<Nex
     let target = results
         .deprecated_exports_in_use
         .iter()
-        .map(|finding| {
-            (
+        .filter_map(|finding| {
+            let path = relative_command_path(&finding.export.path, root);
+            let target = trace_target(&path, &finding.export.export_name)?;
+            Some((
                 std::cmp::Reverse(finding.export.consumer_count),
-                relative_command_path(&finding.export.path, root),
+                path,
                 finding.export.export_name.as_str(),
-            )
+                target,
+            ))
         })
         .min()?;
     Some(next_step(
         "trace-deprecated-export",
-        format!("fallow dead-code --trace {}:{}", target.1, target.2),
+        format!("fallow dead-code --trace {}", target.3),
         "list every consumer of a deprecated export before you migrate it",
     ))
 }
@@ -431,8 +442,8 @@ fn trace_unused_export_from_input(target: Option<&TraceUnusedExportInput>) -> Op
     Some(next_step(
         "trace-unused-export",
         format!(
-            "fallow dead-code --trace {}:{}",
-            target.path, target.export_name
+            "fallow dead-code --trace {}",
+            trace_target(&target.path, &target.export_name)?
         ),
         "verify an export is truly unused before deleting",
     ))
@@ -579,7 +590,7 @@ fn audit_changed(applicable: bool) -> Option<NextStep> {
 }
 
 fn scope_workspaces(workspace_ref: Option<&str>, command: &str) -> Option<NextStep> {
-    let reference = workspace_ref?;
+    let reference = shell_word(workspace_ref?)?;
     Some(next_step(
         "scope-workspaces",
         format!("fallow {command} --changed-workspaces {reference}"),
@@ -921,6 +932,75 @@ mod tests {
             scope_command("architecture").as_deref(),
             Some("fallow architecture --changed-workspaces origin/main")
         );
+    }
+
+    #[test]
+    fn trace_steps_quote_a_target_with_shell_syntax() {
+        let results = AnalysisResults {
+            deprecated_exports_in_use: vec![deprecated("/project/src/(auth)/a.ts", "old", 3)],
+            unused_exports: vec![unused_export("/project/src/a b.ts", "x; touch f #")],
+            ..AnalysisResults::default()
+        };
+
+        let steps = build_dead_code_next_steps(dead_code_input(&results));
+        let command = |id: &str| {
+            steps
+                .iter()
+                .find(|step| step.id == id)
+                .map(|step| step.command.as_str())
+        };
+
+        assert_eq!(
+            command("trace-deprecated-export"),
+            Some("fallow dead-code --trace 'src/(auth)/a.ts:old'")
+        );
+        assert_eq!(
+            command("trace-unused-export"),
+            Some("fallow dead-code --trace 'src/a b.ts:x; touch f #'")
+        );
+    }
+
+    #[test]
+    fn trace_steps_skip_a_target_with_a_line_break() {
+        let results = AnalysisResults {
+            deprecated_exports_in_use: vec![deprecated("/project/src/a.ts", "old\nx", 9)],
+            unused_exports: vec![
+                unused_export("/project/src/a.ts", "alpha\nrm"),
+                unused_export("/project/src/b.ts", "beta"),
+            ],
+            ..AnalysisResults::default()
+        };
+
+        let steps = build_dead_code_next_steps(dead_code_input(&results));
+        let commands = steps
+            .iter()
+            .map(|step| step.command.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(commands, ["fallow dead-code --trace src/b.ts:beta"]);
+    }
+
+    #[test]
+    fn scope_workspaces_step_quotes_the_reference() {
+        let results = AnalysisResults {
+            unused_exports: vec![unused_export("/project/src/a.ts", "alpha")],
+            ..AnalysisResults::default()
+        };
+        let scope_command = |workspace_ref| {
+            build_dead_code_next_steps(DeadCodeNextStepsInput {
+                workspace_ref: Some(workspace_ref),
+                ..dead_code_input(&results)
+            })
+            .into_iter()
+            .find(|step| step.id == "scope-workspaces")
+            .map(|step| step.command)
+        };
+
+        assert_eq!(
+            scope_command("origin/x;id").as_deref(),
+            Some("fallow dead-code --changed-workspaces 'origin/x;id'")
+        );
+        assert_eq!(scope_command("origin/x\nid"), None);
     }
 
     #[test]

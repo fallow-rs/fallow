@@ -89,6 +89,32 @@ pub fn display_line(line: &str) -> Cow<'_, str> {
     Cow::Owned(out)
 }
 
+/// `value` as one POSIX shell word: unchanged when every character is plain,
+/// else in single quotes with each `'` written as `'\''`.
+///
+/// Returns `None` for a value with a control character or a line separator:
+/// such a value cannot stay on one command line, so a caller skips the
+/// command.
+#[must_use]
+pub fn shell_word(value: &str) -> Option<Cow<'_, str>> {
+    if value.chars().any(needs_escape) {
+        return None;
+    }
+    let plain = !value.is_empty()
+        && value.chars().all(|ch| {
+            ch.is_ascii_alphanumeric()
+                || matches!(
+                    ch,
+                    '_' | '.' | '/' | '-' | '@' | '+' | ':' | ',' | '=' | '%'
+                )
+        });
+    if plain {
+        Some(Cow::Borrowed(value))
+    } else {
+        Some(Cow::Owned(format!("'{}'", value.replace('\'', r"'\''"))))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -125,5 +151,31 @@ mod tests {
     fn an_unterminated_escape_at_the_end_is_escaped() {
         assert_eq!(display_line("a\u{1B}[1"), r"a\u{001B}[1");
         assert_eq!(display_line("a\u{1B}"), r"a\u{001B}");
+    }
+
+    #[test]
+    fn shell_word_keeps_a_plain_value() {
+        assert_eq!(
+            shell_word("src/lib.js:unusedHelper").as_deref(),
+            Some("src/lib.js:unusedHelper")
+        );
+    }
+
+    #[test]
+    fn shell_word_quotes_shell_syntax() {
+        assert_eq!(
+            shell_word("src/(auth)/a b.ts:x; touch f #").as_deref(),
+            Some("'src/(auth)/a b.ts:x; touch f #'")
+        );
+        assert_eq!(shell_word("it's").as_deref(), Some(r"'it'\''s'"));
+        assert_eq!(shell_word("$(id)").as_deref(), Some("'$(id)'"));
+        assert_eq!(shell_word("").as_deref(), Some("''"));
+    }
+
+    #[test]
+    fn shell_word_refuses_a_line_break() {
+        assert_eq!(shell_word("a\nb"), None);
+        assert_eq!(shell_word("a\u{2028}b"), None);
+        assert_eq!(shell_word("a\tb").as_deref(), Some("'a\tb'"));
     }
 }
