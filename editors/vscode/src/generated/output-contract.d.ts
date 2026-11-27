@@ -1509,6 +1509,19 @@ export type SearchVisibility = ("found" | "renamed" | "missed")
  */
 export type SearchGapReason = ("import-alias" | "default-import" | "re-export-alias" | "namespace-use" | "dynamic-import" | "pass-through")
 /**
+ * Why the signature use of a type keeps its export.
+ */
+export type SignatureBackingReason = ({
+kind: "private_type_leak"
+} | {
+kind: "declaration_emit"
+/**
+ * The tsconfig that emits declarations, or the package.json that
+ * publishes them.
+ */
+config: string
+})
+/**
  * Wire-shape version of the [`DependencyUsage`] object.
  *
  * The object has its own version, because it is an optional part of the
@@ -14174,6 +14187,14 @@ plugin_credits?: PluginExportCredit[]
  */
 kept_by_tag?: (string | null)
 /**
+ * Why `unused-type` does not report a type that no file imports: the
+ * signature of a live export of the same file uses the type. When it is
+ * present, `is_used` stays `false`, but the export must not be removed.
+ * Absent when the export is used, or when nothing keeps it for this
+ * reason.
+ */
+kept_by_signature?: (SignatureBacking | null)
+/**
  * Human-readable reason summary.
  */
 reason: string
@@ -14281,6 +14302,16 @@ plugin: string
  * The project-relative file pattern of the rule.
  */
 pattern: string
+}
+/**
+ * Why `unused-type` keeps a type export that no file imports.
+ */
+export interface SignatureBacking {
+/**
+ * The live exports of the same file whose signatures use the type.
+ */
+backers: string[]
+reason: SignatureBackingReason
 }
 /**
  * Result of tracing a class / enum / store member: the `--trace FILE:NAME`

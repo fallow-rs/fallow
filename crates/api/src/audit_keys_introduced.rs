@@ -85,6 +85,7 @@ pub(super) fn classify_introduced_dead_code_fields(
         // Export usages and entry-point summary are metadata, not issue
         // collections; no key needed.
         export_usages: _export_usages,
+        signature_backed_types: _signature_backed_types,
         entry_point_summary: _entry_point_summary,
         // Render fan-in is a whole-project descriptive metric, not an issue
         // collection; no key needed.

@@ -125,3 +125,48 @@ fn export_reason(
         "No references found, export is unused".to_string()
     }
 }
+
+/// The star-export collision that makes `export_name` of `file_id`
+/// ambiguous, when one exists.
+pub(super) fn trace_star_export_ambiguity(
+    graph: &crate::graph::ModuleGraph,
+    root: &std::path::Path,
+    file_id: crate::discover::FileId,
+    export_name: &str,
+) -> Option<fallow_types::trace_chain::StarExportAmbiguity> {
+    let collisions: Vec<_> = graph
+        .ambiguous_star_exports()
+        .into_iter()
+        .filter(|collision| {
+            collision.name.as_ref() == export_name
+                && (collision.barrel == file_id || collision.contributors.contains(&file_id))
+        })
+        .collect();
+    if collisions.is_empty() {
+        return None;
+    }
+    let mut sources: Vec<_> = collisions
+        .iter()
+        .flat_map(|collision| collision.contributors.iter())
+        .filter_map(|contributor| graph.module(*contributor))
+        .map(|module| super::trace_impl::relative_module_path(&module.path, root))
+        .collect();
+    sources.sort();
+    sources.dedup();
+    let mut namespaces: Vec<_> = collisions
+        .iter()
+        .map(|collision| match collision.namespace {
+            ExportNamespace::Type => fallow_types::semantic::SemanticNamespace::Type,
+            ExportNamespace::Value => fallow_types::semantic::SemanticNamespace::Value,
+        })
+        .collect();
+    namespaces.sort_unstable_by_key(|namespace| match namespace {
+        fallow_types::semantic::SemanticNamespace::Type => 0,
+        fallow_types::semantic::SemanticNamespace::Value => 1,
+    });
+    namespaces.dedup();
+    Some(fallow_types::trace_chain::StarExportAmbiguity {
+        sources,
+        namespaces,
+    })
+}

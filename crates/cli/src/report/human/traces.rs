@@ -943,6 +943,7 @@ mod tests {
             re_export_chains: Vec::new(),
             plugin_credits: Vec::new(),
             kept_by_tag: None,
+            kept_by_signature: None,
             reason: "Used by 1 file(s)".to_string(),
             semantic,
         }
@@ -1096,6 +1097,7 @@ mod tests {
             }],
             plugin_credits: Vec::new(),
             kept_by_tag: None,
+            kept_by_signature: None,
             reason: "referenced from reachable code".to_string(),
             semantic: None,
         };
@@ -1148,6 +1150,7 @@ mod tests {
             re_export_chains: Vec::new(),
             plugin_credits: Vec::new(),
             kept_by_tag: None,
+            kept_by_signature: None,
             reason: "referenced from reachable code".to_string(),
             semantic: None,
         };

@@ -519,6 +519,7 @@ fn visit_families<V: FamilyVisitor>(results: &mut AnalysisResults, visitor: &mut
         active_suppressions: _,
         feature_flags: _,
         export_usages: _,
+        signature_backed_types: _,
         entry_point_summary: _,
         render_fan_in: _,
         react_component_intel: _,

@@ -59,6 +59,21 @@ fn file_fingerprint(path: &std::path::Path) -> SourceFingerprint {
     })
 }
 
+/// The content hash of each parsed file, by path.
+pub fn collect_file_hashes(
+    modules: &[extract::ModuleInfo],
+    files: &[discover::DiscoveredFile],
+) -> rustc_hash::FxHashMap<std::path::PathBuf, u64> {
+    modules
+        .iter()
+        .filter_map(|module| {
+            files
+                .get(module.file_id.0 as usize)
+                .map(|file| (file.path.clone(), module.content_hash))
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use fallow_types::discover::{DiscoveredFile, FileId};

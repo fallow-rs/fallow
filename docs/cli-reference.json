@@ -19498,7 +19498,7 @@
           },
           {
             "path": "src/index.ts",
-            "code": "import { renderButton } from \"./button\";\n\nconsole.log(renderButton({ label: \"Pay\" }));\n"
+            "code": "import { renderButton, type ButtonProps } from \"./button\";\n\nconst props: ButtonProps = { label: \"Pay\" };\nconsole.log(renderButton(props));\n"
           }
         ],
         "example_base_files": [],

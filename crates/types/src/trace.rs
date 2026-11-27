@@ -70,6 +70,13 @@ pub struct ExportTrace {
     /// when the export is used, or when no kept tag is on it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kept_by_tag: Option<String>,
+    /// Why `unused-type` does not report a type that no file imports: the
+    /// signature of a live export of the same file uses the type. When it is
+    /// present, `is_used` stays `false`, but the export must not be removed.
+    /// Absent when the export is used, or when nothing keeps it for this
+    /// reason.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kept_by_signature: Option<SignatureBacking>,
     /// Human-readable reason summary.
     pub reason: String,
     /// Exact checker-backed references when type-aware tracing is enabled.
@@ -301,6 +308,9 @@ pub struct TraceProvenance {
     /// The packages that start the peer-dependency closure in addition to the
     /// imported packages.
     peer_seeds: PeerClosureSeeds,
+    /// Root-relative file path, type export name, and why `unused-type` does
+    /// not report the type although no file imports it.
+    signature_backing: FxHashMap<PathBuf, FxHashMap<String, SignatureBacking>>,
 }
 
 /// The packages that start a peer-dependency closure although no file
@@ -345,6 +355,43 @@ impl PeerClosureSeeds {
 }
 
 impl TraceProvenance {
+    /// Record the type exports that `unused-type` keeps because a same-file
+    /// signature uses them. `root` makes each path root-relative.
+    pub fn push_signature_backed_types(
+        &mut self,
+        root: &Path,
+        types: impl IntoIterator<Item = SignatureBackedType>,
+    ) {
+        let relative = |path: &Path| path.strip_prefix(root).unwrap_or(path).to_path_buf();
+        for kept in types {
+            let reason = match kept.backing.reason {
+                SignatureBackingReason::DeclarationEmit { config } => {
+                    SignatureBackingReason::DeclarationEmit {
+                        config: relative(&config),
+                    }
+                }
+                reason @ SignatureBackingReason::PrivateTypeLeak => reason,
+            };
+            self.signature_backing
+                .entry(relative(&kept.path))
+                .or_default()
+                .insert(
+                    kept.export_name,
+                    SignatureBacking {
+                        backers: kept.backing.backers,
+                        reason,
+                    },
+                );
+        }
+    }
+
+    /// Why `unused-type` keeps the type export `name` of the root-relative
+    /// `file`, when a same-file signature keeps it.
+    #[must_use]
+    pub fn signature_backing(&self, file: &Path, name: &str) -> Option<&SignatureBacking> {
+        self.signature_backing.get(file)?.get(name)
+    }
+
     /// Record that a framework plugin reads the export `name` of the
     /// root-relative `file` as configuration.
     pub fn push_config_export(&mut self, file: PathBuf, name: String) {
@@ -564,6 +611,80 @@ pub struct TracedExport {
     /// no plugin credits the export.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub plugin_credits: Vec<PluginExportCredit>,
+}
+
+/// Why `unused-type` keeps a type export that no file imports.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct SignatureBacking {
+    /// The live exports of the same file whose signatures use the type.
+    pub backers: Vec<String>,
+    /// Why a signature use keeps the export.
+    pub reason: SignatureBackingReason,
+}
+
+/// Why the signature use of a type keeps its export.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum SignatureBackingReason {
+    /// The `private-type-leak` rule is on for the file. Without the export,
+    /// the rule reports the signature.
+    PrivateTypeLeak,
+    /// The project emits TypeScript declarations. Without the export, the
+    /// declaration of another module that holds the value can fail to name
+    /// the type (TS4023).
+    DeclarationEmit {
+        /// The tsconfig that emits declarations, or the package.json that
+        /// publishes them.
+        #[serde(serialize_with = "serde_path::serialize")]
+        #[cfg_attr(feature = "schema", schemars(with = "String"))]
+        config: PathBuf,
+    },
+}
+
+/// A type export that `unused-type` keeps because a same-file signature uses
+/// it. The analysis records it so that a trace can give the same reason.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SignatureBackedType {
+    /// The file of the type export.
+    pub path: PathBuf,
+    /// The name of the type export.
+    pub export_name: String,
+    /// The backing exports and the reason.
+    pub backing: SignatureBacking,
+}
+
+impl ExportTrace {
+    /// Add the reason that `provenance` records when `unused-type` keeps this
+    /// export because a same-file signature uses it.
+    pub fn apply_signature_backing(&mut self, provenance: &TraceProvenance) {
+        if self.is_used {
+            return;
+        }
+        let Some(backing) = provenance.signature_backing(&self.file, &self.export_name) else {
+            return;
+        };
+        let backers = backing
+            .backers
+            .iter()
+            .map(|backer| format!("`{backer}`"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let why = match &backing.reason {
+            SignatureBackingReason::PrivateTypeLeak => {
+                "the private-type-leak rule is on for this file".to_string()
+            }
+            SignatureBackingReason::DeclarationEmit { config } => format!(
+                "{} emits declarations",
+                config.display().to_string().replace('\\', "/")
+            ),
+        };
+        self.reason = format!(
+            "No references found, but the signature of exported {backers} uses the type and {why}, so unused-type keeps the export"
+        );
+        self.kept_by_signature = Some(backing.clone());
+    }
 }
 
 /// A framework plugin rule that marks an export as used.
@@ -1048,6 +1169,7 @@ mod tests {
             re_export_chains: Vec::new(),
             plugin_credits: Vec::new(),
             kept_by_tag: None,
+            kept_by_signature: None,
             reason: "No references".to_string(),
             semantic: None,
         }

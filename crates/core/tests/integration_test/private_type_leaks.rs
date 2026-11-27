@@ -1,4 +1,4 @@
-use super::common::{create_config, fixture_path};
+use super::common::{create_config, create_config_with_overrides, fixture_path};
 
 fn create_private_type_leak_config(root: std::path::PathBuf) -> fallow_config::ResolvedConfig {
     let mut config = create_config(root);
@@ -69,6 +69,69 @@ fn exported_signature_backing_types_are_not_unused_type_exports() {
     assert!(
         !unused_types.contains(&"PublicBacking"),
         "PublicBacking backs public signatures and should not become an unused type export: {unused_types:?}"
+    );
+}
+
+fn unused_type_names(config: &fallow_config::ResolvedConfig) -> Vec<String> {
+    let results = fallow_core::analyze(config).expect("analysis should succeed");
+    let mut names: Vec<String> = results
+        .unused_types
+        .iter()
+        .map(|export| export.export.export_name.clone())
+        .collect();
+    names.sort();
+    names
+}
+
+/// Issue #5280: with `private-type-leaks` off, nothing asks for a type that
+/// backs an exported signature to stay exported, so an export that no other
+/// file imports is an unused type.
+#[test]
+fn signature_backing_types_are_unused_types_when_private_type_leaks_is_off() {
+    let config = create_config(fixture_path("signature-backing-types"));
+
+    assert_eq!(
+        unused_type_names(&config),
+        [
+            "NeverUsed",
+            "UsedAsGenericArg",
+            "UsedInBody",
+            "UsedInSignature"
+        ]
+    );
+}
+
+/// With `private-type-leaks` on, removing the `export` of a backing type
+/// creates a private-type-leak finding, so the backing type is not reported.
+#[test]
+fn signature_backing_types_are_kept_when_private_type_leaks_is_on() {
+    let config = create_private_type_leak_config(fixture_path("signature-backing-types"));
+
+    assert_eq!(unused_type_names(&config), ["NeverUsed", "UsedInBody"]);
+}
+
+#[test]
+fn signature_backing_types_follow_the_per_file_private_type_leak_rule() {
+    let mut config = create_config_with_overrides(
+        fixture_path("signature-backing-types"),
+        vec![(
+            "src/lib.ts",
+            fallow_config::PartialRulesConfig {
+                private_type_leaks: Some(fallow_config::Severity::Off),
+                ..Default::default()
+            },
+        )],
+    );
+    config.rules.private_type_leaks = fallow_config::Severity::Warn;
+
+    assert_eq!(
+        unused_type_names(&config),
+        [
+            "NeverUsed",
+            "UsedAsGenericArg",
+            "UsedInBody",
+            "UsedInSignature"
+        ]
     );
 }
 
@@ -192,6 +255,8 @@ fn wrapper_call_and_type_assertion_initializers_back_exported_types() {
     );
 }
 
+/// The fixture emits declarations, which is a reason to keep a type in the
+/// inferred return of an exported factory.
 #[test]
 fn inferred_factory_return_types_are_not_unused_type_exports() {
     let root = fixture_path("inferred-factory-return-types");

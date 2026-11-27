@@ -57,6 +57,7 @@ pub fn run_trace_export(
             &options.export_name,
         ) {
             export.apply_plugin_credits(&artifacts.trace_provenance);
+            export.apply_signature_backing(&artifacts.trace_provenance);
             TraceExportTargetOutput::Export(export)
         } else if let Some(member) = fallow_engine::trace::trace_class_member(
             &artifacts.graph,

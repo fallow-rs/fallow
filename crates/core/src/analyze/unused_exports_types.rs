@@ -4,6 +4,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use fallow_config::ResolvedConfig;
 use fallow_types::extract::{ExportName, ImportedName, ModuleInfo};
+use fallow_types::trace::{SignatureBackedType, SignatureBacking, SignatureBackingReason};
 
 use crate::discover::FileId;
 use crate::graph::{ExportNamespace, ModuleGraph};
@@ -219,7 +220,10 @@ pub(super) fn drop_types_paired_with_schemas(unused_types: &mut Vec<UnusedExport
 }
 
 /// Remove exported type findings when the type is only exported to support
-/// another public signature in the same module.
+/// another public signature in the same module, and return the removed types.
+///
+/// `keep_reason` says why a signature use keeps the type exports of a file.
+/// A file without a reason keeps no type this way, so its findings stay.
 ///
 /// A backing export counts as live when it is not in `unused_values` or
 /// `unused_types`. A type stays hidden only while at least one of its backing
@@ -230,9 +234,10 @@ pub fn suppress_signature_backing_types(
     unused_values: &[UnusedExport],
     graph: &ModuleGraph,
     modules: &[ModuleInfo],
-) {
+    keep_reason: &mut dyn FnMut(&std::path::Path) -> Option<SignatureBackingReason>,
+) -> Vec<SignatureBackedType> {
     if unused_types.is_empty() {
-        return;
+        return Vec::new();
     }
 
     let path_by_id: FxHashMap<FileId, &std::path::Path> = graph
@@ -240,11 +245,22 @@ pub fn suppress_signature_backing_types(
         .iter()
         .map(|module| (module.file_id, module.path.as_path()))
         .collect();
+    let candidate_paths: FxHashSet<&std::path::Path> = unused_types
+        .iter()
+        .map(|unused| unused.path.as_path())
+        .collect();
+    let mut reasons: FxHashMap<&std::path::Path, SignatureBackingReason> = FxHashMap::default();
     let mut backers_by_type: FxHashMap<(&std::path::Path, &str), Vec<&str>> = FxHashMap::default();
     for (module, path) in modules
         .iter()
+        .filter(|module| !module.public_signature_type_references.is_empty())
         .filter_map(|module| path_by_id.get(&module.file_id).map(|path| (module, *path)))
+        .filter(|(_, path)| candidate_paths.contains(path))
     {
+        let Some(reason) = keep_reason(path) else {
+            continue;
+        };
+        reasons.insert(path, reason);
         for reference in &module.public_signature_type_references {
             backers_by_type
                 .entry((path, reference.type_name.as_str()))
@@ -286,6 +302,30 @@ pub fn suppress_signature_backing_types(
         }
     }
 
+    let mut kept = Vec::new();
+    for (index, key) in keys.iter().enumerate() {
+        if !hidden[index] {
+            continue;
+        }
+        let mut backers: Vec<String> = Vec::new();
+        for backer in backers_by_type.get(key).into_iter().flatten() {
+            if !dead.contains(&(key.0, *backer)) && !backers.iter().any(|known| known == backer) {
+                backers.push((*backer).to_string());
+            }
+        }
+        if let Some(reason) = reasons.get(key.0) {
+            kept.push(SignatureBackedType {
+                path: key.0.to_path_buf(),
+                export_name: key.1.to_string(),
+                backing: SignatureBacking {
+                    backers,
+                    reason: reason.clone(),
+                },
+            });
+        }
+    }
+
     let mut hidden = hidden.into_iter();
     unused_types.retain(|_| !hidden.next().unwrap_or(false));
+    kept
 }

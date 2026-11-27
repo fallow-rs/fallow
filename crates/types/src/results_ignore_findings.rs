@@ -92,6 +92,7 @@ pub(super) fn classify_ignore_findings_fields(results: &AnalysisResults) {
         active_suppressions: _active_suppressions,
         feature_flags: _feature_flags,
         export_usages: _export_usages,
+        signature_backed_types: _signature_backed_types,
         entry_point_summary: _entry_point_summary,
         render_fan_in: _render_fan_in,
         react_component_intel: _react_component_intel,

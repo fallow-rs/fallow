@@ -165,6 +165,7 @@ pub fn retain_in_scope(results: &mut AnalysisResults, scope: &impl ResultScope) 
         security_unresolved_callee_sites: _,
         security_unresolved_callee_diagnostics,
         export_usages: _,
+        signature_backed_types: _,
         entry_point_summary: _,
         render_fan_in: _,
         react_component_intel: _,

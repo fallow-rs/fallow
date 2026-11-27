@@ -1313,9 +1313,14 @@ fn run_engine_owned_dead_code_pipeline(
             graph_cache_rejection,
         });
     let script_used_packages = prelude.script_used_packages();
-    let trace_provenance = prelude.trace_provenance(&modules, retention.traces(), &entry_points);
+    let mut trace_provenance =
+        prelude.trace_provenance(&modules, retention.traces(), &entry_points);
+    trace_provenance.push_signature_backed_types(
+        &config.root,
+        std::mem::take(&mut detector.results.signature_backed_types),
+    );
     prelude.finish();
-    let file_hashes = collect_file_hashes(&modules, discovery.files());
+    let file_hashes = crate::session_graph::collect_file_hashes(&modules, discovery.files());
 
     Ok(SharedDeadCodeAnalysisArtifacts {
         results: detector.results,
@@ -1327,20 +1332,6 @@ fn run_engine_owned_dead_code_pipeline(
         trace_provenance,
         file_hashes,
     })
-}
-
-fn collect_file_hashes(
-    modules: &[ModuleInfo],
-    files: &[DiscoveredFile],
-) -> FxHashMap<PathBuf, u64> {
-    modules
-        .iter()
-        .filter_map(|module| {
-            files
-                .get(module.file_id.0 as usize)
-                .map(|file| (file.path.clone(), module.content_hash))
-        })
-        .collect()
 }
 
 pub(crate) fn analyze_dead_code_with_parse_result_from_config(
