@@ -22,6 +22,7 @@ mod decision_surface;
 mod duplication;
 mod feature_flags;
 mod mutation;
+mod mutation_cache;
 mod mutation_record;
 mod mutation_replay;
 mod mutation_runner_options;

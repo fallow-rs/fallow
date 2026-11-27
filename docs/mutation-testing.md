@@ -1919,7 +1919,9 @@ that a retry confirmed. A budgeted run keeps time for these retries (see the
 retry section), so a repeat run with the same `--time-budget` continues
 after the stored results. The file is `<cache dir>/mutation/results.json`. A
 later run uses a stored result when the key is equal, and does not run that
-mutant. The dry run always runs, because it gives the covering tests.
+mutant. The covering tests of a mutant come from the dry run, so the
+dry-run cache (see "Dry-run cache") lets a repeat run skip the dry run of
+each unchanged test file.
 
 The key hashes these parts:
 
@@ -1977,9 +1979,11 @@ report repeats it in `cache.not_keyed`.
   key covers that test.
 - A reused result has `cached: true` in `mutants[]`. It counts in the score
   and the coverage the same as a result of this run.
-- `cache` in the report gives `hits`, `stored` and `not_keyed`. It is absent
-  with `--no-cache` and when no companion started.
-- The human output prints one `Cache:` line when a result came from the cache.
+- `cache` in the report gives `hits`, `stored`, `dry_run_hits`,
+  `dry_run_misses`, `dry_run_stored` and `not_keyed`. It is absent with `--no-cache` and when
+  no companion started.
+- The human output prints one `Cache:` line when a result or the dry run of
+  a test file came from the cache.
 - The global `--no-cache` flag turns the result cache off. The run then reads
   and writes no entry.
 - The file keeps one entry for each mutant id, and at most 20000 entries. It
@@ -1990,6 +1994,72 @@ report repeats it in `cache.not_keyed`.
 - The scheduler talks to the cache through the `ResultLookup` trait in
   `crates/api/src/mutation/scheduler`. The key and the file live in
   `crates/api/src/mutation/result_cache`.
+
+## Dry-run cache
+
+The dry run gives the tests of each test file, the mutants that each test
+hits, and the setup time of each file. A run stores these facts for each
+test file in `<cache dir>/mutation/dry-runs.json`. A later run uses the
+stored facts of a file when its key is equal, and dry-runs only the other
+files. When each file has stored facts, no dry run starts. A repeat run with
+no change and each result in the result cache then runs no test.
+
+The key of a test file hashes these parts:
+
+- the format version of the cache file;
+- the parts of the result cache key that a test file gives: the Fallow
+  version, the runner name, the lockfile, the runner config and setup files,
+  the selected Vitest projects, the content of the test file and of each file
+  that it reaches through static imports, and the `bunfig.toml` files between
+  the root and the test file;
+- the runner version, the runtime version and the runner capabilities;
+- the instrumented code of each source file that the test file reaches, so a
+  change of a mutated file or of the operators changes the key;
+- the selected operators;
+- the project root;
+- the `init` options of the runner (the runner, the selected config file, the
+  environment and the Node flags), without the test file selection, which
+  changes with the scope.
+
+The runner reports two facts only for all files of one dry run together,
+not for each file: the mutants that ran when a module loaded (static hits),
+and the instrumented files that loaded. A stored file keeps the part of
+these facts that belongs to the source files that it reaches.
+
+The test files of one dry run that reach the same source file are a group.
+When the facts of one file of a group are not valid, each file of the group
+dry-runs again. Another file of the group can be the file that gave the
+fact, for example when a test file imports only types from the module. So
+this rule keeps the result of a warm run equal to the result of a
+`--no-cache` run.
+
+- The store keeps only a file with no failed test and no error. A file with a
+  baseline failure dry-runs again in each run.
+- Facts that name a mutant id outside the plan are not used.
+- A stored test keeps its test index entry, and a stored file keeps the
+  worker mode that its dry run proved, with each file of that check. A
+  runner with the `adopt` capability then gives a new companion the stored
+  entries, so a warm run starts its mutant runs with no dry run. The run uses
+  a stored worker mode only when each file of the mode has valid facts. A
+  runner without the capability dry-runs the test files of the jobs in each
+  new companion, also for a file with stored facts.
+- The test index entries hold absolute module paths, so the project root is
+  a key part.
+- The limits of the result cache apply: dynamic imports that the module
+  graph does not resolve, and files that a test reads, are not in the key.
+- `cache.dry_run_hits` counts the test files with stored facts,
+  `cache.dry_run_misses` the files that the first dry run ran, and
+  `cache.dry_run_stored` the files that the run stored.
+  `timings.dry_run_ms` is the time of that first dry run, so it is near zero
+  when each file had stored facts.
+- The human `Cache:` line gives the count, for example `the dry run of 3 of
+  10 test files came from an earlier run`.
+- `--no-cache` turns the dry-run cache off. The file keeps one entry for each
+  test file, and at most 20000 entries. A file that does not parse, or that
+  has another format version, gives an empty cache.
+- The scheduler talks to the store through the `DryRunLookup` trait in
+  `crates/api/src/mutation/scheduler/dry_store.rs`. The key and the file live
+  in `crates/api/src/mutation/dry_run_cache`.
 
 ## Outcome journal and resume
 

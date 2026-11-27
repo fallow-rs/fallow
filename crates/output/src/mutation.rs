@@ -614,6 +614,16 @@ pub struct MutationCacheOutput {
     pub hits: usize,
     /// The results that this run added to the cache.
     pub stored: usize,
+    /// The test files whose dry-run facts came from the cache. The first dry
+    /// run of the run did not run them. The key parts are in the "Dry-run
+    /// cache" section of the mutation testing docs.
+    pub dry_run_hits: usize,
+    /// The test files with no valid dry-run facts in the cache. The first
+    /// dry run of the run ran them.
+    pub dry_run_misses: usize,
+    /// The test files whose dry-run facts this run added to the cache. A
+    /// file with a failed test or an error is not stored.
+    pub dry_run_stored: usize,
     /// The test inputs that the cache key does not cover: modules that a
     /// test loads through a dynamic import that the module graph does not
     /// resolve (`dynamic-imports`), and files that a test reads
@@ -842,7 +852,8 @@ pub struct MutationTimings {
     pub plan_ms: u64,
     /// The companion install, the run directory, and the first `init`.
     pub setup_ms: u64,
-    /// The dry run.
+    /// The first dry run: the test files without dry-run facts in the
+    /// cache. Near zero when each file had stored facts.
     pub dry_run_ms: u64,
     /// The mutant runs.
     pub mutants_ms: u64,

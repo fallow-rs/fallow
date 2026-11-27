@@ -34,6 +34,9 @@
   "cache": {
     "hits": 0,
     "stored": 2,
+    "dry_run_hits": 0,
+    "dry_run_misses": 2,
+    "dry_run_stored": 1,
     "not_keyed": [
       "dynamic-imports",
       "file-reads"

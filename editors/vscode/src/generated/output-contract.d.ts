@@ -22635,6 +22635,22 @@ hits: number
  */
 stored: number
 /**
+ * The test files whose dry-run facts came from the cache. The first dry
+ * run of the run did not run them. The key parts are in the "Dry-run
+ * cache" section of the mutation testing docs.
+ */
+dry_run_hits: number
+/**
+ * The test files with no valid dry-run facts in the cache. The first
+ * dry run of the run ran them.
+ */
+dry_run_misses: number
+/**
+ * The test files whose dry-run facts this run added to the cache. A
+ * file with a failed test or an error is not stored.
+ */
+dry_run_stored: number
+/**
  * The test inputs that the cache key does not cover: modules that a
  * test loads through a dynamic import that the module graph does not
  * resolve (`dynamic-imports`), and files that a test reads
@@ -23118,7 +23134,8 @@ plan_ms: number
  */
 setup_ms: number
 /**
- * The dry run.
+ * The first dry run: the test files without dry-run facts in the
+ * cache. Near zero when each file had stored facts.
  */
 dry_run_ms: number
 /**

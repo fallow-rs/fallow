@@ -401,6 +401,28 @@ impl ResultCache {
         digest
     }
 
+    /// The key parts of `test_file` that a mutant key shares: the parts of
+    /// the run and the digest of the file and of each file that it reaches.
+    /// The dry-run cache keys on it too.
+    #[must_use]
+    pub fn test_file_part(&self, test_file: &str) -> String {
+        let mut hasher = Sha256::new();
+        feed(&mut hasher, &self.shared);
+        feed(&mut hasher, &self.test_digest(test_file));
+        hex(&hasher.finalize())
+    }
+
+    /// The files that `test_file` reaches through static imports, sorted.
+    pub fn reach_of(&self, test_file: &str) -> impl Iterator<Item = &str> {
+        self.files
+            .test_file_reach
+            .get(test_file)
+            .into_iter()
+            .flatten()
+            .filter_map(|&index| self.files.reach_files.get(index as usize))
+            .map(String::as_str)
+    }
+
     /// The content hash of the root-relative `path`, read one time for each
     /// run.
     fn hash_of(&self, path: &str) -> String {

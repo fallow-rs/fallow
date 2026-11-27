@@ -58,6 +58,27 @@ pub(super) fn share_files(files: &[String], count: usize) -> Vec<Vec<String>> {
     shares
 }
 
+/// The test files of one dry-run share, with the facts that the runner gives
+/// only for the whole share.
+pub(super) struct ShareFacts {
+    pub(super) files: Vec<String>,
+    pub(super) static_hits: Vec<String>,
+    pub(super) unloaded_paths: Vec<String>,
+    /// The wall time of the dry run of the share.
+    pub(super) took: Duration,
+}
+
+impl ShareFacts {
+    fn of(files: &[String], dry: &DryRunResult, took: Duration) -> Self {
+        Self {
+            files: files.to_vec(),
+            static_hits: dry.static_hits.clone(),
+            unloaded_paths: dry.unloaded_paths.clone(),
+            took,
+        }
+    }
+}
+
 /// The merged dry run of each share and the companion of each share.
 pub(super) struct DryPhase {
     pub(super) result: DryRunResult,
@@ -69,6 +90,9 @@ pub(super) struct DryPhase {
     pub(super) serial: Duration,
     /// The worker mode that the dry run of each share proved.
     pub(super) modes: Vec<WorkerMode>,
+    /// The facts of each share. A recheck of failed files gives one share
+    /// of each file with the merged facts.
+    pub(super) shares: Vec<ShareFacts>,
 }
 
 /// Takes the worker mode of each dry run that proved one for a file.
@@ -104,12 +128,14 @@ fn run_share(
 
 /// Dry-runs `dry_files` on `primary` and on up to `concurrency - 1` more
 /// companions. A fault of any share stops the run, as a fault of the first
-/// companion does.
-fn dry_phase(
+/// companion does. With `partial`, `dry_files` are not each test file of the
+/// run, so a single share records its files as its loaded files.
+pub(super) fn dry_phase(
     spawner: &dyn CompanionSpawner,
     primary: Box<dyn CompanionLink>,
     dry_files: &[String],
     config: &ScheduleConfig,
+    partial: bool,
 ) -> Result<DryPhase, ScheduleError> {
     let shares = share_files(dry_files, config.concurrency);
     if shares.len() == 1 {
@@ -117,17 +143,23 @@ fn dry_phase(
         let mut results = [result];
         let modes = take_modes(&mut results);
         let [result] = results;
+        let mut loaded = partial.then(|| dry_files.to_vec());
+        if let Some(loaded) = &mut loaded {
+            loaded.sort_unstable();
+        }
         let links = vec![WarmLink {
             link,
             known: FxHashSet::default(),
-            loaded: None,
+            loaded,
             unproven: FxHashMap::default(),
         }];
+        let shares = vec![ShareFacts::of(dry_files, &result, serial)];
         return Ok(DryPhase {
             result,
             links,
             serial,
             modes,
+            shares,
         });
     }
     let mut primary = Some(primary);
@@ -153,11 +185,13 @@ fn dry_phase(
     });
     let mut links = Vec::new();
     let mut results = Vec::new();
+    let mut facts = Vec::new();
     let mut serial = Duration::ZERO;
     let mut error = None;
     for (run, files) in runs.into_iter().zip(shares) {
         match run {
             Ok((link, dry, took)) => {
+                facts.push(ShareFacts::of(&files, &dry, took));
                 links.push(WarmLink {
                     link,
                     known: FxHashSet::default(),
@@ -176,34 +210,26 @@ fn dry_phase(
         shutdown_all(links);
         return Err(error);
     }
-    match recheck_failures(spawner, config, dry_files, &mut results) {
-        Ok(took) => serial += took,
+    let rechecked = match recheck_failures(spawner, config, dry_files, &mut results) {
+        Ok(took) => took,
         Err(error) => {
             shutdown_all(links);
             return Err(error);
         }
-    }
+    };
     let modes = take_modes(&mut results);
+    let result = merge_dry_runs(results, dry_files);
+    if let Some(took) = rechecked {
+        serial += took;
+        facts = vec![ShareFacts::of(dry_files, &result, serial)];
+    }
     Ok(DryPhase {
-        result: merge_dry_runs(results, dry_files),
+        result,
         links,
         serial,
         modes,
+        shares: facts,
     })
-}
-
-/// [`dry_phase()`], with its wall time in `timings.dry_run`.
-pub(super) fn timed_dry_phase(
-    spawner: &dyn CompanionSpawner,
-    primary: Box<dyn CompanionLink>,
-    dry_files: &[String],
-    config: &ScheduleConfig,
-    timings: &mut ScheduleTimings,
-) -> Result<DryPhase, ScheduleError> {
-    let started = config.clock.now();
-    let phase = dry_phase(spawner, primary, dry_files, config)?;
-    timings.dry_run = config.clock.now().saturating_duration_since(started);
-    Ok(phase)
 }
 
 /// Runs the failures of the shares again in a new companion, after each
@@ -211,13 +237,13 @@ pub(super) fn timed_dry_phase(
 /// fail on shared outside state, for example a port or a fixed file, that a
 /// serial dry run never shows. A test file with a failed test or an error is
 /// dry-run again. An error outside each test file runs each file again. Gives
-/// the time of the new dry run.
+/// the time of the new dry run, or `None` when no file failed.
 fn recheck_failures(
     spawner: &dyn CompanionSpawner,
     config: &ScheduleConfig,
     dry_files: &[String],
     results: &mut Vec<DryRunResult>,
-) -> Result<Duration, ScheduleError> {
+) -> Result<Option<Duration>, ScheduleError> {
     let global = results
         .iter()
         .flat_map(|dry| &dry.unhandled_errors)
@@ -242,7 +268,7 @@ fn recheck_failures(
             .collect()
     };
     if failed.is_empty() {
-        return Ok(Duration::ZERO);
+        return Ok(None);
     }
     let files: Vec<String> = dry_files
         .iter()
@@ -255,7 +281,7 @@ fn recheck_failures(
         without_files(dry, &failed, global);
     }
     results.push(recheck);
-    Ok(took)
+    Ok(Some(took))
 }
 
 /// Removes the facts of `files` from a dry run. With `all`, it also removes
@@ -565,4 +591,37 @@ pub(super) fn checked_jobs(
     mark_unreached_pending(plan, facts, context.dry_files, outcome);
     let files = phase_files(&jobs);
     Ok((jobs, files, links))
+}
+
+/// The dry-run facts and the `--kill-matrix-for` test ids of the dry run,
+/// and the companions of the dry run. A failure shuts down each companion.
+pub(super) fn read_dry_phase(
+    plan: &SchedulePlan,
+    config: &ScheduleConfig,
+    (caps, files): (Capabilities, TargetFiles<'_>),
+    dry: &DryRunResult,
+    outcome: &mut ScheduleOutcome,
+    links: Vec<WarmLink>,
+) -> Result<(DryRunFacts, TargetIds, Vec<WarmLink>), ScheduleError> {
+    let read = read_dry_run(plan, caps, dry).and_then(|facts| {
+        record_dry_run(outcome, dry);
+        config_targets(config, dry, caps, files, outcome).map(|ids| (facts, ids))
+    });
+    match read {
+        Ok((facts, ids)) => Ok((facts, ids, links)),
+        Err(error) => {
+            shutdown_all(links);
+            Err(error)
+        }
+    }
+}
+
+/// Gives `no_coverage` to each planned and pending mutant of a run with no
+/// dry run.
+pub(super) fn no_coverage_for_all(plan: &SchedulePlan, outcome: &mut ScheduleOutcome) {
+    for mutant in plan.mutants.iter().chain(&plan.pending) {
+        outcome
+            .results
+            .insert(mutant.id.clone(), MutantOutcome::no_coverage());
+    }
 }

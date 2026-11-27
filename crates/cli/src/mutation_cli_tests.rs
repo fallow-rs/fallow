@@ -1330,6 +1330,9 @@ fn cached_results_get_one_line_with_the_opt_out() {
     cached.cache = Some(fallow_output::MutationCacheOutput {
         hits: 0,
         stored: 2,
+        dry_run_hits: 0,
+        dry_run_misses: 0,
+        dry_run_stored: 1,
         not_keyed: vec!["dynamic-imports".to_owned(), "file-reads".to_owned()],
     });
     let text = run_text(&cached, &OPTIONS);
@@ -1337,12 +1340,45 @@ fn cached_results_get_one_line_with_the_opt_out() {
     cached.cache = Some(fallow_output::MutationCacheOutput {
         hits: 2,
         stored: 0,
+        dry_run_hits: 0,
+        dry_run_misses: 0,
+        dry_run_stored: 0,
         not_keyed: vec!["dynamic-imports".to_owned(), "file-reads".to_owned()],
     });
     let text = run_text(&cached, &OPTIONS);
     assert!(
         text.contains(
             "Cache: 2 results came from an earlier run. Pass --no-cache to run each mutant.\n"
+        ),
+        "{text}"
+    );
+    cached.cache = Some(fallow_output::MutationCacheOutput {
+        hits: 2,
+        stored: 0,
+        dry_run_hits: 3,
+        dry_run_misses: 7,
+        dry_run_stored: 0,
+        not_keyed: vec!["dynamic-imports".to_owned(), "file-reads".to_owned()],
+    });
+    let text = run_text(&cached, &OPTIONS);
+    assert!(
+        text.contains(
+            "Cache: 2 results and the dry run of 3 of 10 test files came from an earlier run. Pass --no-cache to run each mutant and dry-run each test file.\n"
+        ),
+        "{text}"
+    );
+    cached.cache = Some(fallow_output::MutationCacheOutput {
+        hits: 0,
+        stored: 1,
+        dry_run_hits: 1,
+        dry_run_misses: 0,
+        dry_run_stored: 0,
+        not_keyed: vec!["dynamic-imports".to_owned(), "file-reads".to_owned()],
+    });
+    let text = run_text(&cached, &OPTIONS);
+    assert!(
+        text.contains(
+            "Cache: the dry run of 1 of 1 test file came from an earlier run. Pass --no-cache to run each mutant and dry-run each test file.\n"
         ),
         "{text}"
     );

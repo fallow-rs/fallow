@@ -8,6 +8,7 @@
 pub(crate) mod companion;
 pub(crate) mod companion_temp;
 pub(crate) mod discovery;
+pub(crate) mod dry_run_cache;
 pub(crate) mod journal;
 pub(crate) mod kill_matrix;
 pub(crate) mod last_report;

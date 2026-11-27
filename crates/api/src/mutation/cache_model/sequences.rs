@@ -1,8 +1,11 @@
-//! Warm equals cold over edit sequences of the result cache.
+//! Warm equals cold over edit sequences of the result cache and of the
+//! dry-run cache.
 //!
 //! The model of a warm run is the `--no-cache` run on the same tree. After
 //! each step, the mutant statuses of the warm run must equal those of the
-//! cache-free run.
+//! cache-free run. After the last step, a warm run with no edit must take
+//! the dry run of each test file and each result from the cache, so a cache
+//! that never hits cannot pass.
 //!
 //! Each step runs the real runner twice, so PR CI runs the regression
 //! sequences and [`PR_SEEDS`] only. Set
@@ -19,6 +22,8 @@ use super::template::{Runner, Step, apply};
 /// The seeds of the generated sequences in PR CI. One starts on Vitest and
 /// one on Bun.
 const PR_SEEDS: [u64; 2] = [0x5eed_0000, 0x5eed_0002];
+/// The test files of the template.
+const TEST_FILES: usize = 2;
 /// The steps in one generated sequence.
 const SEQUENCE_LEN: usize = 4;
 
@@ -66,6 +71,21 @@ const REGRESSIONS: &[Regression] = &[
         steps: &[Step::ToggleBunTypes, Step::TogglePreloadMode],
     },
     Regression {
+        name: "dry run: a helper removes the hit of the mutant",
+        runner: Runner::Vitest,
+        steps: &[Step::ToggleHelperCalls, Step::ToggleHelperCalls],
+    },
+    Regression {
+        name: "dry run: a source change gives new mutants",
+        runner: Runner::Vitest,
+        steps: &[Step::ToggleSourceForm, Step::ToggleHelperCalls],
+    },
+    Regression {
+        name: "dry run: bun helper removes the hit of the mutant",
+        runner: Runner::Bun,
+        steps: &[Step::ToggleHelperCalls, Step::ToggleSourceForm],
+    },
+    Regression {
         name: "runner switch (#3473)",
         runner: Runner::Vitest,
         steps: &[Step::ToggleSetupMode, Step::SwitchRunner],
@@ -95,6 +115,14 @@ fn run_sequence(
                 warm.observation, cold.observation
             ));
         }
+    }
+    let repeat = project.run(true);
+    let cold = project.run(false);
+    if repeat.dry_run_hits != TEST_FILES || repeat.observation != cold.observation {
+        return Err(format!(
+            "{label}: a warm run with no edit does not reuse the dry run of each test file, or differs from the cache-free run\n  runner: {runner:?}\n  steps: {done:?}\n  dry-run hits: {} of {TEST_FILES}\n  warm: {:?}\n  cold: {:?}",
+            repeat.dry_run_hits, repeat.observation, cold.observation
+        ));
     }
     Ok(())
 }

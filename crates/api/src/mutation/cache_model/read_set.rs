@@ -1,5 +1,6 @@
-//! The read-set oracle of the result cache key: a change to each project
-//! file that a cold run of the runner reads must change the key.
+//! The read-set oracle of the result cache key and of the dry-run cache key:
+//! a change to each project file that a cold run of the runner reads must
+//! change the key of each result and of the dry run of a test file.
 //!
 //! The oracle sees the key through the cache counts of a real run: after a
 //! neutral edit of a traced file, a cached run must not reuse a result. A
@@ -66,27 +67,35 @@ fn check_read_set(runner: Runner) {
         control.hits, first.stored,
         "a run with no edit reuses each stored result"
     );
+    assert!(
+        control.dry_run_hits > 0,
+        "a run with no edit reuses each stored dry run"
+    );
     append_neutral_edit(&project.root, UNREAD_FILE);
     assert!(
         !traced.contains(UNREAD_FILE),
         "the runner reads {UNREAD_FILE}"
     );
+    let unread = project.run(true);
     assert_eq!(
-        project.run(true).hits,
-        first.stored,
-        "an edit of a file that the runner does not read keeps each stored result, so a key that hashes the whole tree fails this oracle"
+        (unread.hits, unread.dry_run_hits),
+        (first.stored, control.dry_run_hits),
+        "an edit of a file that the runner does not read keeps each stored result and dry run, so a key that hashes the whole tree fails this oracle"
     );
 
+    // A traced file that only one test file reads changes the dry-run key of
+    // that file only, so the check asks for fewer dry-run hits, not for none.
     let uncovered: Vec<&String> = traced
         .iter()
         .filter(|path| {
             append_neutral_edit(&project.root, path);
-            project.run(true).hits > 0
+            let run = project.run(true);
+            run.hits > 0 || run.dry_run_hits >= control.dry_run_hits
         })
         .collect();
     assert!(
         uncovered.is_empty(),
-        "the {runner:?} runner reads these files, but a change to them does not change the result cache key: {uncovered:?}\ntraced: {traced:?}"
+        "the {runner:?} runner reads these files, but a change to them does not change the result cache key or a dry-run key: {uncovered:?}\ntraced: {traced:?}"
     );
 }
 

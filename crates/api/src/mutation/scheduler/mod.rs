@@ -30,6 +30,7 @@ pub mod clock;
 pub(super) mod control;
 mod dry_facts;
 mod dry_phase;
+mod dry_store;
 mod issues;
 pub mod modes;
 mod retry_set;
@@ -39,7 +40,11 @@ mod window;
 use adopt::{Proven, TestIndex};
 use classification::{attempt_record, is_load_kill, kill_kind, matrix_evidence};
 use dry_facts::{DryRunFacts, covering_tests, read_dry_run, record_dry_run, reported_duplicates};
-use dry_phase::{DryPhase, WarmLink, checked_jobs, holds, shutdown_all, timed_dry_phase};
+use dry_phase::{WarmLink, checked_jobs, holds, no_coverage_for_all, read_dry_phase, shutdown_all};
+#[cfg(test)]
+pub use dry_store::StoredTest;
+use dry_store::joined_dry_phase;
+pub use dry_store::{DryRunEntry, DryRunLookup, StoredDryRun};
 use issues::{no_covering_test_message, static_map_miss_issue, undiscovered_issue};
 use targets::{
     TargetFiles, check_targets, config_targets, confirmed_kill, job_targets, retries_unique_kill,
@@ -96,6 +101,10 @@ pub struct SchedulePlan {
     pub test_files: Vec<String>,
     /// The static test files of each source file.
     pub file_test_files: BTreeMap<String, Vec<String>>,
+    /// The test files that reach each source file of the plan through static
+    /// imports, also through a module that `vi.mock` replaces. A superset of
+    /// `file_test_files`, used for the dry-run facts that the store keeps.
+    pub reaching_test_files: BTreeMap<String, Vec<String>>,
 }
 
 /// How the scheduler runs.
@@ -127,6 +136,8 @@ pub struct ScheduleConfig {
     pub clock: Arc<dyn clock::Clock>,
     /// The result cache. `None` runs each covered mutant.
     pub cache: Option<Arc<dyn ResultLookup>>,
+    /// The stored dry-run facts of each test file. `None` dry-runs each file.
+    pub dry_runs: Option<Arc<dyn DryRunLookup>>,
     /// The outcome journal. It receives each final result when it is final,
     /// and gives the results of an interrupted earlier run on `--resume`.
     pub journal: Option<Arc<dyn OutcomeJournal>>,
@@ -237,6 +248,13 @@ pub struct ScheduleOutcome {
     /// The mutant runs and their time in each worker mode. `None` when no
     /// run stated a mode.
     pub worker_modes: Option<modes::WorkerModeCounts>,
+    /// The test files whose dry-run facts came from the store.
+    pub dry_run_reused: usize,
+    /// The test files that the first dry run ran, because the store had no
+    /// valid facts for them. Zero without a store.
+    pub dry_run_missed: usize,
+    /// The new dry-run facts of each test file, for the store.
+    pub dry_run_entries: Vec<DryRunEntry>,
 }
 
 impl ScheduleOutcome {
@@ -258,6 +276,9 @@ impl ScheduleOutcome {
             promoted: Vec::new(),
             targets: Vec::new(),
             worker_modes: None,
+            dry_run_reused: 0,
+            dry_run_missed: 0,
+            dry_run_entries: Vec::new(),
         }
     }
 }
@@ -1795,29 +1816,6 @@ fn retry_suspects(
 /// outside target mode.
 type TargetIds = Option<FxHashSet<String>>;
 
-/// The dry-run facts and the `--kill-matrix-for` test ids of the dry run,
-/// and the companions of the dry run. A failure shuts down each companion.
-fn read_dry_phase(
-    plan: &SchedulePlan,
-    config: &ScheduleConfig,
-    (caps, files): (Capabilities, TargetFiles<'_>),
-    dry: &DryRunResult,
-    outcome: &mut ScheduleOutcome,
-    links: Vec<WarmLink>,
-) -> Result<(DryRunFacts, TargetIds, Vec<WarmLink>), ScheduleError> {
-    let read = read_dry_run(plan, caps, dry).and_then(|facts| {
-        record_dry_run(outcome, dry);
-        config_targets(config, dry, caps, files, outcome).map(|ids| (facts, ids))
-    });
-    match read {
-        Ok((facts, ids)) => Ok((facts, ids, links)),
-        Err(error) => {
-            shutdown_all(links);
-            Err(error)
-        }
-    }
-}
-
 /// [`run_schedule_with_progress`] with no progress events.
 ///
 /// # Errors
@@ -1830,16 +1828,6 @@ pub fn run_schedule(
     config: &ScheduleConfig,
 ) -> Result<ScheduleOutcome, ScheduleError> {
     run_schedule_with_progress(spawner, plan, config, &|_| {})
-}
-
-/// Gives `no_coverage` to each planned and pending mutant of a run with no
-/// dry run.
-fn no_coverage_for_all(plan: &SchedulePlan, outcome: &mut ScheduleOutcome) {
-    for mutant in plan.mutants.iter().chain(&plan.pending) {
-        outcome
-            .results
-            .insert(mutant.id.clone(), MutantOutcome::no_coverage());
-    }
 }
 
 /// Runs the plan: dry run, mutant runs, and retries of survivors and
@@ -1893,25 +1881,18 @@ pub fn run_schedule_with_progress(
         no_coverage_for_all(plan, &mut outcome);
         return Ok(outcome);
     }
-    progress(MutationProgress::Baseline {
-        test_files: dry_files.len(),
-    });
-    let DryPhase {
-        result: dry,
-        links,
-        serial,
-        modes,
-    } = timed_dry_phase(spawner, link, &dry_files, config, &mut outcome.timings)?;
-    runner.first_dry_run = serial;
+    let inputs = (plan, &ready, dry_files.as_slice());
+    let phase = joined_dry_phase(spawner, link, inputs, config, (progress, &mut outcome))?;
+    runner.first_dry_run = phase.serial;
     let (mut facts, target_ids, links) = read_dry_phase(
         plan,
         config,
         (runner.caps, files),
-        &dry,
+        &phase.result,
         &mut outcome,
-        links,
+        phase.links,
     )?;
-    let index = TestIndex::new(runner.caps, &dry, modes);
+    let index = TestIndex::new(runner.caps, &phase.result, phase.modes);
     runner.index = index.as_ref();
     let context = JobContext {
         dry_files: &dry_files,

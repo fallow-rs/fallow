@@ -35,18 +35,30 @@ const SOURCE: &str = "export const add = (a: number, b: number): number => a + b
 const TEST: &str = r#"import { expect, test } from "vitest";
 import { add } from "../src/math";
 import { installed } from "mode-pkg";
-import { exact } from "./helper";
+import { calls, exact } from "./helper";
 
 const mode = (globalThis as { mode?: string }).mode;
 
 test("adds", () => {
+  if (!calls) {
+    expect(calls).toBe(false);
+    return;
+  }
   const sum = add(2, 3);
   if (exact && installed && mode === "strict") expect(sum).toBe(5);
   else expect(typeof sum).toBe("number");
 });
 "#;
 
-const FILES: [(&str, &str); 15] = [
+const OTHER_TEST: &str = r#"import { expect, test } from "vitest";
+import { add } from "../src/math";
+
+test("gives a number", () => {
+  expect(typeof add(1, 1)).toBe("number");
+});
+"#;
+
+const FILES: [(&str, &str); 16] = [
     (
         "package.json",
         "{\"name\":\"result-cache-model\",\"private\":true,\"type\":\"module\",\"devDependencies\":{\"@types/bun\":\"1.3.0\"},\"dependencies\":{\"mode-pkg\":\"1.0.0\"}}\n",
@@ -80,7 +92,11 @@ const FILES: [(&str, &str); 15] = [
     ),
     ("src/math.ts", SOURCE),
     ("test/math.test.ts", TEST),
-    ("test/helper.ts", "export const exact = true;\n"),
+    ("test/other.test.ts", OTHER_TEST),
+    (
+        "test/helper.ts",
+        "export const exact = true;\nexport const calls = true;\n",
+    ),
     (
         "test/setup.ts",
         "(globalThis as { mode?: string }).mode = \"strict\";\n",
@@ -128,6 +144,13 @@ pub enum Step {
     TogglePreloadMode,
     /// The helper that the test imports turns the exact check on or off.
     ToggleHelperExact,
+    /// The helper that the test imports makes the test call `add`, or not,
+    /// so the dry run gives the test a hit of the mutant, or no hit. The
+    /// other test file calls `add` and never kills the mutant.
+    ToggleHelperCalls,
+    /// The source file changes, so each mutant and its instrumented code
+    /// change.
+    ToggleSourceForm,
     /// The Vitest config lists the setup file, or no setup file.
     ToggleSetupListed,
     /// `bunfig.toml` lists the preload file, or no preload file.
@@ -146,10 +169,12 @@ pub enum Step {
 }
 
 impl Step {
-    pub const ALL: [Self; 10] = [
+    pub const ALL: [Self; 12] = [
         Self::ToggleSetupMode,
         Self::TogglePreloadMode,
         Self::ToggleHelperExact,
+        Self::ToggleHelperCalls,
+        Self::ToggleSourceForm,
         Self::ToggleSetupListed,
         Self::TogglePreloadListed,
         Self::SwitchRunner,
@@ -178,7 +203,9 @@ pub fn apply(root: &Path, step: Step) {
     match step {
         Step::ToggleSetupMode => swap(root, "test/setup.ts", "\"strict\"", "\"loose\""),
         Step::TogglePreloadMode => swap(root, "test/preload.ts", "\"strict\"", "\"loose\""),
-        Step::ToggleHelperExact => swap(root, "test/helper.ts", "true", "false"),
+        Step::ToggleHelperExact => swap(root, "test/helper.ts", "exact = true", "exact = false"),
+        Step::ToggleHelperCalls => swap(root, "test/helper.ts", "calls = true", "calls = false"),
+        Step::ToggleSourceForm => swap(root, "src/math.ts", "=> a + b", "=> (a + b)"),
         Step::ToggleSetupListed => swap(
             root,
             "vitest.config.mjs",

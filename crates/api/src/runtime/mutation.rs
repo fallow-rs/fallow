@@ -4,6 +4,7 @@
 //! [`run_mutation`] plans through the engine, then runs the tests of the
 //! project against each planned mutant through the embedded companion.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -22,6 +23,7 @@ use fallow_output::{
 use fallow_types::envelope::ElapsedMs;
 use rustc_hash::FxHashSet;
 
+use super::mutation_cache::{dry_run_cache, key_files, open_result_cache, store_results};
 use super::mutation_record::{record_and_search, settle_recording};
 use super::mutation_runner_options::{runner_config, runner_projects};
 use super::mutation_witness::{WitnessSearch, search_witnesses};
@@ -40,15 +42,15 @@ use crate::mutation::report::{
     mutant_results, plan_counts, plan_files, plan_mutants, skipped_files, skipped_tests_issue,
     tool_version, unmatched_paths,
 };
-use crate::mutation::result_cache::{KeyFiles, NOT_KEYED, ResultCache};
-use crate::mutation::run_dir::{RunFile, write_run_dir};
+use crate::mutation::result_cache::ResultCache;
+use crate::mutation::run_dir::{RunDir, RunFile, write_run_dir};
 use crate::mutation::runner_select::{Runner, select_runner};
 use crate::mutation::runner_version::{plan_runner, runner_version_help};
 use crate::mutation::scheduler::clock::SystemClock;
 use crate::mutation::scheduler::modes::ModeUse;
 use crate::mutation::scheduler::{
-    OutcomeJournal, ResultLookup, ScheduleConfig, ScheduleError, ScheduleIssue, ScheduleOutcome,
-    SchedulePlan, ScheduledMutant, run_schedule_with_progress,
+    DryRunLookup, OutcomeJournal, ResultLookup, ScheduleConfig, ScheduleError, ScheduleIssue,
+    ScheduleOutcome, SchedulePlan, ScheduledMutant, run_schedule_with_progress,
 };
 use crate::mutation::setup_timeout::longer_setup_timeout;
 use crate::mutation::transport::ProcessSpawner;
@@ -826,7 +828,27 @@ fn schedule_plan(plan: &MutationPlan) -> SchedulePlan {
             .iter()
             .map(|file| (file.path.clone(), file.static_test_files.clone()))
             .collect(),
+        reaching_test_files: reaching_test_files(plan),
     }
+}
+
+/// The test files whose static reach holds each instrumented source file of
+/// `plan`.
+fn reaching_test_files(plan: &MutationPlan) -> BTreeMap<String, Vec<String>> {
+    let sources: FxHashSet<&str> = plan.files.iter().map(|file| file.path.as_str()).collect();
+    let mut reaching: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for (test_file, reach) in &plan.test_file_reach {
+        let paths = reach
+            .iter()
+            .filter_map(|&index| plan.reach_files.get(index as usize));
+        for path in paths.filter(|path| sources.contains(path.as_str())) {
+            reaching
+                .entry(path.clone())
+                .or_default()
+                .push(test_file.clone());
+        }
+    }
+    reaching
 }
 
 /// The facts of a started run that the report reads.
@@ -1084,53 +1106,20 @@ fn settle_journal(
     })
 }
 
-/// The result cache of a run. `None` with `--no-cache`.
-fn open_result_cache(
-    no_cache: bool,
-    mutation_cache: &Path,
-    root: &Path,
-    runner: &str,
-    files: KeyFiles,
-) -> Option<Arc<ResultCache>> {
-    (!no_cache).then(|| Arc::new(ResultCache::open(mutation_cache, root, runner, files)))
-}
-
-/// The key files of the result cache. A selected runner config file is a
-/// support file of the key, so a result of one config content is never the
-/// result of another. The selected Vitest projects are a key part too.
-fn key_files(
-    plan: &MutationPlan,
-    runner_config: Option<&str>,
-    runner_projects: &[String],
-) -> KeyFiles {
-    let mut files = KeyFiles {
-        runner_projects: runner_projects.to_vec(),
-        ..KeyFiles::from_plan(plan)
-    };
-    if let Some(config) = runner_config
-        && !files.support_files.iter().any(|file| file == config)
-    {
-        files.support_files.push(config.to_owned());
-    }
-    files
-}
-
-/// Stores the new results of `outcome` in `cache` and writes the cache file.
-/// A failed write adds a `cache-write-failed` issue and keeps the run result.
-fn store_results(cache: &ResultCache, outcome: &mut ScheduleOutcome) -> MutationCacheOutput {
-    let counts = cache.record(outcome);
-    if let Err(message) = cache.save() {
-        outcome.issues.push(ScheduleIssue {
-            code: "cache-write-failed",
-            message: format!("the mutation result cache was not saved: {message}"),
-            mutant_id: None,
-            stderr_tail: None,
-        });
-    }
-    MutationCacheOutput {
-        hits: counts.hits,
-        stored: counts.stored,
-        not_keyed: NOT_KEYED.iter().map(|&item| item.to_owned()).collect(),
+/// The `init` request of each companion of a run.
+fn init_request(planned: &Planned, root: &Path, run_dir: &RunDir) -> InitRequest {
+    InitRequest {
+        root: root.to_string_lossy().into_owned(),
+        runner: planned.runner.name().to_owned(),
+        config_path: planned.runner_config.clone(),
+        run_dir: run_dir.dir.to_string_lossy().into_owned(),
+        path_map: run_dir.path_map.clone(),
+        options: init_options(
+            planned.runner,
+            root,
+            &planned.plan.test_files,
+            &planned.runner_projects,
+        ),
     }
 }
 
@@ -1256,15 +1245,13 @@ fn execute(
         &runtime_label,
         &run_dir.dir,
     )?;
+    let init = init_request(planned, &root, &run_dir);
+    let dry_cache = result_cache.as_ref().map(|keys| {
+        let operators = planned.operators.as_deref();
+        dry_run_cache(keys, &mutation_cache, &run_files(plan), operators, &init)
+    });
     let config = ScheduleConfig {
-        init: InitRequest {
-            root: root.to_string_lossy().into_owned(),
-            runner: name.to_owned(),
-            config_path: planned.runner_config.clone(),
-            run_dir: run_dir.dir.to_string_lossy().into_owned(),
-            path_map: run_dir.path_map.clone(),
-            options: init_options(runner, &root, &plan.test_files, &planned.runner_projects),
-        },
+        init,
         runner: range.clone(),
         kill_matrix: options.kill_matrix,
         targets: options.kill_matrix_targets.clone(),
@@ -1276,6 +1263,9 @@ fn execute(
         cache: result_cache
             .clone()
             .map(|cache| cache as Arc<dyn ResultLookup>),
+        dry_runs: dry_cache
+            .clone()
+            .map(|cache| cache as Arc<dyn DryRunLookup>),
         journal: Some(Arc::clone(&run_journal.journal) as Arc<dyn OutcomeJournal>),
     };
     let spawner = ProcessSpawner {
@@ -1289,9 +1279,7 @@ fn execute(
     let mut outcome = run_schedule_with_progress(&spawner, &schedule, &config, progress)
         .map_err(|error| schedule_error(&error, &config.runner, config.runner_timeout))?;
     let runner = runner_output(&outcome, name, manifest, &runtime);
-    let cache = (outcome.ready.is_some())
-        .then(|| result_cache.map(|result_cache| store_results(&result_cache, &mut outcome)))
-        .flatten();
+    let cache = store_results(result_cache.as_deref(), dry_cache.as_deref(), &mut outcome);
     let journal_run_id = Some(run_journal.journal.run_id().to_owned());
     let resume = settle_journal(options, run_journal, &mut outcome);
     let (record, witness) = record_and_search(options, &outcome, spawner, &config, &mutation_cache);
@@ -1531,6 +1519,7 @@ pub fn run_mutation_with_progress(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mutation::result_cache::KeyFiles;
 
     fn vitest_range() -> &'static RunnerRange {
         manifest()

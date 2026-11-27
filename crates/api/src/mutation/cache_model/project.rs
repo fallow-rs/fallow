@@ -75,14 +75,18 @@ pub fn available_runners() -> Vec<Runner> {
     runners
 }
 
-/// The status of each mutant of one run.
-pub type Observation = Vec<(String, MutantStatus, Option<String>)>;
+/// The status, the killing test, the covering tests and the static flag of
+/// each mutant of one run. The covering tests and the static flag come from
+/// the dry run, so a stale dry-run entry shows also when the status stays.
+pub type Observation = Vec<(String, MutantStatus, Option<String>, Vec<String>, bool)>;
 
 /// The facts of one mutation run.
 pub struct Run {
     pub observation: Observation,
     pub hits: usize,
     pub stored: usize,
+    /// The test files whose dry-run facts came from the cache.
+    pub dry_run_hits: usize,
 }
 
 /// A template project in a temporary directory.
@@ -116,20 +120,30 @@ impl Project {
         };
         let report = run_mutation(&options).expect("the mutation run completes");
         check_complete(&report);
-        let (hits, stored) = report
-            .cache
-            .as_ref()
-            .map_or((0, 0), |cache| (cache.hits, cache.stored));
+        let (hits, stored, dry_run_hits) = report.cache.as_ref().map_or((0, 0, 0), |cache| {
+            (cache.hits, cache.stored, cache.dry_run_hits)
+        });
         let mut observation: Observation = report
             .mutants
             .into_iter()
-            .map(|mutant| (mutant.location.mutant_id, mutant.status, mutant.killed_by))
+            .map(|mutant| {
+                let mut covering = mutant.covering_tests;
+                covering.sort();
+                (
+                    mutant.location.mutant_id,
+                    mutant.status,
+                    mutant.killed_by,
+                    covering,
+                    mutant.static_mutant,
+                )
+            })
             .collect();
         observation.sort();
         Run {
             observation,
             hits,
             stored,
+            dry_run_hits,
         }
     }
 }
