@@ -371,6 +371,43 @@ pub(super) fn function_body_returns_identifier(
     Some(returned)
 }
 
+/// The callee of a pass-through wrapper: a function whose single result is a
+/// bare call `callee(...)`, as in `const setup = () => newService(db)`. The
+/// wrapper result is the callee result, so a read on the wrapper result is a
+/// read on the callee result (issue #5366). `None` for a branchy body, for an
+/// optional or awaited call, and for a callee that a parameter or a local
+/// declaration of the wrapper binds.
+pub(super) fn function_body_returns_call_of(
+    body: BodyRef<'_, '_>,
+    params: &FormalParameters<'_>,
+) -> Option<String> {
+    let returned = match body {
+        BodyRef::Concise(expr) => expr,
+        BodyRef::Block(body) => {
+            if count_returns_in_statements(&body.statements) != 1 {
+                return None;
+            }
+            first_return_arg_in_statements(&body.statements)?
+        }
+    };
+    let Expression::CallExpression(call) = unwrap_static_expr(returned) else {
+        return None;
+    };
+    if call.optional {
+        return None;
+    }
+    let Expression::Identifier(callee) = &call.callee else {
+        return None;
+    };
+    let callee = callee.name.as_str();
+    if formal_params_bind_identifier(params, callee)
+        || statements_declare_identifier(body.statements(), callee)
+    {
+        return None;
+    }
+    Some(callee.to_string())
+}
+
 /// The properties of an object literal a function returns, flattened to dotted
 /// paths with per-property value refs. `Some(props)` when the function's single
 /// (or expression-body) return is an object literal, or a bare identifier bound

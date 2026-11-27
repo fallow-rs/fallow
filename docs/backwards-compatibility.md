@@ -499,6 +499,8 @@ The schema-derive ladder ([#384](https://github.com/fallow-rs/fallow/issues/384)
 - **Stable starting point**: wire protocol version 6 is the first stable
   contract between Fallow and the optional `fallow-type-aware` companion.
   Version 7 adds the closed `svelte-virtual-module-exports` semantic gap reason.
+  Version 11 adds the `dependency-hook` contract relation: an optional
+  member of a dependency contract that keeps the declaration.
 - **Exact-version pairing**: the native binary and companion package must have
   the same Fallow version. The backend version and supported operations come
   from `crates/api/type-aware-protocol.json`.

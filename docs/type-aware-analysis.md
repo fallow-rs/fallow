@@ -505,9 +505,10 @@ Every candidate has one of five outcomes:
 - `confirmed-used`: exact static references were found, so Fallow removes the
   syntactic finding
 - `contract-preserved`: an interface or abstract member requires the
-  declaration, an override changes inherited behavior, or a detected framework
-  contract resolves to the exact package declaration, so Fallow removes the
-  syntactic finding
+  declaration, an override changes inherited behavior, the declaration
+  implements an optional hook that a dependency or the platform declares
+  (relation `dependency-hook`), or a detected framework contract resolves
+  to the exact package declaration, so Fallow removes the syntactic finding
 - `confirmed-no-static-references`: every owning project was checked and no
   static references were found, so Fallow keeps the finding
 - `retained-unresolved`: the exact declaration or owning project could not be
@@ -538,9 +539,25 @@ verdict. Resolve the files named in `workspace_diagnostics[]` and re-run.
 The current safety policy abstains for every candidate in a TypeScript project
 when configuration, program, syntax, or bind diagnostics make its structure
 unsafe. It also abstains per candidate for decorators, dynamic computed member
-access, optional contracts, accessor pairs, overload sets, abstract
-declarations, attached comments, or a dynamic import that can consume an export
-without an exact static property reference. Ordinary semantic diagnostics do
+access, optional contracts of the project, accessor pairs, overload sets,
+abstract declarations, attached comments, or a dynamic import that can consume
+an export without an exact static property reference.
+
+An optional member of an interface or base class that a dependency or the
+platform declares is a hook: code of the dependency can call it, and that
+call is outside the program. For example, a class that `implements` the
+`NodeView` interface of `prosemirror-view` keeps `ignoreMutation`. The
+relation of such a member is `dependency-hook`, and the result is
+`contract-preserved`. A contract file below `node_modules` or a default
+library file of TypeScript is a dependency contract. A workspace package is
+project code, also when it is outside the analysis root. An optional member
+of a project contract keeps the `optional-contract` abstention, because its
+callers are in the program.
+
+A class that a library receives without an `implements` or `extends` clause
+gets no contract evidence, because TypeScript types are structural and the
+pass does not follow each value into library calls. Such a member keeps its
+finding unless a static reference credits it. Ordinary semantic diagnostics do
 not invalidate an exact declaration match, so Fallow does not request a
 separate full semantic diagnostic pass before scanning. It also avoids
 TypeScript's project-wide global diagnostic pass, which eagerly checks the

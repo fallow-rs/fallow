@@ -28,6 +28,7 @@ impl ModuleInfoExtractor {
         self.resolve_factory_return_object_shapes();
         self.resolve_factory_property_observations();
         self.resolve_factory_property_accesses();
+        self.resolve_factory_pass_through_callees();
         self.resolve_factory_return_candidates();
         // Separate from the candidate pass, which early-returns when no member
         // candidate exists: an unnamed factory result records no member candidate.

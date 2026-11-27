@@ -2762,6 +2762,115 @@ test("protocol v7 preserves required interface, abstract, and inherited contract
   }
 });
 
+test("an optional member of a dependency contract is a preserved hook", () => {
+  const root = makeProject();
+  try {
+    write(
+      root,
+      "tsconfig.json",
+      JSON.stringify({
+        compilerOptions: { strict: true, module: "esnext", moduleResolution: "bundler" },
+        include: ["src/**/*.ts"],
+      }),
+    );
+    write(
+      root,
+      "node_modules/hooks-lib/package.json",
+      JSON.stringify({ name: "hooks-lib", version: "1.0.0", types: "index.d.ts" }),
+    );
+    write(
+      root,
+      "node_modules/hooks-lib/index.d.ts",
+      "export interface Extension { onLoad?(): void }\n",
+    );
+    const source = [
+      'import type { Extension } from "hooks-lib";',
+      "class Worker implements Extension {",
+      "  onLoad(): void {}",
+      "}",
+      "export const worker = new Worker();",
+      "",
+    ].join("\n");
+    write(root, "src/worker.ts", source);
+    const symbol = symbolIdentity({
+      source,
+      marker: "onLoad",
+      occurrence: 1,
+      file: "src/worker.ts",
+      namespace: "value",
+      declarationKind: "class_method",
+      exportedName: "onLoad",
+      owner: "Worker",
+    });
+    Object.assign(symbol, utf8Position(source, "onLoad", 1));
+
+    const response = runSidecar(
+      semanticRequest(root, [{ id: 45, operation: "symbol-use", symbol, framework_contracts: [] }]),
+    );
+    const result = response.results[0];
+    assert.equal(result.assertion, "contract-preserved");
+    assert.equal(result.data.closed_world_eligible, false);
+    assert.equal(result.data.contract_relations[0].relation, "dependency-hook");
+    assert.equal(result.data.contract_relations[0].optional, true);
+    assert.ok(!result.omissions.some((omission) => omission.reason_code === "optional-contract"));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("an optional member of a workspace package outside the root is not a hook", () => {
+  const workspace = makeProject();
+  const root = path.join(workspace, "apps/web");
+  const previousScopeRoot = process.env.FALLOW_TYPE_AWARE_SCOPE_ROOT;
+  process.env.FALLOW_TYPE_AWARE_SCOPE_ROOT = workspace;
+  try {
+    write(
+      workspace,
+      "apps/web/tsconfig.json",
+      JSON.stringify({
+        compilerOptions: { strict: true, module: "esnext", moduleResolution: "bundler" },
+        include: ["src/**/*.ts", "../../packages/lib/**/*.ts"],
+      }),
+    );
+    write(
+      workspace,
+      "packages/lib/contract.ts",
+      "export interface Extension { onLoad?(): void }\n",
+    );
+    const source = [
+      'import type { Extension } from "../../../packages/lib/contract";',
+      "class Worker implements Extension {",
+      "  onLoad(): void {}",
+      "}",
+      "export const worker = new Worker();",
+      "",
+    ].join("\n");
+    write(workspace, "apps/web/src/worker.ts", source);
+    const symbol = symbolIdentity({
+      source,
+      marker: "onLoad",
+      occurrence: 1,
+      file: "src/worker.ts",
+      namespace: "value",
+      declarationKind: "class_method",
+      exportedName: "onLoad",
+      owner: "Worker",
+    });
+    Object.assign(symbol, utf8Position(source, "onLoad", 1));
+
+    const response = runSidecar(
+      semanticRequest(root, [{ id: 46, operation: "symbol-use", symbol, framework_contracts: [] }]),
+    );
+    const result = response.results[0];
+    assert.notEqual(result.assertion, "contract-preserved");
+    assert.equal(result.data.contract_relations[0].relation, "optional-contract");
+  } finally {
+    if (previousScopeRoot === undefined) delete process.env.FALLOW_TYPE_AWARE_SCOPE_ROOT;
+    else process.env.FALLOW_TYPE_AWARE_SCOPE_ROOT = previousScopeRoot;
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
 test("protocol v7 abstains for optional contracts, decorators, and dynamic member access", () => {
   const cases = [
     {

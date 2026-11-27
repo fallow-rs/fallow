@@ -4,7 +4,13 @@ import path from "node:path";
 
 import { accessorPairExists, countsAsAccessorUse } from "./accessor-direction.mjs";
 import { ast, createApi as createBackendApi, heritageTypeName, sync } from "./backend.mjs";
-import { declarationIsProjectLocal, isUnresolvedContractHeritage } from "./heritage-provenance.mjs";
+import {
+  declarationIsProjectLocal,
+  isUnresolvedContractHeritage,
+  optionalContractDeclaration,
+  optionalContractRelation,
+  packageNameForDeclaration,
+} from "./heritage-provenance.mjs";
 
 import { canonicalFileIdentity, resetFileIdentityCache } from "./file-identity.mjs";
 import { packagePathTargets, projectPackage, wildcardPattern } from "./project-package.mjs";
@@ -61,7 +67,7 @@ import {
   graphProjects,
 } from "./semantic-input.mjs";
 
-const { SignatureKind, SymbolFlags } = sync;
+const { SignatureKind } = sync;
 const {
   isCallExpression,
   isClassDeclaration,
@@ -864,9 +870,6 @@ const hasAttachedComment = (declaration) => {
   return ATTACHED_COMMENT_PATTERN.test(trivia);
 };
 
-const optionalContractDeclaration = (symbol, declaration) =>
-  (symbol.flags & SymbolFlags.Optional) !== 0 || declaration?.questionToken !== undefined;
-
 const heritageRelation = (clause, declaration) => {
   const text = clause.getText(clause.getSourceFile());
   if (text.startsWith("implements")) return "interface-implementation";
@@ -888,7 +891,9 @@ const contractRelationsFor = (root, project, declaration, memberName) => {
       for (const contractDeclaration of declarationsForSymbol(project, symbol)) {
         const optional = optionalContractDeclaration(symbol, contractDeclaration);
         relations.push({
-          relation: optional ? "optional-contract" : heritageRelation(clause, contractDeclaration),
+          relation: optional
+            ? optionalContractRelation(project, contractDeclaration)
+            : heritageRelation(clause, contractDeclaration),
           declaration: stableSymbolIdentity(root, contractDeclaration, "value", memberName),
           optional,
         });
@@ -896,18 +901,6 @@ const contractRelationsFor = (root, project, declaration, memberName) => {
     }
   }
   return uniqueSorted(relations);
-};
-
-const packageNameForDeclaration = (declaration) => {
-  const normalized = declaration.getSourceFile().fileName.replaceAll("\\", "/");
-  const marker = "/node_modules/";
-  const index = normalized.lastIndexOf(marker);
-  if (index < 0) return undefined;
-  const segments = normalized.slice(index + marker.length).split("/");
-  if (segments[0]?.startsWith("@")) {
-    return segments.length >= 2 ? `${segments[0]}/${segments[1]}` : undefined;
-  }
-  return segments[0] || undefined;
 };
 
 const frameworkContractRelationsFor = (root, project, declaration, contracts, memberName) => {
@@ -1061,7 +1054,7 @@ const resolveSymbolQuery = (
   if (primary.declaration.name && !isIdentifier(primary.declaration.name)) {
     declarationUncertainties.add("dynamic-member-access");
   }
-  if (contractRelations.some((relation) => relation.optional)) {
+  if (contractRelations.some((relation) => relation.relation === "optional-contract")) {
     declarationUncertainties.add("optional-contract");
   }
   if (accessorPairExists(primary.declaration)) {
@@ -1103,7 +1096,9 @@ const analyzeSymbolUse = (
   batchUncertainties,
 ) => {
   const uncertainties = new Set([...resolved.declarationUncertainties, ...batchUncertainties]);
-  const requiredContracts = resolved.contractRelations.filter((relation) => !relation.optional);
+  const requiredContracts = resolved.contractRelations.filter(
+    (relation) => relation.relation !== "optional-contract",
+  );
   const frameworkContracts = resolved.frameworkContractRelations;
   const omissions = [
     ...resolved.omissions,

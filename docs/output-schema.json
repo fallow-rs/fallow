@@ -26838,6 +26838,11 @@
           "type": "string",
           "const": "optional-contract",
           "description": "An optional inherited or interface member that still blocks auto-fix."
+        },
+        {
+          "type": "string",
+          "const": "dependency-hook",
+          "description": "An optional member of an interface or base class that a dependency or\nthe platform declares. Code of the dependency can call it as a hook,\nso the contract keeps the declaration."
         }
       ],
       "description": "How a class member participates in an inherited or implemented relation."

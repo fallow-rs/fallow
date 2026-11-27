@@ -136,8 +136,9 @@ use visit_chain_names::{call_receiver_name, static_member_object_name, type_name
 pub(super) use visit_dynamic_imports::{ComponentLoaderImport, NewUrlContext};
 use visit_factory_returns::{
     FactoryReturnFunctionInput, classify_factory_assigned_value, collect_self_scope_assignments,
-    function_body_is_terminal, function_body_returns_identifier, function_body_returns_new_class,
-    function_body_returns_new_class_unanimous, function_body_returns_object_shape,
+    function_body_is_terminal, function_body_returns_call_of, function_body_returns_identifier,
+    function_body_returns_new_class, function_body_returns_new_class_unanimous,
+    function_body_returns_object_shape,
 };
 pub(super) use visit_factory_returns::{
     collect_return_args_in_statements, count_returns_in_statements,
