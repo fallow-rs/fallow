@@ -170,3 +170,87 @@ fn tokenize_ts_enum_body_has_braces() {
         .count();
     assert!(open_braces >= 1, "Enum body should have open brace");
 }
+
+fn kinds(tokens: &[SourceToken]) -> Vec<TokenKind> {
+    tokens.iter().map(|t| t.kind.clone()).collect()
+}
+
+fn has_ident(tokens: &[SourceToken], name: &str) -> bool {
+    tokens
+        .iter()
+        .any(|t| matches!(&t.kind, TokenKind::Identifier(n) if n == name))
+}
+
+/// Calls that differ only in their type arguments are different code. See
+/// issue #5401: `check<Omit<A, "a">>()` must not give the tokens of `check()`.
+#[test]
+fn tokenize_ts_call_type_arguments() {
+    let a = tokenize(r#"check<Omit<First, "a">>().not.toExtend<First>();"#);
+    let b = tokenize(r#"check<Omit<Second, "b">>().not.toExtend<Second>();"#);
+    assert!(
+        has_ident(&a, "Omit"),
+        "call type argument should be tokenized"
+    );
+    assert!(
+        has_ident(&a, "First"),
+        "nested type argument should be tokenized"
+    );
+    assert!(
+        a.iter()
+            .any(|t| matches!(&t.kind, TokenKind::StringLiteral(s) if s == "a")),
+        "string literal type in a call type argument should be tokenized"
+    );
+    assert_ne!(kinds(&a), kinds(&b));
+}
+
+#[test]
+fn tokenize_ts_new_type_arguments() {
+    let a = tokenize("const m = new Map<string, First>();");
+    let b = tokenize("const m = new Map<number, Second>();");
+    assert!(
+        has_ident(&a, "First"),
+        "new type argument should be tokenized"
+    );
+    assert_ne!(kinds(&a), kinds(&b));
+}
+
+#[test]
+fn tokenize_ts_tagged_template_type_arguments() {
+    let a = tokenize("const q = sql<First>`select 1`;");
+    assert!(
+        has_ident(&a, "First"),
+        "tagged template type argument should be tokenized"
+    );
+}
+
+#[test]
+fn tokenize_ts_instantiation_expression_type_arguments() {
+    let a = tokenize("const f = make<First>;");
+    assert!(
+        has_ident(&a, "First"),
+        "instantiation expression type argument should be tokenized"
+    );
+}
+
+#[test]
+fn tokenize_tsx_element_type_arguments() {
+    let a = tokenize_tsx("const x = <List<First> items={items} />;");
+    assert!(
+        has_ident(&a, "First"),
+        "JSX element type argument should be tokenized"
+    );
+}
+
+#[test]
+fn strip_types_drops_call_and_new_type_arguments() {
+    let stripped = tokenize_cross_language("check<First>(); new Map<string, Second>();");
+    let plain = tokenize_cross_language("check(); new Map();");
+    assert_eq!(kinds(&stripped), kinds(&plain));
+}
+
+#[test]
+fn tokenize_ts_optional_call_type_arguments() {
+    for source in ["a?.b<First>();", "a?.<First>();", "a.b<First>?.();"] {
+        assert!(has_ident(&tokenize(source), "First"), "{source}");
+    }
+}
