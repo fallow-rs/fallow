@@ -100,6 +100,8 @@ pub fn write_run_dir(
         ));
     }
     let runs = mutation_cache.join("runs");
+    refuse_link(mutation_cache)?;
+    refuse_link(&runs)?;
     let dir = runs.join(content_hash(&files));
     let mut expected: Vec<(String, Content<'_>)> = files
         .iter()
@@ -128,10 +130,41 @@ pub fn write_run_dir(
             )
         })?;
     }
-    // A failed marker write only makes the prune order less exact.
-    let _ = fs::write(dir.join(LAST_USED), now_nanos().to_string());
+    mark_used(&dir);
     prune_run_dirs(&runs, &dir, SystemTime::now());
     Ok(RunDir { dir, path_map })
+}
+
+/// Refuses `path` when it is a symlink, so a run never writes or removes
+/// run directories through a link. A path that does not exist yet passes.
+/// Metadata that cannot be read refuses the path.
+fn refuse_link(path: &Path) -> Result<(), String> {
+    match fs::symlink_metadata(path) {
+        Ok(meta) if meta.file_type().is_symlink() => Err(format!(
+            "{} is a symlink, so fallow does not write the mutation run directories through it. Remove the link",
+            path.display()
+        )),
+        Ok(_) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(format!("cannot read {}: {error}", path.display())),
+    }
+}
+
+/// Replaces the marker of `dir` with the current time. The old entry is
+/// removed and the new file is created with `create_new`, which does not
+/// follow a symlink, so a link at the marker is replaced and never written
+/// through. A failed write only makes the prune order less exact.
+fn mark_used(dir: &Path) {
+    use std::io::Write as _;
+    let marker = dir.join(LAST_USED);
+    let _ = fs::remove_file(&marker);
+    if let Ok(mut file) = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&marker)
+    {
+        let _ = file.write_all(now_nanos().to_string().as_bytes());
+    }
 }
 
 fn now_nanos() -> u128 {
@@ -140,9 +173,11 @@ fn now_nanos() -> u128 {
         .map_or(0, |elapsed| elapsed.as_nanos())
 }
 
-/// True when each expected file of `dir` has the expected content.
+/// True when `dir` is a directory, not a symlink, and each expected file of
+/// it has the expected content. A link at `dir` does not match, so the run
+/// moves the link aside and installs a real directory.
 fn matches(dir: &Path, expected: &[(String, Content<'_>)]) -> bool {
-    dir.is_dir()
+    fs::symlink_metadata(dir).is_ok_and(|meta| meta.is_dir())
         && expected.iter().all(|(relative, content)| {
             let Ok(actual) = fs::read(dir.join(relative)) else {
                 return false;
@@ -278,8 +313,13 @@ fn last_used(dir: &Path) -> Option<SystemTime> {
 /// [`RUN_DIRS_KEPT`] most recently used ones and that no run used within
 /// [`RUN_DIR_GRACE`]. It also removes staging directories older than
 /// [`RUN_DIR_GRACE`], which a crash can leave. It never removes `in_use`.
-/// A failed removal leaves the directory for a later run.
+/// A failed removal leaves the directory for a later run. It removes nothing
+/// when `runs` is a symlink, and it skips an entry that is a symlink, so it
+/// never removes a directory through a link.
 fn prune_run_dirs(runs: &Path, in_use: &Path, now: SystemTime) {
+    if !fs::symlink_metadata(runs).is_ok_and(|meta| meta.is_dir()) {
+        return;
+    }
     let Ok(entries) = fs::read_dir(runs) else {
         return;
     };
@@ -290,7 +330,7 @@ fn prune_run_dirs(runs: &Path, in_use: &Path, now: SystemTime) {
     let mut candidates: Vec<(SystemTime, PathBuf)> = Vec::new();
     for entry in entries.flatten() {
         let path = entry.path();
-        if path == in_use || !path.is_dir() {
+        if path == in_use || !entry.file_type().is_ok_and(|kind| kind.is_dir()) {
             continue;
         }
         let used = last_used(&path).unwrap_or(UNIX_EPOCH);
@@ -638,5 +678,112 @@ mod tests {
         );
         assert!(dirs[0].is_dir(), "the newest old dir stays");
         assert!(!dirs[RUN_DIRS_KEPT + 1].is_dir(), "the oldest dir goes");
+    }
+
+    /// A directory with an old `.last-used` marker, so the prune counts it
+    /// as expired.
+    #[cfg(unix)]
+    fn old_dir(parent: &Path, name: &str) -> PathBuf {
+        let dir = parent.join(name);
+        fs::create_dir_all(&dir).expect("dir");
+        let marker = dir.join(LAST_USED);
+        fs::write(&marker, "0").expect("marker");
+        set_mtime(&marker, SystemTime::now() - RUN_DIR_GRACE * 24);
+        dir
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_linked_runs_dir_is_refused_and_its_target_keeps_each_dir() {
+        let base = tempfile::tempdir().expect("dir");
+        let cache = base.path().join("cache");
+        let shared = base.path().join("shared");
+        fs::create_dir_all(&cache).expect("cache");
+        let dirs: Vec<PathBuf> = (0..RUN_DIRS_KEPT + 3)
+            .map(|index| old_dir(&shared, &format!("dir-{index}")))
+            .collect();
+        std::os::unix::fs::symlink(&shared, cache.join("runs")).expect("link");
+        let error = write_run_dir(
+            &cache,
+            &[RunFile {
+                path: "src/a.ts",
+                code: "a",
+            }],
+            None,
+        )
+        .expect_err("refused");
+        assert!(error.contains("symlink"), "{error}");
+        for dir in &dirs {
+            assert!(dir.is_dir(), "{} stays", dir.display());
+        }
+        assert_eq!(fs::read_dir(&shared).expect("shared").count(), dirs.len());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_linked_mutation_cache_is_refused() {
+        let base = tempfile::tempdir().expect("dir");
+        let shared = base.path().join("shared");
+        fs::create_dir_all(&shared).expect("shared");
+        let cache = base.path().join("mutation");
+        std::os::unix::fs::symlink(&shared, &cache).expect("link");
+        let error = write_run_dir(
+            &cache,
+            &[RunFile {
+                path: "src/a.ts",
+                code: "a",
+            }],
+            None,
+        )
+        .expect_err("refused");
+        assert!(error.contains("symlink"), "{error}");
+        assert_eq!(fs::read_dir(&shared).expect("shared").count(), 0);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_linked_last_used_marker_is_replaced_and_its_target_keeps_its_content() {
+        let base = tempfile::tempdir().expect("dir");
+        let cache = base.path().join("cache");
+        let kept = base.path().join("kept.txt");
+        fs::write(&kept, "original").expect("kept");
+        let files = [RunFile {
+            path: "src/a.ts",
+            code: "a",
+        }];
+        let run = write_run_dir(&cache, &files, None).expect("run dir");
+        let marker = run.dir.join(LAST_USED);
+        fs::remove_file(&marker).expect("remove marker");
+        std::os::unix::fs::symlink(&kept, &marker).expect("link");
+        write_run_dir(&cache, &files, None).expect("reused run dir");
+        assert_eq!(fs::read_to_string(&kept).expect("kept"), "original");
+        let meta = fs::symlink_metadata(&marker).expect("marker");
+        assert!(meta.is_file(), "the marker is a plain file again");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_linked_run_dir_is_replaced_by_a_real_one() {
+        let base = tempfile::tempdir().expect("dir");
+        let cache = base.path().join("cache");
+        let files = [RunFile {
+            path: "src/a.ts",
+            code: "a",
+        }];
+        let run = write_run_dir(&cache, &files, None).expect("run dir");
+        let moved = base.path().join("moved");
+        fs::rename(&run.dir, &moved).expect("move");
+        std::os::unix::fs::symlink(&moved, &run.dir).expect("link");
+        let marker = moved.join(LAST_USED);
+        fs::write(&marker, "original").expect("marker");
+        let again = write_run_dir(&cache, &files, None).expect("run dir");
+        assert_eq!(again.dir, run.dir);
+        let meta = fs::symlink_metadata(&again.dir).expect("run dir");
+        assert!(meta.is_dir(), "the run dir is a real directory");
+        assert_eq!(fs::read_to_string(&marker).expect("marker"), "original");
+        assert!(
+            moved.join("files/src/a.ts").is_file(),
+            "the link target stays"
+        );
     }
 }

@@ -599,5 +599,7 @@ pub fn run_health_with_runner(
 
 #[cfg(test)]
 mod cancellation_tests;
+#[cfg(all(test, unix))]
+mod mutation_cache_tests;
 #[cfg(test)]
 mod tests;

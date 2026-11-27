@@ -35,8 +35,12 @@ mod cache_model;
 #[cfg(test)]
 #[expect(clippy::unwrap_used, reason = "tests unwrap to keep assertions short")]
 mod e2e_tests;
+#[cfg(all(test, unix))]
+mod ignore_file_tests;
 
 use std::path::{Path, PathBuf};
+
+use fallow_types::path_guard::CacheTarget;
 use std::time::Duration;
 
 pub use fallow_engine::mutation::Operator;
@@ -52,13 +56,36 @@ use crate::AnalysisOptions;
 
 /// Writes `*` to `<cache>/.gitignore` when the cache has no ignore file, so
 /// that the run directory and the saved report never show in `git status`.
+/// An existing entry stays as it is. The file is created with `create_new`,
+/// which does not follow a symlink, so a link at `.gitignore` (also one whose
+/// target does not exist) is never written through.
 pub(crate) fn ignore_cache_dir(cache_dir: &Path) -> std::io::Result<()> {
+    use std::io::Write as _;
     std::fs::create_dir_all(cache_dir)?;
-    let ignore = cache_dir.join(".gitignore");
-    if !ignore.exists() {
-        std::fs::write(ignore, "*\n")?;
+    let created = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(cache_dir.join(".gitignore"));
+    match created {
+        Ok(mut file) => file.write_all(b"*\n"),
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
+        Err(error) => Err(error),
     }
-    Ok(())
+}
+
+/// Fails when a write to the mutation run directories or to the companion
+/// would follow a symlink that leaves the directory that cache writes must
+/// stay in, or that resolves into Git metadata or `node_modules`. This is the
+/// check of the analysis caches, through [`CacheTarget`].
+///
+/// # Errors
+///
+/// Returns the error of [`CacheTarget::check`].
+pub(crate) fn check_cache_links(root: &Path, cache_dir: &Path) -> std::io::Result<()> {
+    let target = CacheTarget::new(root, cache_dir);
+    let mutation = cache_dir.join("mutation");
+    target.check(&mutation.join("runs"))?;
+    target.check(&mutation.join("companion"))
 }
 
 /// The code that a mutation run mutates.
