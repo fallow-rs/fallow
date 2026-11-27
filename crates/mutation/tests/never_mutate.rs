@@ -289,3 +289,86 @@ function report(console: { log(message: string): void }) {
 ";
     assert!(comparison_keeps_mutants(source, "c03 > 0"));
 }
+
+/// Asserts that no mutant starts inside one of the `arguments` texts. The
+/// texts must be unique in `source`.
+fn assert_no_mutant_in(source: &str, kind: SourceKind, arguments: &[&str]) {
+    let result = run(source, kind);
+    assert!(!result.mutants.is_empty(), "the source gave no mutant");
+    for text in arguments {
+        let Some(start) = source.find(text) else {
+            panic!("{text:?} is not in the source");
+        };
+        let start = start as u32;
+        let end = start + text.len() as u32;
+        for mutant in &result.mutants {
+            assert!(
+                !(start..end).contains(&mutant.span.0),
+                "mutant in {text:?}: {} {:?} -> {:?}",
+                mutant.operator,
+                mutant.original,
+                mutant.replacement,
+            );
+        }
+    }
+}
+
+/// Bun replaces a `feature()` call from `bun:bundle` at compile time and
+/// requires a string literal argument (issue #5285). The condition around
+/// the call keeps its mutants.
+#[test]
+fn bun_bundle_feature_arguments() {
+    let source = r#"
+import { feature as flag } from "bun:bundle";
+export const scale = (n: number) => {
+  if (flag("FAST")) return n * 2;
+  return flag('SLOW') ? n - 1 : n + 1;
+};
+"#;
+    assert_no_mutant_in(source, TS, &[r#""FAST""#, "'SLOW'"]);
+    let result = run(source, TS);
+    assert!(result.mutants.iter().any(|m| m.original == "*"));
+}
+
+/// Bun runs a macro at compile time, so its arguments must stay static.
+#[test]
+fn bun_macro_arguments() {
+    let source = r#"
+import { size } from "./size.ts" with { type: "macro" };
+import * as macros from "./macros.ts" with { type: "macro" };
+export const a = size("abc", 1 + 2);
+export const b = macros.hash("x", true);
+export const keep = c + 1;
+"#;
+    assert_no_mutant_in(source, TS, &[r#""abc", 1 + 2"#, r#""x", true"#]);
+}
+
+/// Vite transforms `import.meta.glob` with a static parse of the copy, so
+/// the patterns and the options stay literals.
+#[test]
+fn import_meta_glob_arguments() {
+    let source = r#"
+export const pages = import.meta.glob(["./pages/*.ts", "!./pages/x.ts"], { eager: true });
+export const keep = c + 1;
+"#;
+    assert_no_mutant_in(
+        source,
+        TS,
+        &[r#"["./pages/*.ts", "!./pages/x.ts"], { eager: true }"#],
+    );
+}
+
+/// A `feature` that does not come from `bun:bundle` and a call that is not
+/// a macro keep their argument mutants.
+#[test]
+fn other_feature_calls_keep_mutants() {
+    let source = r#"
+import { feature } from "./flags";
+import { size } from "./size.ts";
+export const a = feature("FAST");
+export const b = size("abc");
+"#;
+    let result = run(source, TS);
+    assert!(result.mutants.iter().any(|m| m.original.contains("FAST")));
+    assert!(result.mutants.iter().any(|m| m.original.contains("abc")));
+}
