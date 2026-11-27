@@ -28,9 +28,12 @@ const SCRIPT_ROOT_ANCHORS: &[&str] = &[
 /// names no file.
 const JS_COMMENT_STARTS: &[&str] = &["//", "/*", "*"];
 
-/// The anchor in a github-script body of a composite action that stands for
+/// The anchors in a github-script body of a composite action that stand for
 /// the action directory.
-const SCRIPT_ACTION_ANCHOR: &str = "${{ github.action_path }}/";
+const SCRIPT_ACTION_ANCHORS: &[&str] = &[
+    "${process.env.GITHUB_ACTION_PATH}/",
+    "${{ github.action_path }}/",
+];
 
 /// The `require` calls whose relative path resolves from the working
 /// directory of github-script, the project root. A relative `import()`
@@ -319,10 +322,12 @@ fn script_line_files(line: &str, action_dir: Option<&str>, files: &mut Vec<Strin
         );
     }
     if let Some(dir) = action_dir {
-        starts.extend(
-            line.match_indices(SCRIPT_ACTION_ANCHOR)
-                .map(|(at, _)| (at + SCRIPT_ACTION_ANCHOR.len(), Some(dir))),
-        );
+        for anchor in SCRIPT_ACTION_ANCHORS {
+            starts.extend(
+                line.match_indices(anchor)
+                    .map(|(at, _)| (at + anchor.len(), Some(dir))),
+            );
+        }
     }
     for call in SCRIPT_REQUIRE_CALLS {
         starts.extend(
@@ -511,11 +516,18 @@ runs:
       with:
         script: |
           require('${{ github.action_path }}/local.js')
+          require(`${process.env.GITHUB_ACTION_PATH}/envvar.js`)
 ";
         assert_eq!(
             github_script_files(content, Some(".github/actions/report")),
-            [".github/actions/report/local.js"]
+            [
+                ".github/actions/report/local.js",
+                ".github/actions/report/envvar.js",
+            ]
         );
-        assert_eq!(github_script_files(content, Some("")), ["local.js"]);
+        assert_eq!(
+            github_script_files(content, Some("")),
+            ["local.js", "envvar.js"]
+        );
     }
 }

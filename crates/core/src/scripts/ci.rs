@@ -401,13 +401,35 @@ enum AnchorTarget {
     /// The project root: `$GITHUB_WORKSPACE`, `${{ github.workspace }}`,
     /// GitLab `$CI_PROJECT_DIR`.
     Root,
-    /// The directory of the composite action: `${{ github.action_path }}`.
+    /// The directory of the composite action: `${{ github.action_path }}`,
+    /// `$GITHUB_ACTION_PATH`, `${{ env.GITHUB_ACTION_PATH }}`.
     Action,
 }
 
 const ROOT_ANCHOR_VARIABLES: &[&str] = &["GITHUB_WORKSPACE", "CI_PROJECT_DIR"];
 const ROOT_ANCHOR_EXPRESSIONS: &[&str] = &["github.workspace", "env.GITHUB_WORKSPACE"];
-const ACTION_ANCHOR_EXPRESSION: &str = "github.action_path";
+const ACTION_ANCHOR_VARIABLES: &[&str] = &["GITHUB_ACTION_PATH"];
+const ACTION_ANCHOR_EXPRESSIONS: &[&str] = &["github.action_path", "env.GITHUB_ACTION_PATH"];
+
+fn expression_target(expression: &str) -> Option<AnchorTarget> {
+    if ROOT_ANCHOR_EXPRESSIONS.contains(&expression) {
+        Some(AnchorTarget::Root)
+    } else if ACTION_ANCHOR_EXPRESSIONS.contains(&expression) {
+        Some(AnchorTarget::Action)
+    } else {
+        None
+    }
+}
+
+fn variable_target(variable: &str) -> Option<AnchorTarget> {
+    if ROOT_ANCHOR_VARIABLES.contains(&variable) {
+        Some(AnchorTarget::Root)
+    } else if ACTION_ANCHOR_VARIABLES.contains(&variable) {
+        Some(AnchorTarget::Action)
+    } else {
+        None
+    }
+}
 
 /// The target of `anchor` when the whole token is a workspace anchor.
 fn anchor_target(anchor: &str) -> Option<AnchorTarget> {
@@ -423,24 +445,17 @@ fn anchor_at(text: &str) -> Option<(AnchorTarget, usize)> {
         let close = rest.find("}}")?;
         let expression = rest[..close].trim();
         let len = 3 + close + 2;
-        if ROOT_ANCHOR_EXPRESSIONS.contains(&expression) {
-            return Some((AnchorTarget::Root, len));
-        }
-        return (expression == ACTION_ANCHOR_EXPRESSION).then_some((AnchorTarget::Action, len));
+        return expression_target(expression).map(|target| (target, len));
     }
     if let Some(rest) = text.strip_prefix("${") {
         let close = rest.find('}')?;
-        return ROOT_ANCHOR_VARIABLES
-            .contains(&&rest[..close])
-            .then_some((AnchorTarget::Root, 2 + close + 1));
+        return variable_target(&rest[..close]).map(|target| (target, 2 + close + 1));
     }
     let rest = text.strip_prefix('$')?;
     let name_len = rest
         .find(|ch: char| !(ch.is_ascii_alphanumeric() || ch == '_'))
         .unwrap_or(rest.len());
-    ROOT_ANCHOR_VARIABLES
-        .contains(&&rest[..name_len])
-        .then_some((AnchorTarget::Root, 1 + name_len))
+    variable_target(&rest[..name_len]).map(|target| (target, 1 + name_len))
 }
 
 /// Replace each workspace anchor that starts a path (`$GITHUB_WORKSPACE/x`,
@@ -1854,7 +1869,20 @@ runs:
       shell: bash
     - run: node "${{ github.action_path }}/../shared/util.ts"
       shell: bash
+    - run: node "${GITHUB_ACTION_PATH}/lib/envvar.mjs"
+      shell: bash
+    - run: node $GITHUB_ACTION_PATH/lib/unbraced.mjs
+      shell: bash
+    - run: node "${{ env.GITHUB_ACTION_PATH }}/lib/env_expr.mjs"
+      shell: bash
 "#,
+        )
+        .unwrap();
+        let workflows = dir.path().join(".github/workflows");
+        std::fs::create_dir_all(&workflows).unwrap();
+        std::fs::write(
+            workflows.join("ci.yml"),
+            "jobs:\n  test:\n    steps:\n      - run: node \"$GITHUB_ACTION_PATH/lib/workflow_only.mjs\"\n",
         )
         .unwrap();
         let nested = dir.path().join(".github/actions/group/deploy");
@@ -1875,6 +1903,10 @@ runs:
         assert_eq!(
             sorted(&analysis.entry_files),
             [
+                "$GITHUB_ACTION_PATH/lib/workflow_only.mjs",
+                ".github/actions/build/lib/env_expr.mjs",
+                ".github/actions/build/lib/envvar.mjs",
+                ".github/actions/build/lib/unbraced.mjs",
                 ".github/actions/build/run.ts",
                 ".github/actions/shared/util.ts",
                 "scripts/deploy.ts"
