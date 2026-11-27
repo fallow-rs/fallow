@@ -41,6 +41,10 @@ pub struct CiAnalysis {
     /// The subset of `entry_files` that a built-in test runner runs as tests
     /// (`node --test scripts/*.test.mjs`). These are test entry points.
     pub test_entry_files: Vec<String>,
+    /// The subset of `entry_files` that a script runtime runs as modules
+    /// (`node scripts/deploy`). Such a path can name a directory with an
+    /// index file.
+    pub module_entry_files: Vec<String>,
     /// The project-root-relative path of the CI file that names each path of
     /// `entry_files` (`.github/workflows/ci.yml`). When more CI files name
     /// one path, the first file in scan order wins: `.gitlab-ci.yml`, then
@@ -134,6 +138,8 @@ pub fn analyze_ci_files(
     analysis.entry_files.dedup();
     analysis.test_entry_files.sort();
     analysis.test_entry_files.dedup();
+    analysis.module_entry_files.sort();
+    analysis.module_entry_files.dedup();
     analysis
 }
 
@@ -261,6 +267,9 @@ fn analyze_command_group(
     analysis
         .test_entry_files
         .extend(parsed.test_entry_files.into_iter().filter_map(resolve));
+    analysis
+        .module_entry_files
+        .extend(parsed.module_entry_files.into_iter().filter_map(resolve));
 }
 
 /// The run steps of the composite actions in `.github/actions/<name>/` and

@@ -6,6 +6,31 @@
 /// Its entries have the test role.
 pub const SCRIPT_TEST_ENTRY_SOURCE: &str = "script-tests";
 
+/// The file arguments of script, task or CI commands that become entry
+/// points.
+#[derive(Clone, Copy)]
+pub struct ScriptEntryFiles<'a> {
+    /// Every file argument that becomes an entry point.
+    pub entries: &'a [String],
+    /// The files that a built-in test runner runs.
+    pub tests: &'a [String],
+    /// The subset of `entries` that a script runtime runs as modules
+    /// (`node scripts/build`).
+    pub modules: &'a [String],
+}
+
+impl<'a> ScriptEntryFiles<'a> {
+    /// The entry files of the analysis of package.json scripts and tasks.
+    #[must_use]
+    pub fn of(analysis: &'a crate::scripts::ScriptAnalysis) -> Self {
+        Self {
+            entries: &analysis.entry_files,
+            tests: &analysis.test_entry_files,
+            modules: &analysis.module_entry_files,
+        }
+    }
+}
+
 /// Push the entry patterns of script file arguments. A file that a built-in
 /// test runner runs is also a test entry, so the code that it imports counts
 /// as reached by tests. The `scripts` rule comes first, so it stays the
@@ -16,13 +41,15 @@ pub const SCRIPT_TEST_ENTRY_SOURCE: &str = "script-tests";
 /// names the file that runs it.
 ///
 /// A file argument without a glob resolves against `root`, the project root,
-/// like a package entry: `node scripts/build` runs `scripts/build.js`.
+/// like a package entry: `node scripts/build` runs `scripts/build.js`. Only a
+/// module that a script runtime runs resolves a directory to its index file
+/// (`node scripts/build` runs `scripts/build/index.js`). The directory of a
+/// file runner such as `vitest run src/lib/` is a filter.
 pub fn push_script_entry_patterns(
     entry_patterns: &mut Vec<(crate::plugins::PathRule, String)>,
     root: &std::path::Path,
     prefix: &str,
-    entry_files: &[String],
-    test_entry_files: &[String],
+    files: ScriptEntryFiles<'_>,
     ci_sources: Option<&rustc_hash::FxHashMap<String, String>>,
 ) {
     let source_of = |entry: &String| {
@@ -30,17 +57,20 @@ pub fn push_script_entry_patterns(
             .and_then(|sources| sources.get(entry))
             .map_or("scripts", String::as_str)
     };
-    let sources = entry_files
+    let sources = files
+        .entries
         .iter()
         .map(|entry| (entry, source_of(entry)))
         .chain(
-            test_entry_files
+            files
+                .tests
                 .iter()
                 .map(|entry| (entry, SCRIPT_TEST_ENTRY_SOURCE)),
         );
     for (entry, source) in sources {
         if let Some(pat) = crate::scripts::normalize_script_entry_pattern(prefix, entry) {
-            let pat = resolve_literal_entry(root, pat);
+            let module = files.modules.contains(entry);
+            let pat = resolve_literal_entry(root, pat, module);
             entry_patterns.push((crate::plugins::PathRule::new(pat), source.to_string()));
         }
     }
@@ -68,20 +98,30 @@ pub fn analyze_ci_scripts(
         &mut plugin_result.entry_patterns,
         &config.root,
         "",
-        &ci_analysis.entry_files,
-        &ci_analysis.test_entry_files,
+        ScriptEntryFiles {
+            entries: &ci_analysis.entry_files,
+            tests: &ci_analysis.test_entry_files,
+            modules: &ci_analysis.module_entry_files,
+        },
         Some(&ci_analysis.entry_file_sources),
     );
 }
 
 /// Replace a literal entry pattern with the project-relative path of the
 /// source file that it names. A glob, or a reference that names no file,
-/// stays as it is.
-fn resolve_literal_entry(root: &std::path::Path, pattern: String) -> String {
+/// stays as it is. A `module` pattern can also name a directory with an
+/// index file.
+fn resolve_literal_entry(root: &std::path::Path, pattern: String, module: bool) -> String {
     if crate::scripts::is_glob(&pattern) {
         return pattern;
     }
-    crate::discover::probe_runnable_file(&root.join(&pattern))
+    let path = root.join(&pattern);
+    crate::discover::probe_runnable_file(&path)
+        .or_else(|| {
+            module
+                .then(|| crate::discover::probe_directory_index(&path))
+                .flatten()
+        })
         .and_then(|file| {
             file.strip_prefix(root)
                 .ok()
@@ -97,7 +137,12 @@ mod tests {
     fn patterns(root: &std::path::Path, prefix: &str, entries: &[&str]) -> Vec<String> {
         let entries: Vec<String> = entries.iter().map(|entry| (*entry).to_string()).collect();
         let mut out = Vec::new();
-        push_script_entry_patterns(&mut out, root, prefix, &entries, &[], None);
+        let files = ScriptEntryFiles {
+            entries: &entries,
+            tests: &[],
+            modules: &[],
+        };
+        push_script_entry_patterns(&mut out, root, prefix, files, None);
         out.into_iter().map(|(rule, _)| rule.pattern).collect()
     }
 
@@ -154,6 +199,23 @@ mod tests {
             patterns(dir.path(), "", &["scripts/deploy.sh", "tsconfig.json"]),
             ["scripts/deploy.sh", "tsconfig.json"]
         );
+    }
+
+    #[test]
+    fn only_a_runtime_module_directory_resolves_to_its_index_file() {
+        let dir = tempfile::tempdir().expect("temp project");
+        std::fs::create_dir_all(dir.path().join("scripts/gen")).expect("dirs");
+        std::fs::write(dir.path().join("scripts/gen/index.js"), "").expect("index");
+        let entries = ["scripts/gen".to_string(), "./scripts/gen/".to_string()];
+        let mut out = Vec::new();
+        let files = ScriptEntryFiles {
+            entries: &entries,
+            tests: &[],
+            modules: &entries[..1],
+        };
+        push_script_entry_patterns(&mut out, dir.path(), "", files, None);
+        let patterns: Vec<String> = out.into_iter().map(|(rule, _)| rule.pattern).collect();
+        assert_eq!(patterns, ["scripts/gen/index.js", "scripts/gen"]);
     }
 
     #[test]

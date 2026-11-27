@@ -57,6 +57,20 @@ pub fn probe_runnable_file(resolved: &Path) -> Option<PathBuf> {
         .find(|candidate| candidate.is_file())
 }
 
+/// Whether `path` has an extension that is not a runnable extension
+/// (`deploy.sh`, `theme.css`).
+pub fn has_non_runnable_extension(path: &Path) -> bool {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| !RUNNABLE_EXTENSIONS.contains(&ext))
+}
+
+/// The index file of the directory `resolved`, as Node resolves a module
+/// path that names a directory (`scripts/build` to `scripts/build/index.js`).
+pub fn probe_directory_index(resolved: &Path) -> Option<PathBuf> {
+    fallow_graph::resolve::directory_index_entry(resolved, SOURCE_EXTENSIONS)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

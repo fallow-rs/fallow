@@ -56,23 +56,36 @@ fn run_commands_targets_credit_extensionless_script_files() {
         "scripts/tsnoext.ts",
         "scripts/ci-check.mjs",
         "packages/app/tools/run.cjs",
+        "scripts/nx-dir/index.js",
+        "scripts/ci-dir/index.mjs",
+        "scripts/docker-dir/index.js",
+        "scripts/wrapped-dir/index.js",
     ] {
         assert!(
             !unused.iter().any(|path| path.ends_with(credited)),
-            "{credited} is run without its extension, got unused: {unused:?}"
+            "{credited} is run without its extension or as a directory, got unused: {unused:?}"
         );
     }
-    for unrun in ["src/orphan.ts", "scripts/deploy.ts"] {
+    // `bash scripts/deploy.sh` and `bash scripts/pkg-deploy.sh` name shell
+    // files that are not on disk, and a shell cannot run the directory of
+    // `bash scripts/sh-dir`.
+    for unrun in [
+        "src/orphan.ts",
+        "scripts/deploy.ts",
+        "scripts/pkg-deploy.ts",
+        "scripts/sh-dir/index.js",
+    ] {
         assert!(
             unused.iter().any(|path| path.ends_with(unrun)),
-            "{unrun} is run by no command (`bash scripts/deploy.sh` names a shell file that is not on disk), got: {unused:?}"
+            "{unrun} is run by no command, got: {unused:?}"
         );
     }
 }
 
-/// A directory argument such as `vitest run src/lib/` is a filter, not a
-/// module that the command runs, so the index file of the directory does not
-/// become an entry.
+/// Issue #5370: a directory argument such as `vitest run src/lib/` is a
+/// filter, not a module that the command runs, so the index file of the
+/// directory does not become an entry. The fixture passes the directory in an
+/// Nx target, a package.json script and a Dockerfile.
 #[test]
 fn run_commands_directory_argument_is_not_an_index_entry() {
     let output = run_fallow(

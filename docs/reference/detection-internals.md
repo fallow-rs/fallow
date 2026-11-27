@@ -851,7 +851,7 @@ the rules:
 - `sh -c "<command>"` reads the quoted command with the same rules.
 
 An entry file argument without a glob resolves on disk through
-`probe_runnable_file` in `crates/core/src/discover/entry_points.rs`, as Node
+`probe_runnable_file` in `crates/core/src/discover/source_probe.rs`, as Node
 and the TypeScript runners resolve it (issue #5325). The probe tries the exact
 file first. A path with a runnable extension (`.js`, `.ts` and their module
 variants) then gets each runnable extension in its place. Any other path gets
@@ -859,17 +859,36 @@ each runnable extension added: `node tools/build` runs `tools/build.js`,
 and `node tools/build.prod` runs `tools/build.prod.js`. The probe never
 replaces another extension, so `bash tools/deploy.sh` does not name
 `tools/deploy.ts`. It never adds a style or markup extension, so
-`node tools/theme` does not name `tools/theme.css`. It does not resolve a
-directory to its index file, because a command can pass a directory as a
-filter (`vitest run src/lib/`). The `package.json` scripts, the Nx
-`run-commands` targets, the Vite+ tasks and the CI commands share this probe.
+`node tools/theme` does not name `tools/theme.css`. The `package.json`
+scripts, the Nx `run-commands` targets, the Vite+ tasks and the CI commands
+share this probe.
+
+The program that takes an argument decides whether a directory names its
+index file (issue #5370):
+
+- A script runtime (`node`, `tsx`, `bun`, `deno run`) runs one module. `argument_entries::runs_modules` marks its arguments, and
+  `ScriptCommand::runs_modules`, `ScriptAnalysis::module_entry_files` and
+  `CiAnalysis::module_entry_files` carry that fact to the resolvers. After
+  the probe, such an argument resolves a directory to its index file:
+  `node tools/build` runs `tools/build/index.js`.
+- Any other program (a test runner, a bundler, a linter) takes paths and
+  filters. A directory argument such as `vitest run src/lib/` names no entry
+  point. A shell runs a script file, but it cannot run a directory.
+
+The infrastructure files (`Dockerfile`, `Procfile`, `fly.toml`) apply the
+same rule through `resolve_script_entry_path`. A missing command argument
+with a non-script extension (`bash index.sh`) never falls back to the source
+index of the package.
+
+The `package.json` scripts resolve in `ScriptPackage::resolve` in
+`crates/core/src/discover/script_package.rs`. That resolver first maps build
+output to source (`node dist/server.js` to `src/server.ts`), then probes
+with `EntryProbe::ScriptModule` or `EntryProbe::ScriptPath`. A config file
+argument keeps the package entry probe.
 
 Package entries (`main`, `bin`, `exports`) resolve through
 `probe_source_file`: the exact file, or the path with its extension replaced
-by any source extension, then the directory index. The `package.json`
-scripts also resolve through this package entry resolver, so a script
-argument there still resolves a directory to its index file and still swaps
-any extension.
+by any source extension, then the directory index.
 
 Formatters and linters (`file_target_tools.rs`) and the built-in test
 runners (`node --test`, `bun test`, `deno test`, `borp`) keep their own

@@ -100,6 +100,9 @@ const SCRIPT_EXTENSIONS: &[&str] = &[
 /// The characters that make an argument a glob.
 const GLOB_CHARS: &[char] = &['*', '?', '{'];
 
+/// The shells. A shell runs a script file, but it cannot run a directory.
+const SHELLS: &[&str] = &["sh", "bash", "zsh", "dash"];
+
 /// Every [`ScriptRuntime`].
 const SCRIPT_RUNTIMES: &[ScriptRuntime] = &[
     ScriptRuntime {
@@ -193,7 +196,7 @@ const SCRIPT_RUNTIMES: &[ScriptRuntime] = &[
         inline_code_flags: &[],
     },
     ScriptRuntime {
-        names: &["sh", "bash", "zsh", "dash"],
+        names: SHELLS,
         subcommands: &[],
         value_flags: &["-c", "-o", "+o"],
         loading_flags: &[],
@@ -356,6 +359,31 @@ fn wrapped_program(args: &[&str]) -> Option<usize> {
         after_flag = token.starts_with('-') && token != "--" && !token.contains('=');
     }
     None
+}
+
+/// Return `true` when the file arguments of `binary` are modules that a
+/// script runtime runs (`node scripts/build`, `tsx -r ./setup.ts app.ts`),
+/// and not paths or filters that a file runner reads. `args` are the tokens
+/// after the binary.
+///
+/// A module argument resolves like Node resolves it: the exact file, a JS or
+/// TS extension, then the index file of a directory. A path argument never
+/// names the index file of a directory (issue #5370).
+#[must_use]
+pub fn runs_modules(binary: &str, args: &[&str]) -> bool {
+    if !matches!(argument_entries(binary, args), ArgumentEntries::Listed(_)) {
+        return false;
+    }
+    let name = tool_name(binary);
+    if script_runtime(name).is_some() {
+        return !SHELLS.contains(&name);
+    }
+    // An executable script runs itself, and a file utility runs nothing.
+    if is_executable_script(binary) || FILE_UTILITIES.contains(&name) {
+        return false;
+    }
+    // Another program can run a known program (`time node x.js`).
+    wrapped_program(args).is_some_and(|idx| runs_modules(args[idx], &args[idx + 1..]))
 }
 
 /// Return `true` when `binary` runs or loads every file argument that it
@@ -583,6 +611,34 @@ mod tests {
             .into_iter()
             .flat_map(|cmd| cmd.file_args)
             .collect()
+    }
+
+    #[test]
+    fn only_a_script_runtime_runs_its_arguments_as_modules() {
+        let runs = |script: &str| {
+            let tokens: Vec<&str> = script.split_whitespace().collect();
+            super::runs_modules(tokens[0], &tokens[1..])
+        };
+        for script in [
+            "node scripts/build",
+            "tsx -r ./setup.ts scripts/build",
+            "deno run scripts/build",
+            "time node scripts/build",
+            "infisical run -- tsx scripts/build",
+        ] {
+            assert!(runs(script), "`{script}` runs a module");
+        }
+        for script in [
+            "vitest run src/lib/",
+            "node --test test/",
+            "bun build ./src",
+            "bash scripts/deploy",
+            "./scripts/run.js node data/",
+            "cp src/lib dist/",
+            "my-codegen src/lib",
+        ] {
+            assert!(!runs(script), "`{script}` runs no module");
+        }
     }
 
     #[test]

@@ -6,6 +6,12 @@ use crate::scripts::{
 /// Shells whose `-c` value is a command.
 const SHELLS: &[&str] = &["sh", "bash", "zsh", "dash"];
 
+/// The file references of a script, without the module marks.
+#[cfg(test)]
+fn extract_script_file_refs(script: &str, context: CommandRefContext<'_>) -> Vec<String> {
+    extract_script_file_refs_with_modules(script, context).paths
+}
+
 /// Extract file path references from a package.json script value.
 ///
 /// Recognises patterns like:
@@ -30,8 +36,15 @@ const SHELLS: &[&str] = &["sh", "bash", "zsh", "dash"];
 ///
 /// The body of a `$(...)` or backtick command substitution is scanned as a
 /// script of its own, because the shell runs it.
-pub fn extract_script_file_refs(script: &str, context: CommandRefContext<'_>) -> Vec<String> {
-    let mut refs = Vec::new();
+///
+/// The result marks the references that a script runtime runs as modules
+/// (`node scripts/build`). Only such a reference can name a directory with
+/// an index file.
+pub fn extract_script_file_refs_with_modules(
+    script: &str,
+    context: CommandRefContext<'_>,
+) -> ScriptFileRefs {
+    let mut refs = ScriptFileRefs::default();
     let mut expansions = 0;
     collect_script_file_refs(
         script,
@@ -41,6 +54,42 @@ pub fn extract_script_file_refs(script: &str, context: CommandRefContext<'_>) ->
         &mut refs,
     );
     refs
+}
+
+/// The file references of a script.
+#[derive(Debug, Default)]
+pub struct ScriptFileRefs {
+    /// Every file reference.
+    pub paths: Vec<String>,
+    /// The subset of `paths` that a script runtime runs as modules
+    /// (`node scripts/build`). Such a reference can name a directory with an
+    /// index file.
+    pub modules: Vec<String>,
+}
+
+impl ScriptFileRefs {
+    /// Add `paths`, as modules when `modules` is `true`.
+    pub(super) fn extend(&mut self, paths: impl IntoIterator<Item = String>, modules: bool) {
+        let first_new = self.paths.len();
+        self.paths.extend(paths);
+        if modules {
+            self.modules.extend_from_slice(&self.paths[first_new..]);
+        }
+    }
+
+    /// Add every reference of `other`.
+    pub(super) fn append(&mut self, other: Self) {
+        self.paths.extend(other.paths);
+        self.modules.extend(other.modules);
+    }
+
+    /// Add the references of a script of the package in `dir`, each rebased
+    /// to the calling package.
+    fn extend_rebased(&mut self, dir: &str, other: Self) {
+        let rebase = |path: String| crate::scripts::rebase_path(dir, &path);
+        self.paths.extend(other.paths.into_iter().map(rebase));
+        self.modules.extend(other.modules.into_iter().map(rebase));
+    }
 }
 
 /// How deep the scan is in script calls and in command substitutions.
@@ -76,7 +125,7 @@ fn collect_script_file_refs(
     context: CommandRefContext<'_>,
     depth: Depth,
     expansions: &mut usize,
-    refs: &mut Vec<String>,
+    refs: &mut ScriptFileRefs,
 ) {
     if depth.substitutions < MAX_SUBSTITUTION_DEPTH {
         let inner = Depth {
@@ -122,7 +171,7 @@ fn collect_script_file_refs(
                     }
                     *expansions += 1;
                     let scripts = context.scripts.for_package_command(command);
-                    let mut package_refs = Vec::new();
+                    let mut package_refs = ScriptFileRefs::default();
                     collect_script_file_refs(
                         &command.command,
                         CommandRefContext {
@@ -133,11 +182,7 @@ fn collect_script_file_refs(
                         expansions,
                         &mut package_refs,
                     );
-                    refs.extend(
-                        package_refs
-                            .iter()
-                            .map(|path| crate::scripts::rebase_path(&command.dir, path)),
-                    );
+                    refs.extend_rebased(&command.dir, package_refs);
                 }
                 continue;
             }
@@ -180,8 +225,8 @@ fn collect_script_file_refs(
             collect_script_file_refs(body, context, inner, expansions, refs);
             continue;
         }
-        let files = script_file_args(cmd, &tokens, start, unknown_body);
-        refs.extend(files.iter().flat_map(|path| resolve(path)));
+        let (files, modules) = script_file_args(cmd, &tokens, start, unknown_body);
+        refs.extend(files.iter().flat_map(|path| resolve(path)), modules);
     }
 }
 
@@ -250,19 +295,31 @@ fn command_string(value: &str) -> &str {
 /// flags load, and a program that fallow does not know gives no glob. A
 /// call of a script with an unknown body (`unknown_body`) can run any
 /// program, so every argument can name a file.
-fn script_file_args(cmd: &str, tokens: &[&str], start: usize, unknown_body: bool) -> Vec<String> {
+///
+/// The `bool` is `true` when a script runtime runs the arguments as modules.
+fn script_file_args(
+    cmd: &str,
+    tokens: &[&str],
+    start: usize,
+    unknown_body: bool,
+) -> (Vec<String>, bool) {
     const RUNNERS: &[&str] = &["node", "bun", "ts-node", "tsx", "babel-node"];
     // A package manager that stays the command runs a script that the
     // catalog does not declare.
     const PACKAGE_MANAGERS: &[&str] = &["npm", "pnpm", "yarn"];
     if crate::scripts::is_file_target_tool(cmd) {
-        return crate::scripts::file_target_tool_loaded_files(cmd, &tokens[start + 1..]);
+        return (
+            crate::scripts::file_target_tool_loaded_files(cmd, &tokens[start + 1..]),
+            false,
+        );
     }
     let entries = if unknown_body || PACKAGE_MANAGERS.contains(&cmd) {
         ArgumentEntries::All
     } else {
         crate::scripts::argument_entries(cmd, &tokens[start + 1..])
     };
+    let modules = matches!(entries, ArgumentEntries::Listed(_))
+        && crate::scripts::runs_modules(cmd, &tokens[start + 1..]);
     let (args, is_ref): (Vec<&str>, fn(&str) -> bool) = match entries {
         ArgumentEntries::All if RUNNERS.contains(&cmd) => {
             (tokens[start + 1..].to_vec(), looks_like_file_path)
@@ -285,12 +342,14 @@ fn script_file_args(cmd: &str, tokens: &[&str], start: usize, unknown_body: bool
                 .collect(),
             looks_like_file_path,
         ),
-        ArgumentEntries::Loaded(loaded) => return loaded,
+        ArgumentEntries::Loaded(loaded) => return (loaded, false),
     };
-    args.into_iter()
+    let files = args
+        .into_iter()
         .filter(|token| !token.starts_with('-') && is_ref(token))
         .map(str::to_string)
-        .collect()
+        .collect();
+    (files, modules)
 }
 
 /// Check if a token looks like a file path argument (has a directory separator
