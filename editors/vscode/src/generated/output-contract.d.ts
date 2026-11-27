@@ -22995,7 +22995,8 @@ test_id?: (string | null)
 message?: (string | null)
 /**
  * The mutants that ran without this test, because the test did not pass
- * in the dry run of a restarted companion. Each of them ran with its
+ * in a restarted companion: in its dry run, or in the control run of a
+ * test that it took from the first dry run. Each of them ran with its
  * other covering tests. Absent for a failure of the first dry run.
  */
 mutant_ids?: string[]

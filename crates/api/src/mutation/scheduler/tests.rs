@@ -140,6 +140,7 @@ impl CompanionSpawner for FakeSpawner {
 }
 
 const VITEST_CAPS: Capabilities = Capabilities {
+    adopt: false,
     per_test_attribution: true,
     test_filter: true,
     hot_switch: true,
@@ -162,6 +163,7 @@ fn ready(caps: Capabilities, version: &str) -> Response {
 
 fn test(id: &str, duration: f64, status: TestStatus) -> DryTest {
     DryTest {
+        index: None,
         test_id: format!("test/a.test.ts::{id}"),
         file: "test/a.test.ts".to_owned(),
         duration_ms: Some(duration),
@@ -178,6 +180,7 @@ fn tid(id: &str) -> String {
 /// t1 (fast) hits m1, t2 (slow) and t1 hit m2, nothing hits m3.
 fn standard_dry() -> DryRunResult {
     DryRunResult {
+        worker_mode: None,
         tests: vec![
             test("t1", 2.0, TestStatus::Pass),
             test("t2", 100.0, TestStatus::Pass),
@@ -241,7 +244,7 @@ fn script(
         Request::Reload => Ok(Response::Reloaded(Reloaded {
             method: ReloadMethod::Noop,
         })),
-        Request::Shutdown | Request::Replay(_) | Request::Record { .. } => {
+        Request::Shutdown | Request::Replay(_) | Request::Record { .. } | Request::Adopt(_) => {
             Err(LinkFault::Protocol("no response".to_owned()))
         }
     }
@@ -1146,10 +1149,12 @@ fn an_init_error_response_stops_the_run_with_its_message() {
 fn baseline_failures_never_decide_a_mutant() {
     let spawner = FakeSpawner::new(script(
         |_| DryRunResult {
+            worker_mode: None,
             tests: vec![
                 test("t1", 2.0, TestStatus::Fail),
                 test("t2", 3.0, TestStatus::Pass),
                 DryTest {
+                    index: None,
                     test_id: "test/b.test.ts::t3".to_owned(),
                     file: "test/b.test.ts".to_owned(),
                     duration_ms: Some(1.0),
@@ -1252,7 +1257,7 @@ fn static_mutants_run_last_with_a_reload_around_each_when_modules_stay_loaded() 
                 ReloadMethod::Invalidate
             },
         })),
-        Request::Shutdown | Request::Replay(_) | Request::Record { .. } => {
+        Request::Shutdown | Request::Replay(_) | Request::Record { .. } | Request::Adopt(_) => {
             Err(LinkFault::Protocol("no response".to_owned()))
         }
     });
@@ -1287,6 +1292,7 @@ fn a_module_level_mutant_with_static_and_test_hits_runs_static_importer_tests() 
         move |_| {
             let mut dry = standard_dry();
             dry.tests.push(DryTest {
+                index: None,
                 test_id: dry_test.clone(),
                 file: "test/b.test.ts".to_owned(),
                 duration_ms: Some(5.0),
@@ -1675,7 +1681,7 @@ fn without_a_test_filter_a_mutant_runs_each_passing_test_of_its_covering_files()
         Request::Reload => Ok(Response::Reloaded(Reloaded {
             method: ReloadMethod::Noop,
         })),
-        Request::Shutdown | Request::Replay(_) | Request::Record { .. } => {
+        Request::Shutdown | Request::Replay(_) | Request::Record { .. } | Request::Adopt(_) => {
             Err(LinkFault::Protocol("no response".to_owned()))
         }
     });
@@ -1752,6 +1758,7 @@ fn no_covering_test_message_gives_a_count_and_the_first_test_only() {
 #[test]
 fn a_covering_test_that_fails_in_a_respawned_dry_run_is_a_baseline_failure() {
     let dry = |index: usize| DryRunResult {
+        worker_mode: None,
         tests: vec![
             test("t1", 2.0, TestStatus::Pass),
             test(
@@ -1840,6 +1847,7 @@ fn failed_test(id: &str, error: &str) -> DryTest {
 #[test]
 fn a_respawned_dry_run_failure_keeps_the_error_of_the_test() {
     let dry = |index: usize| DryRunResult {
+        worker_mode: None,
         tests: vec![
             test("t1", 2.0, TestStatus::Pass),
             match index {
@@ -1901,6 +1909,7 @@ fn a_respawned_dry_run_failure_keeps_the_error_of_the_test() {
 fn a_first_dry_run_failure_keeps_the_error_of_the_test() {
     let spawner = FakeSpawner::new(script(
         |_| DryRunResult {
+            worker_mode: None,
             tests: vec![
                 failed_test(
                     "t1",
@@ -1944,6 +1953,7 @@ fn a_first_dry_run_failure_keeps_the_error_of_the_test() {
 #[test]
 fn a_survivor_without_a_dropped_covering_test_is_not_a_runtime_error() {
     let dry = |index: usize| DryRunResult {
+        worker_mode: None,
         tests: vec![
             test("t1", 2.0, TestStatus::Pass),
             test(
@@ -2012,6 +2022,7 @@ fn a_survivor_without_a_dropped_covering_test_is_not_a_runtime_error() {
 #[test]
 fn a_dropped_test_cannot_be_the_killer() {
     let dry = |index: usize| DryRunResult {
+        worker_mode: None,
         tests: vec![
             test("t1", 2.0, TestStatus::Pass),
             test(
@@ -2995,6 +3006,7 @@ fn two_file_dry() -> DryRunResult {
         tests: vec![
             test("t1", 2.0, TestStatus::Pass),
             DryTest {
+                index: None,
                 test_id: "test/b.test.ts::t2".to_owned(),
                 file: "test/b.test.ts".to_owned(),
                 duration_ms: Some(3.0),
@@ -3053,7 +3065,7 @@ fn a_companion_restarted_for_a_static_mutant_dry_runs_only_the_files_of_the_muta
         Request::Reload => Ok(Response::Reloaded(Reloaded {
             method: ReloadMethod::RestartRequired,
         })),
-        Request::Shutdown | Request::Replay(_) | Request::Record { .. } => {
+        Request::Shutdown | Request::Replay(_) | Request::Record { .. } | Request::Adopt(_) => {
             Err(LinkFault::Protocol("no response".to_owned()))
         }
     });
@@ -3091,7 +3103,7 @@ fn a_kept_companion_with_a_narrow_dry_run_restarts_for_tests_outside_it() {
                 ReloadMethod::Invalidate
             },
         })),
-        Request::Shutdown | Request::Replay(_) | Request::Record { .. } => {
+        Request::Shutdown | Request::Replay(_) | Request::Record { .. } | Request::Adopt(_) => {
             Err(LinkFault::Protocol("no response".to_owned()))
         }
     });
@@ -3464,3 +3476,6 @@ mod concurrency_tests;
 
 #[path = "shard_tests.rs"]
 mod shard_tests;
+
+#[path = "adopt_tests.rs"]
+mod adopt_tests;

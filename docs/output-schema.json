@@ -35362,7 +35362,7 @@
           "items": {
             "type": "string"
           },
-          "description": "The mutants that ran without this test, because the test did not pass\nin the dry run of a restarted companion. Each of them ran with its\nother covering tests. Absent for a failure of the first dry run."
+          "description": "The mutants that ran without this test, because the test did not pass\nin a restarted companion: in its dry run, or in the control run of a\ntest that it took from the first dry run. Each of them ran with its\nother covering tests. Absent for a failure of the first dry run."
         }
       },
       "description": "A test or a test file that failed with no active mutant. Its tests do not\ndecide a mutant status."

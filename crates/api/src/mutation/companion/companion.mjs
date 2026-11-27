@@ -106,6 +106,14 @@ const createSession = () => {
     init,
     dry_run: async (request) =>
       response(request.id, "dry_run_result", await requireAdapter().dryRun(request)),
+    adopt: async (request) => {
+      const current = requireAdapter();
+      expectRequest(
+        typeof current.adopt === "function",
+        "the runner has no adopt capability; ready.capabilities.adopt is false",
+      );
+      return response(request.id, "adopted", await current.adopt(request));
+    },
     run: async (request) => response(request.id, "run_result", await requireAdapter().run(request)),
     reload: async (request) =>
       response(request.id, "reloaded", await requireAdapter().reload(request)),

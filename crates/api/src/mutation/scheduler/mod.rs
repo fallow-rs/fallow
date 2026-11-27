@@ -24,6 +24,7 @@ use super::{MutationProgress, MutationProgressSink};
 use reserve::PhaseDeadline;
 use retry_set::{confirmation_tests, fastest_first, retried_status, retry_extra_ms, whole_files};
 
+mod adopt;
 mod classification;
 pub mod clock;
 pub(super) mod control;
@@ -33,9 +34,10 @@ mod issues;
 mod retry_set;
 pub mod targets;
 mod window;
+use adopt::{Proven, TestIndex};
 use classification::{attempt_record, classify, is_load_kill, kill_kind, matrix_evidence};
 use dry_facts::{DryRunFacts, covering_tests, read_dry_run, record_dry_run, reported_duplicates};
-use dry_phase::{DryPhase, WarmLink, checked_jobs, dry_phase, holds, shutdown_all};
+use dry_phase::{DryPhase, WarmLink, checked_jobs, holds, shutdown_all, timed_dry_phase};
 use issues::{no_covering_test_message, static_map_miss_issue, undiscovered_issue};
 use targets::{
     TargetFiles, check_targets, config_targets, confirmed_kill, job_targets, retries_unique_kill,
@@ -48,8 +50,8 @@ use stored::{FirstRun, FirstRuns, job_key, journal_first_run, journal_retry, rec
 
 use control::{
     CONFIRMATION_RUN_FAILURE, CONTROL_RUN_FAILURE, ControlCheck, ControlMemo, ControlOutcome,
-    ControlVerdict, FailedTest, control_fault, first_line, note_control_failures,
-    note_restarted_baseline_failure, parallel_state_hint, sorted_tests,
+    ControlVerdict, FailedTest, RESTARTED_DRY_RUN_FAILURE, control_fault, first_line,
+    note_control_failures, note_restarted_baseline_failure, parallel_state_hint, sorted_tests,
 };
 
 /// The extra wait of the watchdog after `timeout_ms` (section 8).
@@ -474,7 +476,7 @@ impl Attempt {
     }
 }
 
-/// A companion that has sent `ready` and a dry run.
+/// A companion that has sent `ready`, with a dry run or a taken test index.
 struct Worker<'a> {
     workers: usize,
     spawner: &'a dyn CompanionSpawner,
@@ -488,6 +490,14 @@ struct Worker<'a> {
     /// A reload of a companion of this worker gave `restart_required`.
     restarts_on_reload: bool,
     memo: &'a ControlMemo,
+    /// The test index of the first dry run, when the runner can take it.
+    index: Option<&'a TestIndex>,
+    /// The taken tests that did not yet pass in this companion, with the
+    /// test file of each.
+    unproven: FxHashMap<String, String>,
+    /// The taken tests that failed in a control run of a companion of this
+    /// worker. A new companion of the worker does not take them again.
+    dropped: FxHashSet<String>,
 }
 
 enum EnsureError {
@@ -514,6 +524,9 @@ impl<'a> Worker<'a> {
             loaded_files: None,
             restarts_on_reload: false,
             memo,
+            index: None,
+            unproven: FxHashMap::default(),
+            dropped: FxHashSet::default(),
         }
     }
 
@@ -522,96 +535,13 @@ impl<'a> Worker<'a> {
             link.shutdown();
         }
         self.known_tests.clear();
+        self.unproven.clear();
         self.loaded_files = None;
     }
 
     /// True when the companion of this worker dry-ran each of `files`.
     fn holds(&self, files: &[String]) -> bool {
         self.link.is_some() && holds(self.loaded_files.as_deref(), files)
-    }
-
-    /// Gives a companion whose dry run covers the sorted `need` files. A new
-    /// companion dry-runs `scope`, or each file of the phase for `None`. A
-    /// companion with a narrower dry run is replaced: the protocol has no
-    /// second dry run.
-    fn ensure(
-        &mut self,
-        scope: Option<&[String]>,
-        need: &[String],
-    ) -> Result<&mut Box<dyn CompanionLink>, EnsureError> {
-        if self.link.is_some() && !self.holds(need) {
-            self.reset();
-        }
-        if self.link.is_none() {
-            let mut link = self.spawner.spawn().map_err(|failure| match failure {
-                SpawnFailure::Integrity(message) => {
-                    EnsureError::Fatal(ScheduleError::Integrity(message))
-                }
-                SpawnFailure::Fault(fault) => EnsureError::Fault(
-                    format!(
-                        "the companion did not start: {fault}{}",
-                        setup_timeout_hint(&fault)
-                    ),
-                    fault.stderr_tail().map(str::to_owned),
-                ),
-            })?;
-            let fault = |stage: &str, fault: &LinkFault| {
-                EnsureError::Fault(
-                    format!(
-                        "the companion {stage} failed: {fault}{}{}",
-                        setup_timeout_hint(fault),
-                        parallel_state_hint(self.workers)
-                    ),
-                    fault.stderr_tail().map(str::to_owned),
-                )
-            };
-            match link.request(
-                &Request::Init(self.config.init.clone()),
-                self.config.runner_timeout,
-            ) {
-                Ok(Response::Ready(ready)) => {
-                    if !self.config.runner.contains(&ready.runner_version) {
-                        link.shutdown();
-                        return Err(EnsureError::Fatal(version_error(
-                            &self.config.runner,
-                            &ready.runner_version,
-                        )));
-                    }
-                }
-                Ok(_) => return Err(EnsureError::Fault("init gave no ready".to_owned(), None)),
-                Err(error) => return Err(fault("init", &error)),
-            }
-            let request = Request::DryRun {
-                test_files: scope.unwrap_or(self.dry_files).to_vec(),
-            };
-            match link.request(&request, self.dry_run_timeout) {
-                Ok(Response::DryRun(result)) => {
-                    for test in &result.tests {
-                        if let (TestStatus::Fail, Some(error)) = (test.status, &test.message) {
-                            self.memo.note_restarted_dry_run_error(&test.test_id, error);
-                        }
-                    }
-                    self.known_tests = result
-                        .tests
-                        .into_iter()
-                        .filter(|test| test.status == TestStatus::Pass)
-                        .map(|test| test.test_id)
-                        .collect();
-                }
-                Ok(_) => {
-                    return Err(EnsureError::Fault(
-                        "dry_run gave no dry_run_result".to_owned(),
-                        None,
-                    ));
-                }
-                Err(error) => return Err(fault("dry run", &error)),
-            }
-            self.link = Some(link);
-            self.loaded_files = scope.map(<[String]>::to_vec);
-        }
-        self.link
-            .as_mut()
-            .ok_or_else(|| EnsureError::Fault("the companion is gone".to_owned(), None))
     }
 
     /// [`Self::ensure`] for the test files of `job`.
@@ -659,20 +589,7 @@ impl<'a> Worker<'a> {
             .cloned()
             .partition(|test| self.known_tests.contains(test) && !self.memo.is_failed(test));
         if tests.is_empty() {
-            if dropped_tests.iter().all(|test| self.memo.is_failed(test)) {
-                return Ok(Attempt::uncovered(dropped_tests));
-            }
-            let mut attempt = Attempt::runtime_error(
-                job,
-                format!(
-                    "{}{}",
-                    no_covering_test_message(&dropped_tests),
-                    parallel_state_hint(self.workers)
-                ),
-                None,
-            );
-            attempt.dropped_tests = dropped_tests;
-            return Ok(attempt);
+            return Ok(self.no_tests_left(job, dropped_tests));
         }
         let request = Request::Run(RunRequest {
             mutant_id: Some(job.id.clone()),
@@ -682,6 +599,7 @@ impl<'a> Worker<'a> {
             bail,
         });
         let watchdog = Duration::from_millis(job.watchdog_ms());
+        let taken = self.taken_of(&tests);
         let Some(link) = self.link.as_mut() else {
             return Ok(Attempt::runtime_error(
                 job,
@@ -734,6 +652,11 @@ impl<'a> Worker<'a> {
         if job.static_mutant && !caps.fresh_modules_per_run && self.link.is_some() {
             self.reload();
         }
+        let attempt = match self.prove_taken(job, &tests, caps, attempt, &taken)? {
+            Proven::Kept(attempt) => attempt,
+            Proven::Rerun => return self.attempt_tests(job, caps, bail),
+            Proven::Fault(fault) => return Ok(fault),
+        };
         if load_kill {
             return self.confirm_load_kill(job, &tests, caps, attempt);
         }
@@ -741,6 +664,26 @@ impl<'a> Worker<'a> {
             return self.confirm_new_killer(job, &tests, caps, attempt);
         }
         Ok(attempt)
+    }
+
+    /// The attempt of a job with no covering test left in the companion:
+    /// `no_coverage` when each test failed in a control run, otherwise a
+    /// `runtime_error`.
+    fn no_tests_left(&self, job: &Job, dropped_tests: Vec<String>) -> Attempt {
+        if dropped_tests.iter().all(|test| self.memo.is_failed(test)) {
+            return Attempt::uncovered(dropped_tests);
+        }
+        let mut attempt = Attempt::runtime_error(
+            job,
+            format!(
+                "{}{}",
+                no_covering_test_message(&dropped_tests),
+                parallel_state_hint(self.workers)
+            ),
+            None,
+        );
+        attempt.dropped_tests = dropped_tests;
+        attempt
     }
 
     /// Keeps a kill with no executed test only when `tests` pass in a control
@@ -995,7 +938,11 @@ impl<'a> Worker<'a> {
             Err(fault) => ControlOutcome::Fault(fault.to_string()),
         };
         match &outcome {
-            ControlOutcome::Passed => {}
+            ControlOutcome::Passed => {
+                for test in &tests {
+                    self.unproven.remove(test);
+                }
+            }
             // Failed tests are a fact about the tests. The companion stays.
             ControlOutcome::Failed(fault) if !fault.failed_tests.is_empty() => {
                 let message = if job.first_tests.is_empty() {
@@ -1264,6 +1211,7 @@ struct Phase<'a> {
     dry_files: &'a [String],
     dry_run_timeout: Duration,
     memo: &'a ControlMemo,
+    index: Option<&'a TestIndex>,
     /// Receives the count of finished jobs after each job.
     report: &'a (dyn Fn(usize) + Sync),
     /// Receives each finished job before the phase records it.
@@ -1293,8 +1241,9 @@ impl Phase<'_> {
     /// 3. from the back of the queue, a job of another share that holds more
     ///    than one queued job.
     ///
-    /// A job for another companion needs a new companion and a new dry run,
-    /// so the worker leaves the last queued job of a share to its holder.
+    /// A job for another companion needs a new dry run, or the index entries
+    /// of its files and a control run before a kill counts, so the worker
+    /// leaves the last queued job of a share to its holder.
     fn next_job(&self, slot: usize, worker: &Worker<'_>) -> Option<Job> {
         let mut jobs = self.jobs.lock().ok()?;
         let others: Vec<Vec<String>> = {
@@ -1346,10 +1295,12 @@ impl Phase<'_> {
             self.memo,
         );
         worker.workers = self.workers;
+        worker.index = self.index;
         if let Some(warm) = primary {
             worker.link = Some(warm.link);
             worker.known_tests = warm.known;
             worker.loaded_files = warm.loaded;
+            worker.unproven = warm.unproven;
         }
         loop {
             if self.stop.load(Ordering::SeqCst) {
@@ -1391,6 +1342,8 @@ struct PhaseRunner<'a> {
     first_dry_run: Duration,
     /// The control results of the run.
     memo: &'a ControlMemo,
+    /// The test index of the first dry run, when the runner can take it.
+    index: Option<&'a TestIndex>,
     /// Receives the phase events of the run.
     progress: MutationProgressSink<'a>,
 }
@@ -1435,6 +1388,7 @@ fn run_phase(
             workers,
         ),
         memo: runner.memo,
+        index: runner.index,
         report: &report,
         finished,
     };
@@ -1845,6 +1799,7 @@ pub fn run_schedule_with_progress(
         caps: ready.capabilities,
         first_dry_run: Duration::ZERO,
         memo: &memo,
+        index: None,
         progress,
     };
     outcome.ready = Some(ready.clone());
@@ -1860,13 +1815,12 @@ pub fn run_schedule_with_progress(
     progress(MutationProgress::Baseline {
         test_files: dry_files.len(),
     });
-    let dry_started = config.clock.now();
     let DryPhase {
         result: dry,
         links,
         serial,
-    } = dry_phase(spawner, link, &dry_files, config)?;
-    outcome.timings.dry_run = config.clock.now().saturating_duration_since(dry_started);
+        modes,
+    } = timed_dry_phase(spawner, link, &dry_files, config, &mut outcome.timings)?;
     runner.first_dry_run = serial;
     let (mut facts, target_ids, links) = read_dry_phase(
         plan,
@@ -1876,7 +1830,8 @@ pub fn run_schedule_with_progress(
         &mut outcome,
         links,
     )?;
-    outcome.unloaded_paths = dry.unloaded_paths;
+    let index = TestIndex::new(runner.caps, &dry, modes);
+    runner.index = index.as_ref();
     let context = JobContext {
         dry_files: &dry_files,
         kill_matrix: config.kill_matrix,
