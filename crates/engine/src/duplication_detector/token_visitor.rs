@@ -189,6 +189,23 @@ impl<'s> TokenExtractor<'s> {
         atomic
     }
 
+    /// Tokens of the type arguments of a call or `new` expression, then the
+    /// opening parenthesis after them. Calls that differ only in their type
+    /// arguments are different code (#5401).
+    fn push_call_type_arguments_and_paren<'a>(
+        &mut self,
+        callee: &Expression<'a>,
+        type_arguments: Option<&TSTypeParameterInstantiation<'a>>,
+    ) where
+        Self: Visit<'a>,
+    {
+        let open = type_arguments.map_or_else(|| callee.span().end, |args| args.span.end);
+        if let Some(args) = type_arguments {
+            self.visit_ts_type_parameter_instantiation(args);
+        }
+        self.push_punc(PunctuationType::OpenParen, point_span(open));
+    }
+
     /// Record the atomic invocation `span` of a call or `new` expression, plus
     /// the spans of its object and array literal arguments. The literal spans
     /// let the filter keep a clone that starts inside one literal argument,
@@ -558,8 +575,7 @@ impl<'a> Visit<'a> for TokenExtractor<'_> {
     fn visit_call_expression(&mut self, expr: &CallExpression<'a>) {
         let functions_before = self.function_spans.len();
         self.visit_expression(&expr.callee);
-        let open = point_span(expr.callee.span().end);
-        self.push_punc(PunctuationType::OpenParen, open);
+        self.push_call_type_arguments_and_paren(&expr.callee, expr.type_arguments.as_deref());
         for arg in &expr.arguments {
             self.visit_argument(arg);
             let comma = point_span(arg.span().end);
@@ -574,8 +590,7 @@ impl<'a> Visit<'a> for TokenExtractor<'_> {
         let functions_before = self.function_spans.len();
         self.push_keyword(KeywordType::New, self.word(expr.span.start));
         self.visit_expression(&expr.callee);
-        let open = point_span(expr.callee.span().end);
-        self.push_punc(PunctuationType::OpenParen, open);
+        self.push_call_type_arguments_and_paren(&expr.callee, expr.type_arguments.as_deref());
         for arg in &expr.arguments {
             self.visit_argument(arg);
             let comma = point_span(arg.span().end);
