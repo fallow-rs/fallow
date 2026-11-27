@@ -1271,7 +1271,7 @@
       "reviewed_on": "2026-11-27",
       "sample_size": 30,
       "reviews": 3,
-      "agreement_percent": 95,
+      "agreement_percent": 99,
       "projects": [
         {
           "project": "documenso",
@@ -1294,34 +1294,30 @@
         {
           "project": "immich",
           "commit": "7b27863b13d7ec52340e87637d71a39aa8d7efc0",
-          "findings": 419,
+          "findings": 265,
           "sampled": 30,
-          "real": 17,
-          "noise": 13,
+          "real": 24,
+          "noise": 6,
           "unsure": 0
         },
         {
           "project": "react-hook-form",
           "commit": "f3fd1bf4a3cb1265171adfc778f279a3c7e06fc5",
-          "findings": 16,
-          "sampled": 16,
+          "findings": 5,
+          "sampled": 5,
           "real": 0,
-          "noise": 16,
+          "noise": 5,
           "unsure": 0
         }
       ],
       "noise_classes": [
         {
-          "class": "controller test import path",
-          "count": 12
+          "class": "build-only web export",
+          "count": 2
         },
         {
-          "class": "type-only re-export",
-          "count": 7
-        },
-        {
-          "class": "type-only export",
-          "count": 4
+          "class": "transitive Svelte component import",
+          "count": 2
         },
         {
           "class": "type test import path",
@@ -1332,11 +1328,15 @@
           "count": 2
         },
         {
+          "class": "development-only export",
+          "count": 1
+        },
+        {
           "class": "package export assertion",
           "count": 1
         },
         {
-          "class": "Svelte template import path",
+          "class": "type-only database schema",
           "count": 1
         },
         {
