@@ -332,6 +332,33 @@ pub struct MutationRunnerOutput {
     /// counted. Absent when the runner states no fact.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub notes: Vec<String>,
+    /// The mutant runs and their time in each worker mode of the runner.
+    /// Absent when no mutant run stated a mode.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worker_modes: Option<MutationWorkerModes>,
+}
+
+/// The mutant runs and their time in each worker mode. The values depend on
+/// the host and on the schedule, so a gate must not compare them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct MutationWorkerModes {
+    /// Runs that gave each covering test file a new worker process.
+    pub isolated: MutationWorkerModeUse,
+    /// Runs whose test files shared one new worker process.
+    pub shared: MutationWorkerModeUse,
+    /// Runs whose test files shared the kept worker process of the companion.
+    pub reused: MutationWorkerModeUse,
+}
+
+/// The mutant runs of one worker mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct MutationWorkerModeUse {
+    /// The number of mutant runs in this mode.
+    pub runs: usize,
+    /// The sum of the run times that the runner reported, in milliseconds.
+    pub duration_ms: u64,
 }
 
 /// The source position of a mutant. No source text.

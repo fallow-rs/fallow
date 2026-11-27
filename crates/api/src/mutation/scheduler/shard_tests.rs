@@ -1,3 +1,4 @@
+use super::super::super::protocol::RunWorkerMode;
 use super::*;
 
 const FILES: [&str; 3] = ["test/a.test.ts", "test/b.test.ts", "test/c.test.ts"];
@@ -280,4 +281,45 @@ fn an_error_outside_each_file_of_a_share_runs_each_file_again() {
         error,
         ScheduleError::Baseline(vec!["EADDRINUSE: port 4000".to_owned()])
     );
+}
+
+#[test]
+fn the_outcome_counts_the_worker_mode_of_each_mutant_run() {
+    let plain = shard_spawner(None);
+    let spawner = FakeSpawner::new(move |index, request| match request {
+        Request::Run(run) => {
+            let Response::Run(mut result) = run_result(run, RunStatus::Survived, None) else {
+                unreachable!("run_result gives a run response");
+            };
+            result.worker_mode = Some(if run.mutant_id.as_deref() == Some("m1") {
+                RunWorkerMode::Reused
+            } else {
+                RunWorkerMode::Isolated
+            });
+            Ok(Response::Run(result))
+        }
+        other => (plain.script)(index, other),
+    });
+    let outcome = run_schedule(&spawner, &shard_plan(&["m1", "m2"]), &config(1)).expect("run");
+
+    let runs_of = |id: &str| {
+        spawner
+            .runs()
+            .iter()
+            .filter(|(_, run)| run.mutant_id.as_deref() == Some(id))
+            .count()
+    };
+    assert!(runs_of("m1") > 0 && runs_of("m2") > 0);
+    let counts = outcome.worker_modes.expect("the runs stated a mode");
+    assert_eq!(
+        (counts.reused.runs, counts.isolated.runs, counts.shared.runs),
+        (runs_of("m1"), runs_of("m2"), 0)
+    );
+}
+
+#[test]
+fn a_runner_without_a_worker_mode_gives_no_counts() {
+    let spawner = shard_spawner(None);
+    let outcome = run_schedule(&spawner, &shard_plan(&["m1"]), &config(1)).expect("run");
+    assert_eq!(outcome.worker_modes, None);
 }

@@ -31,6 +31,7 @@ pub(super) mod control;
 mod dry_facts;
 mod dry_phase;
 mod issues;
+pub mod modes;
 mod retry_set;
 pub mod targets;
 mod window;
@@ -232,6 +233,9 @@ pub struct ScheduleOutcome {
     /// Each `--kill-matrix-for` target with the dry-run tests that it
     /// selects, in the given order. Empty outside target mode.
     pub targets: Vec<targets::ResolvedTarget>,
+    /// The mutant runs and their time in each worker mode. `None` when no
+    /// run stated a mode.
+    pub worker_modes: Option<modes::WorkerModeCounts>,
 }
 
 impl ScheduleOutcome {
@@ -252,6 +256,7 @@ impl ScheduleOutcome {
             cache_keys: FxHashMap::default(),
             promoted: Vec::new(),
             targets: Vec::new(),
+            worker_modes: None,
         }
     }
 }
@@ -611,6 +616,9 @@ impl<'a> Worker<'a> {
         let mut attempt = match link.request(&request, watchdog) {
             Ok(Response::Run(result)) => match classify(job, &tests, &result) {
                 Ok((status, killed_by)) => {
+                    self.memo
+                        .modes
+                        .record(result.worker_mode, result.duration_ms);
                     load_kill = is_load_kill(&result, status, killed_by.as_ref());
                     let kind = kill_kind(&result, status, killed_by.as_deref());
                     let decided = Attempt::decided(status, killed_by, round_ms(result.duration_ms));
@@ -1894,6 +1902,12 @@ pub fn run_schedule_with_progress(
         retry_suspects(runner, &facts, suspects, first_runs, &mut outcome)?;
         outcome.timings.retry = config.clock.now().saturating_duration_since(retry_started);
     }
+    finish_outcome(&mut outcome, &memo);
+    Ok(outcome)
+}
+
+/// Sorts the lists of a finished schedule and adds the worker-mode counts.
+fn finish_outcome(outcome: &mut ScheduleOutcome, memo: &ControlMemo) {
     outcome
         .issues
         .sort_by(|left, right| left.mutant_id.cmp(&right.mutant_id));
@@ -1903,7 +1917,7 @@ pub fn run_schedule_with_progress(
     }
     outcome.baseline_failures.sort();
     outcome.unretried.sort();
-    Ok(outcome)
+    outcome.worker_modes = memo.modes.counts();
 }
 
 mod reserve;

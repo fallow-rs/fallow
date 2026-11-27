@@ -35007,6 +35007,17 @@
             "type": "string"
           },
           "description": "Facts of the runner setup that limit the result, kebab-case.\n`typecheck-not-run`: the project config enables the Vitest type-check\npass, and the run did not execute it, so a type-level kill is not\ncounted. Absent when the runner states no fact."
+        },
+        "worker_modes": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/MutationWorkerModes"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The mutant runs and their time in each worker mode of the runner.\nAbsent when no mutant run stated a mode."
         }
       },
       "required": [
@@ -40959,6 +40970,47 @@
         }
       ],
       "description": "Why the signature use of a type keeps its export."
+    },
+    "MutationWorkerModes": {
+      "type": "object",
+      "properties": {
+        "isolated": {
+          "description": "Runs that gave each covering test file a new worker process.",
+          "$ref": "#/definitions/MutationWorkerModeUse"
+        },
+        "shared": {
+          "description": "Runs whose test files shared one new worker process.",
+          "$ref": "#/definitions/MutationWorkerModeUse"
+        },
+        "reused": {
+          "description": "Runs whose test files shared the kept worker process of the companion.",
+          "$ref": "#/definitions/MutationWorkerModeUse"
+        }
+      },
+      "required": [
+        "isolated",
+        "shared",
+        "reused"
+      ],
+      "description": "The mutant runs and their time in each worker mode. The values depend on\nthe host and on the schedule, so a gate must not compare them."
+    },
+    "MutationWorkerModeUse": {
+      "type": "object",
+      "properties": {
+        "runs": {
+          "type": "integer",
+          "description": "The number of mutant runs in this mode."
+        },
+        "duration_ms": {
+          "type": "integer",
+          "description": "The sum of the run times that the runner reported, in milliseconds."
+        }
+      },
+      "required": [
+        "runs",
+        "duration_ms"
+      ],
+      "description": "The mutant runs of one worker mode."
     }
   }
 }

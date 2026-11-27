@@ -52,6 +52,7 @@ fn killed_by_each_always(run: &RunRequest, killers: &[String]) -> Response {
         tests,
         unhandled_errors: Vec::new(),
         loop_timeout: false,
+        worker_mode: None,
     })
 }
 

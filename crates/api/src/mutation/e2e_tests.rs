@@ -160,6 +160,7 @@ fn a_complete_run_keeps_the_journal_of_a_newer_run() {
         },
         concurrency: 1,
         notes: Vec::new(),
+        worker_modes: None,
     });
     report.journal_run_id = Some("older-run".to_owned());
     let journal = project.path().join(".fallow/mutation/journal.jsonl");
@@ -951,6 +952,18 @@ mod end_to_end {
         assert_eq!(runner.name, "vitest");
         assert_eq!(runner.version, "5.1.0");
         assert_eq!(runner.runtime.name, "node");
+        let modes = runner
+            .worker_modes
+            .expect("the Vitest runs state a worker mode");
+        let ran = report
+            .mutants
+            .iter()
+            .filter(|mutant| mutant.duration_ms.is_some())
+            .count();
+        assert!(
+            modes.isolated.runs + modes.shared.runs + modes.reused.runs >= ran,
+            "{modes:?} for {ran} mutants that ran"
+        );
         assert_eq!(
             report.completion.status,
             MutationCompletionStatus::Complete,
