@@ -40,6 +40,7 @@ mod codeclimate;
 mod coverage_envelopes;
 mod dead_code_sarif;
 mod diff;
+mod display_text;
 mod doctor;
 mod dupes;
 mod entry_weight;
@@ -197,6 +198,7 @@ pub use coverage_envelopes::{
 };
 pub use dead_code_sarif::build_dead_code_sarif;
 pub use diff::{DiffIndex, MAX_ADDED_LINES, MAX_DIFF_BYTES, relative_to_diff_path};
+pub use display_text::{display_line, display_text};
 pub use doctor::{
     DOCTOR_SCHEMA_VERSION, DoctorCheck, DoctorCheckCategory, DoctorCheckId, DoctorCheckStatus,
     DoctorOutput, DoctorRemediation, DoctorStatus, DoctorSummary, serialize_doctor_json_output,

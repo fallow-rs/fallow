@@ -40,7 +40,7 @@ pub(in crate::report) fn print_dependency_usage_trace_human(trace: &DependencyTr
         lines.extend(build_dependency_usage_human_lines(usage, quiet));
     }
     for line in lines {
-        crate::report::sink::outln!("{line}");
+        crate::report::sink::outln!("{}", super::report_line(&line));
     }
 }
 
@@ -50,7 +50,7 @@ pub(in crate::report) fn print_clone_trace_human(trace: &CloneTrace, root: &Path
 
 fn print_lines(lines: &[String]) {
     for line in lines {
-        eprintln!("{line}");
+        eprintln!("{}", super::report_line(line));
     }
 }
 

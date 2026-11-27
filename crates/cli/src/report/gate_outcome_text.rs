@@ -60,11 +60,14 @@ impl GateText for GateLine {
             .files
             .iter()
             .take(MAX_NAMED_FILES)
-            .map(|file| match &file.parse {
-                Some(parse) => {
-                    format!("{}: {}", file.path, crate::gates::parse_error_reason(parse))
+            .map(|file| {
+                let path = fallow_output::display_text(&file.path);
+                match &file.parse {
+                    Some(parse) => {
+                        format!("{path}: {}", crate::gates::parse_error_reason(parse))
+                    }
+                    None => path.into_owned(),
                 }
-                None => file.path.clone(),
             })
             .collect();
         let rest = self.files.len().saturating_sub(MAX_NAMED_FILES);
@@ -535,6 +538,28 @@ mod tests {
              src/f2.ts: 1 parser error, the parser recovered; \
              src/f3.ts: 1 parser error, the parser recovered; \
              src/f4.ts: 1 parser error, the parser recovered; and 2 more)."
+        );
+    }
+
+    /// A saved envelope for `fallow report --from` can hold any path text, so
+    /// the note escapes a line break in a file name.
+    #[test]
+    fn a_gate_file_name_with_a_line_break_stays_on_the_note_line() {
+        let value = envelope(&serde_json::json!({
+            "parse-error": {
+                "status": "fail", "enforced": true, "observed": 1.0,
+                "files": [{
+                    "path": "src/a\n::warning::text\r\n# Heading.ts",
+                    "error_count": 1,
+                    "panicked": false
+                }]
+            }
+        }));
+        let line = summary_line(&value).expect("armed gate renders");
+        assert_eq!(
+            line,
+            "Gates: failed parse-error (src/a\\n::warning::text\\r\\n# Heading.ts: \
+             1 parser error, the parser recovered)."
         );
     }
 

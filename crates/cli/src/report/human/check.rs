@@ -23,7 +23,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use super::{
     GroupedByFileInput, MAX_FLAT_ITEMS, build_grouped_by_file, build_section_header, format_path,
     print_explain_tip_if_tty, push_section_footer_rollup, push_section_footer_with_count,
-    push_section_footer_with_fixability,
+    push_section_footer_with_fixability, report_line,
 };
 use crate::report::ArchitectureLayout;
 use crate::report::grouping::OwnershipResolver;
@@ -251,7 +251,7 @@ pub(in crate::report) fn print_human(input: &PrintHumanInput<'_>) {
         layout: input.architecture_layout,
     });
     for line in lines {
-        outln!("{line}");
+        outln!("{}", report_line(&line));
     }
 
     if !input.quiet {
@@ -3516,10 +3516,9 @@ fn emit_grouped_body(
     explain: bool,
     layout: ArchitectureLayout,
 ) {
-    if let Some(ref owners) = group.owners
-        && !owners.is_empty()
-    {
-        outln!("  {} {}", "owners:".dimmed(), owners.join(" ").dimmed());
+    if let Some(owners) = group.owners.as_ref().filter(|owners| !owners.is_empty()) {
+        let owners = report_line(&owners.join(" ")).dimmed();
+        outln!("  {} {owners}", "owners:".dimmed());
     }
 
     let lines = grouped_lines(&group.results, root, rules, explain, layout);
@@ -3527,7 +3526,7 @@ fn emit_grouped_body(
         if line.contains("fallow.tools/docs/") && !seen_footers.insert(line.clone()) {
             continue;
         }
-        outln!("{line}");
+        outln!("{}", report_line(line));
     }
 
     if group.key == crate::codeowners::UNOWNED_LABEL {
@@ -3583,7 +3582,7 @@ pub(in crate::report) fn print_grouped_human(input: &PrintGroupedHumanInput<'_>)
         grand_total += total;
 
         let header_text = grouped_header_text(group, root, resolver, total);
-        outln!("{}", header_text.cyan().bold());
+        outln!("{}", report_line(&header_text).cyan().bold());
         emit_grouped_body(
             group,
             root,

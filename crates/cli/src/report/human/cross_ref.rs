@@ -26,7 +26,7 @@ pub(in crate::report) fn print_cross_reference_findings(
     }
 
     for line in build_cross_reference_lines(cross_ref, root) {
-        outln!("{line}");
+        outln!("{}", super::report_line(&line));
     }
 
     let total = cross_ref.total();

@@ -81,9 +81,11 @@ fn format_type_aware_metadata(
     )
 }
 
+/// Each compact record is one line, so a control character in a project
+/// string is escaped and cannot start a second record.
 fn print_lines(lines: Vec<String>) {
     for line in lines {
-        outln!("{line}");
+        outln!("{}", fallow_output::display_text(&line));
     }
 }
 

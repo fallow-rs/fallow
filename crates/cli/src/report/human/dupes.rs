@@ -82,7 +82,7 @@ pub(in crate::report) fn print_duplication_human(
         build_duplication_human_lines(report, root)
     };
     for line in lines {
-        outln!("{line}");
+        outln!("{}", super::report_line(&line));
     }
 
     if !quiet {

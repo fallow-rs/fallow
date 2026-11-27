@@ -283,7 +283,11 @@ pub fn print_parse_error_gate_failure(files: &[GateFile]) {
         )
     );
     for file in files {
-        eprintln!("  {}: {}", file.path, parse_error_reason(file));
+        eprintln!(
+            "  {}: {}",
+            fallow_output::display_text(&file.path),
+            parse_error_reason(file)
+        );
     }
 }
 

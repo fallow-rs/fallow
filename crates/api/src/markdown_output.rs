@@ -42,14 +42,14 @@ fn format_window(seconds: u64) -> String {
 }
 
 fn escape_markdown_prose(s: &str) -> String {
-    s.replace('`', "\\`")
+    fallow_output::display_text(s).replace('`', "\\`")
 }
 
 /// Escape every character that inline markdown treats as syntax, so free
 /// text from a source comment renders as plain text.
 fn escape_markdown_inline(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
-    for c in s.chars() {
+    for c in fallow_output::display_text(s).chars() {
         if matches!(
             c,
             '\\' | '`' | '*' | '_' | '[' | ']' | '<' | '>' | '|' | '#'

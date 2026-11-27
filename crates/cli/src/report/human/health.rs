@@ -99,7 +99,7 @@ pub(in crate::report) fn print_health_human(input: &PrintHealthHumanInput<'_>) {
     );
     insert_parse_degraded_note(&mut lines, parse_note, has_score && !skip_score_and_trend);
     for line in lines {
-        outln!("{line}");
+        outln!("{}", super::report_line(&line));
     }
 
     if !quiet {

@@ -22,12 +22,15 @@ pub(super) use health::*;
 pub(super) use perf::*;
 pub(super) use traces::*;
 
+use std::borrow::Cow;
 use std::io::IsTerminal;
 use std::path::Path;
+use std::sync::{Mutex, OnceLock};
 
 use colored::Colorize;
 use fallow_types::issue_meta::{issue_meta_by_kind, issue_meta_for_contract_token};
 use fallow_types::suppress::{IssueKind, issue_kind_to_kebab};
+use rustc_hash::FxHashSet;
 
 use super::{Level, format_display_path, plural, relative_path, split_dir_filename};
 
@@ -498,7 +501,36 @@ fn push_docs_footer(lines: &mut Vec<String>, description: &str, url: &str) {
         .map(|chunk| format!("{FOOTER_INDENT}{}", chunk.dimmed()))
         .collect();
     footer.push(format!("{FOOTER_INDENT}{}", url.dimmed()));
-    lines.push(footer.join("\n"));
+    let footer = footer.join("\n");
+    docs_footers()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .insert(footer.clone());
+    lines.push(footer);
+}
+
+/// The footer entries that [`push_docs_footer`] built from fallow's own text.
+/// Such an entry holds line breaks on purpose, so [`report_line`] prints it as
+/// it is.
+fn docs_footers() -> &'static Mutex<FxHashSet<String>> {
+    static FOOTERS: OnceLock<Mutex<FxHashSet<String>>> = OnceLock::new();
+    FOOTERS.get_or_init(|| Mutex::new(FxHashSet::default()))
+}
+
+/// One entry of a human report as printed text. Every entry other than a
+/// docs footer can hold a project string (a path, a name, a specifier), so a
+/// control character in it becomes a visible escape and cannot start a new
+/// output line. The color sequences of the renderer stay.
+fn report_line(entry: &str) -> Cow<'_, str> {
+    let is_footer = entry.contains('\n')
+        && docs_footers()
+            .lock()
+            .is_ok_and(|footers| footers.contains(entry));
+    if is_footer {
+        Cow::Borrowed(entry)
+    } else {
+        fallow_output::display_line(entry)
+    }
 }
 
 /// Greedily wrap text at word boundaries to `width` columns. A word that is
@@ -809,6 +841,25 @@ mod tests {
         let result = strip_ansi(&format_path("src/components/Button.tsx"));
         assert!(result.ends_with("Button.tsx"));
         assert!(result.contains("src/components/"));
+    }
+
+    #[test]
+    fn report_line_keeps_a_docs_footer_and_escapes_other_line_breaks() {
+        let mut lines = Vec::new();
+        push_docs_footer(
+            &mut lines,
+            "Files not reachable from any entry point",
+            "https://fallow.tools/docs/rules/unused-file/",
+        );
+        let footer = &lines[0];
+        assert_eq!(report_line(footer), footer.as_str());
+
+        let forged = format!("  src/a.ts\n::notice::x\n{footer}");
+        assert!(!report_line(&forged).contains('\n'));
+        assert_eq!(
+            strip_ansi(&report_line("  :1 ./helper\n::notice::x")),
+            "  :1 ./helper\\n::notice::x"
+        );
     }
 
     #[test]
