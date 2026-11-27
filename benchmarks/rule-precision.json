@@ -1267,16 +1267,16 @@
         "--shallow-directories",
         "--css"
       ],
-      "fallow_version": "3.48.0",
-      "reviewed_on": "2026-11-25",
+      "fallow_version": "3.49.0",
+      "reviewed_on": "2026-11-27",
       "sample_size": 30,
-      "reviews": 2,
-      "agreement_percent": 100,
+      "reviews": 3,
+      "agreement_percent": 95,
       "projects": [
         {
           "project": "documenso",
           "commit": "cc491f1ec224bda8d3e09338e291ca11fe47641a",
-          "findings": 2979,
+          "findings": 2999,
           "sampled": 30,
           "real": 29,
           "noise": 1,
@@ -1294,45 +1294,53 @@
         {
           "project": "immich",
           "commit": "7b27863b13d7ec52340e87637d71a39aa8d7efc0",
-          "findings": 413,
+          "findings": 419,
           "sampled": 30,
-          "real": 16,
-          "noise": 14,
+          "real": 17,
+          "noise": 13,
           "unsure": 0
         },
         {
           "project": "react-hook-form",
           "commit": "f3fd1bf4a3cb1265171adfc778f279a3c7e06fc5",
-          "findings": 67,
-          "sampled": 30,
-          "real": 24,
-          "noise": 6,
+          "findings": 16,
+          "sampled": 16,
+          "real": 0,
+          "noise": 16,
           "unsure": 0
         }
       ],
       "noise_classes": [
         {
-          "class": "decorator metadata on test import path",
+          "class": "controller test import path",
           "count": 12
+        },
+        {
+          "class": "type-only re-export",
+          "count": 7
         },
         {
           "class": "type-only export",
           "count": 4
         },
         {
+          "class": "type test import path",
+          "count": 2
+        },
+        {
           "class": "value binding imported by type test",
           "count": 2
         },
         {
-          "class": "same-module use on test import path",
+          "class": "package export assertion",
           "count": 1
         },
         {
-          "class": "test path uses export alias",
+          "class": "Svelte template import path",
           "count": 1
         },
         {
-          "class": "type-only production usage",
+          "class": "unused default export",
           "count": 1
         }
       ]
@@ -1345,16 +1353,16 @@
         "--shallow-directories",
         "--css"
       ],
-      "fallow_version": "3.48.0",
-      "reviewed_on": "2026-11-25",
+      "fallow_version": "3.49.0",
+      "reviewed_on": "2026-11-27",
       "sample_size": 30,
       "reviews": 3,
-      "agreement_percent": 61,
+      "agreement_percent": 92,
       "projects": [
         {
           "project": "documenso",
           "commit": "cc491f1ec224bda8d3e09338e291ca11fe47641a",
-          "findings": 1671,
+          "findings": 1684,
           "sampled": 30,
           "real": 30,
           "noise": 0,
@@ -1372,26 +1380,17 @@
         {
           "project": "immich",
           "commit": "7b27863b13d7ec52340e87637d71a39aa8d7efc0",
-          "findings": 167,
+          "findings": 169,
           "sampled": 30,
-          "real": 30,
-          "noise": 0,
-          "unsure": 0
-        },
-        {
-          "project": "react-hook-form",
-          "commit": "f3fd1bf4a3cb1265171adfc778f279a3c7e06fc5",
-          "findings": 46,
-          "sampled": 30,
-          "real": 0,
-          "noise": 30,
+          "real": 29,
+          "noise": 1,
           "unsure": 0
         }
       ],
       "noise_classes": [
         {
-          "class": "test fixture treated as production",
-          "count": 30
+          "class": "test-only server",
+          "count": 1
         }
       ]
     }
