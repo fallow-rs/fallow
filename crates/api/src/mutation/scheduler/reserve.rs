@@ -48,19 +48,12 @@ pub(super) struct PhaseDeadline {
 
 impl PhaseDeadline {
     /// The deadline of the first pass, with a reserve for the retries.
-    /// `setup` is the setup time of the run and `first_dry_run` the time of
-    /// one dry run of each test file.
-    pub(super) fn first_pass(
-        config: &ScheduleConfig,
-        setup: Duration,
-        first_dry_run: Duration,
-        facts: &DryRunFacts,
-    ) -> Option<Self> {
+    pub(super) fn first_pass(config: &ScheduleConfig, start: CompanionStart) -> Option<Self> {
         config.deadline.map(|at| Self {
             at,
             clock: Arc::clone(&config.clock),
             reserve: Some(ConfirmationReserve::new(
-                CompanionStart::new(setup, first_dry_run, facts),
+                start,
                 config.concurrency,
                 config.target_full,
             )),
@@ -117,12 +110,15 @@ pub(super) fn expired(config: &ScheduleConfig) -> bool {
 /// The start time of a retry companion: the setup of the run and the dry run
 /// of the test files of the suspects. Each retry worker starts its own
 /// companion at the same time and dry-runs each of these files, so the dry
-/// run does not get shorter with more workers.
+/// run does not get shorter with more workers. A companion that takes the
+/// test index of the first dry run runs no test before its first job, but it
+/// still loads each test file, so only the setup time of each file counts.
 pub(super) struct CompanionStart {
     /// The setup time of the run, in milliseconds.
     setup: u64,
-    /// The dry-run time of each passing test file, in milliseconds: the
-    /// durations of its passing tests plus its setup time.
+    /// The start time of each passing test file, in milliseconds: the
+    /// durations of its passing tests, unless the companion takes the test
+    /// index, plus its setup time.
     files: FxHashMap<String, u64>,
     /// The time of one dry run of each test file, in milliseconds. A runner
     /// can dry-run files in parallel, so the sum of `files` can be more than
@@ -133,10 +129,17 @@ pub(super) struct CompanionStart {
 impl CompanionStart {
     /// The start of a retry companion from the `setup` time of the run, the
     /// time of one dry run of each test file, and the dry-run facts.
-    pub(super) fn new(setup: Duration, first_dry_run: Duration, facts: &DryRunFacts) -> Self {
+    /// `adopts` is true when the companion takes the test index.
+    pub(super) fn new(
+        setup: Duration,
+        first_dry_run: Duration,
+        facts: &DryRunFacts,
+        adopts: bool,
+    ) -> Self {
         let mut file_ms: FxHashMap<String, f64> = FxHashMap::default();
         for (file, duration) in facts.passing.values() {
-            *file_ms.entry(file.clone()).or_default() += duration;
+            let tests = if adopts { 0.0 } else { *duration };
+            *file_ms.entry(file.clone()).or_default() += tests;
         }
         for (file, setup) in &facts.file_setup {
             if let Some(total) = file_ms.get_mut(file) {
@@ -277,6 +280,8 @@ fn ceil_ms(ms: f64) -> u64 {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
     use super::*;
 
     const FILE: &str = "test/a.test.ts";
@@ -415,5 +420,24 @@ mod tests {
         // min(300 + 9,000, 5,000) dry run + 100 retry = 5,100, a quarter
         // margin of 1,275, and 2 * 100 mean.
         assert_eq!(reserve.needed(), Duration::from_millis(6575));
+    }
+
+    #[test]
+    fn a_companion_that_takes_the_test_index_counts_only_the_file_setup() {
+        let facts = DryRunFacts {
+            passing: BTreeMap::from([
+                ("a::t1".to_owned(), (FILE.to_owned(), 400.0)),
+                ("a::t2".to_owned(), (FILE.to_owned(), 600.0)),
+            ]),
+            covering: FxHashMap::default(),
+            static_ids: FxHashSet::default(),
+            baseline: Vec::new(),
+            file_setup: BTreeMap::from([(FILE.to_owned(), 50.0)]),
+        };
+        let second = Duration::from_secs(1);
+        let dry_run = CompanionStart::new(Duration::ZERO, second, &facts, false);
+        assert_eq!(dry_run.dry_run_ms(FILE), 1050);
+        let adopted = CompanionStart::new(Duration::ZERO, second, &facts, true);
+        assert_eq!(adopted.dry_run_ms(FILE), 50);
     }
 }

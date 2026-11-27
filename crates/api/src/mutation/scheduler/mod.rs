@@ -21,7 +21,7 @@ use super::protocol::{
 use super::setup_timeout::{self_check_help, setup_timeout_hint};
 use super::transport::{CompanionLink, CompanionSpawner, SpawnFailure};
 use super::{MutationProgress, MutationProgressSink};
-use reserve::{PhaseDeadline, Retry};
+use reserve::{CompanionStart, PhaseDeadline, Retry};
 use retry_set::{confirmation_tests, fastest_first, retried_status, retry_extra_ms, whole_files};
 
 mod adopt;
@@ -1627,6 +1627,34 @@ fn retry_of(target_full: bool, job: &Job, attempt: &Attempt) -> Retry {
     }
 }
 
+/// Runs the first pass of `jobs` on the companions of the dry run, inside
+/// the time budget less the time reserve of the retries.
+fn run_first_pass(
+    runner: PhaseRunner<'_>,
+    facts: &DryRunFacts,
+    (jobs, phase_files, links): (Vec<Job>, &[String], Vec<WarmLink>),
+    outcome: &mut ScheduleOutcome,
+) -> Result<Vec<(Job, Attempt)>, ScheduleError> {
+    let config = runner.config;
+    let finished = |job: &Job, attempt: &Attempt| journal_first_run(config, job, attempt);
+    let start = CompanionStart::new(
+        outcome.timings.setup,
+        runner.first_dry_run,
+        facts,
+        runner.index.is_some(),
+    );
+    let (attempts, workers) = run_phase(
+        runner,
+        phase_files,
+        jobs,
+        PhaseDeadline::first_pass(config, start),
+        (links, &finished),
+        |done, total| MutationProgress::Mutants { done, total },
+    )?;
+    outcome.workers = workers;
+    Ok(attempts)
+}
+
 /// Runs each survivor and each timeout again in a new companion (section
 /// 10), see [`retried_status`]. Host load alone can make a test time out,
 /// so a single timeout is not proof of detection. The retry stays inside the time budget: a
@@ -1854,16 +1882,7 @@ pub fn run_schedule_with_progress(
     let mutants_started = config.clock.now();
     let (jobs, phase_files, links) =
         checked_jobs(runner, plan, &mut facts, &context, links, &mut outcome)?;
-    let finished = |job: &Job, attempt: &Attempt| journal_first_run(config, job, attempt);
-    let (attempts, workers) = run_phase(
-        runner,
-        &phase_files,
-        jobs,
-        PhaseDeadline::first_pass(config, outcome.timings.setup, runner.first_dry_run, &facts),
-        (links, &finished),
-        |done, total| MutationProgress::Mutants { done, total },
-    )?;
-    outcome.workers = workers;
+    let attempts = run_first_pass(runner, &facts, (jobs, &phase_files, links), &mut outcome)?;
     outcome.timings.mutants = config
         .clock
         .now()
