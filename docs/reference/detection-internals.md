@@ -802,11 +802,11 @@ An entry file argument without a glob resolves on disk through
 and the TypeScript runners resolve it (issue #5325). The probe tries the exact
 file first. A path with a runnable extension (`.js`, `.ts` and their module
 variants) then gets each runnable extension in its place. Any other path gets
-each runnable extension added: `node scripts/build` runs `scripts/build.js`,
-and `node scripts/build.prod` runs `scripts/build.prod.js`. The probe never
-replaces another extension, so `bash scripts/deploy.sh` does not name
-`scripts/deploy.ts`. It never adds a style or markup extension, so
-`node scripts/theme` does not name `scripts/theme.css`. It does not resolve a
+each runnable extension added: `node tools/build` runs `tools/build.js`,
+and `node tools/build.prod` runs `tools/build.prod.js`. The probe never
+replaces another extension, so `bash tools/deploy.sh` does not name
+`tools/deploy.ts`. It never adds a style or markup extension, so
+`node tools/theme` does not name `tools/theme.css`. It does not resolve a
 directory to its index file, because a command can pass a directory as a
 filter (`vitest run src/lib/`). The `package.json` scripts, the Nx
 `run-commands` targets, the Vite+ tasks and the CI commands share this probe.
