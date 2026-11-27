@@ -11,9 +11,11 @@ use crate::error::{
 use crate::exit_codes::NETWORK_FAILURE;
 
 use super::{
-    CiProvider, GITLAB_PER_PAGE, emit_pr_comment_post_plan, github_create_json, github_get_json,
-    github_repo, github_token, gitlab_api_url, gitlab_create_json, gitlab_get_page,
-    gitlab_has_more_pages, gitlab_project_id, gitlab_put_json, gitlab_token, read_text_file,
+    BotLogin, CiProvider, GITLAB_PER_PAGE, GitlabAuthenticatedUser, emit_pr_comment_post_plan,
+    github_create_json, github_get_json, github_repo, github_token, gitlab_api_url,
+    gitlab_create_json, gitlab_get_page, gitlab_has_more_pages,
+    gitlab_note_has_native_bot_metadata, gitlab_project_id, gitlab_put_json, gitlab_token,
+    is_github_bot_comment, is_gitlab_bot_note, load_gitlab_authenticated_user, read_text_file,
     require_target, url_encode_path_segment,
 };
 
@@ -194,6 +196,8 @@ fn find_github_sticky_comment(
     token: &str,
     marker_id: &str,
 ) -> Result<Option<fallow_output::ExistingPrComment>, String> {
+    let bot_login_var = std::env::var("FALLOW_BOT_LOGIN");
+    let bot_login = BotLogin::from_var(&bot_login_var);
     let marker = format!("<!-- fallow-id: {marker_id} -->");
     for page in 1..=100 {
         let url = format!("{api}/repos/{repo}/issues/{pr}/comments?per_page=100&page={page}");
@@ -201,16 +205,8 @@ fn find_github_sticky_comment(
         let comments = value
             .as_array()
             .ok_or_else(|| "GitHub issue comments response was not an array".to_owned())?;
-        for comment in comments {
-            let body = comment.get("body").and_then(Value::as_str).unwrap_or("");
-            if body.contains(&marker)
-                && let Some(id) = comment.get("id").and_then(Value::as_u64)
-            {
-                return Ok(Some(fallow_output::ExistingPrComment {
-                    id: id.to_string(),
-                    body: body.to_owned(),
-                }));
-            }
+        if let Some(existing) = github_sticky_comment(comments, &marker, bot_login) {
+            return Ok(Some(existing));
         }
         if comments.len() < 100 {
             break;
@@ -227,6 +223,9 @@ fn find_gitlab_sticky_note(
     token: &str,
     marker_id: &str,
 ) -> Result<Option<fallow_output::ExistingPrComment>, String> {
+    let bot_login_var = std::env::var("FALLOW_BOT_LOGIN");
+    let bot_login = BotLogin::from_var(&bot_login_var);
+    let mut authenticated_user = None;
     let marker = format!("<!-- fallow-id: {marker_id} -->");
     for page in 1..=100 {
         let url = format!(
@@ -236,22 +235,74 @@ fn find_gitlab_sticky_note(
         let notes = value
             .as_array()
             .ok_or_else(|| "GitLab notes response was not an array".to_owned())?;
-        for note in notes {
-            let body = note.get("body").and_then(Value::as_str).unwrap_or("");
-            if body.contains(&marker)
-                && let Some(id) = note.get("id").and_then(Value::as_u64)
-            {
-                return Ok(Some(fallow_output::ExistingPrComment {
-                    id: id.to_string(),
-                    body: body.to_owned(),
-                }));
-            }
+        if authenticated_user.is_none() && sticky_note_needs_user(notes, &marker, bot_login) {
+            authenticated_user = Some(load_gitlab_authenticated_user(agent, api, token)?);
+        }
+        if let Some(existing) =
+            gitlab_sticky_note(notes, &marker, authenticated_user.as_ref(), bot_login)
+        {
+            return Ok(Some(existing));
         }
         if !gitlab_has_more_pages(next_page, notes.len()) {
             break;
         }
     }
     Ok(None)
+}
+
+/// The first comment of a page that the bot wrote and that holds the sticky
+/// `marker` as a full line. A comment of another account is never updated.
+fn github_sticky_comment(
+    comments: &[Value],
+    marker: &str,
+    bot_login: BotLogin<'_>,
+) -> Option<fallow_output::ExistingPrComment> {
+    comments
+        .iter()
+        .filter(|comment| has_sticky_marker(comment, marker))
+        .filter(|comment| is_github_bot_comment(comment, bot_login))
+        .find_map(existing_comment)
+}
+
+/// The first note of a page that the bot wrote and that holds the sticky
+/// `marker` as a full line. fallow never writes a system note, so a system
+/// note is not a candidate.
+fn gitlab_sticky_note(
+    notes: &[Value],
+    marker: &str,
+    authenticated_user: Option<&GitlabAuthenticatedUser>,
+    bot_login: BotLogin<'_>,
+) -> Option<fallow_output::ExistingPrComment> {
+    notes
+        .iter()
+        .filter(|note| has_sticky_marker(note, marker))
+        .filter(|note| is_gitlab_bot_note(note, authenticated_user, bot_login))
+        .find_map(existing_comment)
+}
+
+/// Whether the owner check of a candidate note needs the user of the token.
+fn sticky_note_needs_user(notes: &[Value], marker: &str, bot_login: BotLogin<'_>) -> bool {
+    matches!(bot_login, BotLogin::Unset)
+        && notes.iter().any(|note| {
+            has_sticky_marker(note, marker) && !gitlab_note_has_native_bot_metadata(note)
+        })
+}
+
+fn has_sticky_marker(comment: &Value, marker: &str) -> bool {
+    comment.get("system").and_then(Value::as_bool) != Some(true)
+        && comment
+            .get("body")
+            .and_then(Value::as_str)
+            .is_some_and(|body| body.lines().any(|line| line.trim_end() == marker))
+}
+
+fn existing_comment(comment: &Value) -> Option<fallow_output::ExistingPrComment> {
+    let id = comment.get("id").and_then(Value::as_u64)?;
+    let body = comment.get("body").and_then(Value::as_str)?;
+    Some(fallow_output::ExistingPrComment {
+        id: id.to_string(),
+        body: body.to_owned(),
+    })
 }
 
 fn apply_github_pr_comment_plan(
@@ -357,6 +408,70 @@ mod tests {
             gitlab_project_id(Some("group/project"), "MR comment").as_deref(),
             Ok("group/project")
         );
+    }
+
+    const MARKER: &str = "<!-- fallow-id: fallow-results -->";
+
+    /// Another account can post a comment with the sticky marker. The post
+    /// step updates only the comment of the bot.
+    #[test]
+    fn github_sticky_comment_skips_a_comment_of_another_author() {
+        let comments = serde_json::json!([
+            {
+                "id": 1,
+                "body": format!("{MARKER}\ntext of a person"),
+                "user": { "login": "alice", "type": "User" }
+            },
+            {
+                "id": 2,
+                "body": format!("quoted: {MARKER}"),
+                "user": { "login": "other[bot]", "type": "Bot" }
+            },
+            {
+                "id": 3,
+                "body": format!("{MARKER}\n### report"),
+                "user": { "login": "github-actions[bot]", "type": "Bot" }
+            }
+        ]);
+        let comments = comments.as_array().unwrap();
+
+        let found = github_sticky_comment(comments, MARKER, BotLogin::Unset);
+        assert_eq!(found.map(|c| c.id).as_deref(), Some("3"));
+
+        let found = github_sticky_comment(comments, MARKER, BotLogin::Configured("alice"));
+        assert_eq!(found.map(|c| c.id).as_deref(), Some("1"));
+    }
+
+    #[test]
+    fn gitlab_sticky_note_skips_a_note_of_another_author() {
+        let notes = serde_json::json!([
+            {
+                "id": 1,
+                "body": format!("{MARKER}\ntext of a person"),
+                "author": { "id": 7, "username": "alice", "bot": false }
+            },
+            {
+                "id": 2,
+                "system": true,
+                "body": format!("added 1 commit\n\n{MARKER}"),
+                "author": { "id": 7, "username": "alice" }
+            },
+            {
+                "id": 3,
+                "body": format!("{MARKER}\n### report"),
+                "author": { "id": 9, "username": "ci-runner", "bot": false }
+            }
+        ]);
+        let notes = notes.as_array().unwrap();
+        let user = GitlabAuthenticatedUser {
+            id: 9,
+            username: "ci-runner".to_owned(),
+        };
+
+        assert!(sticky_note_needs_user(notes, MARKER, BotLogin::Unset));
+        let found = gitlab_sticky_note(notes, MARKER, Some(&user), BotLogin::Unset);
+        assert_eq!(found.map(|c| c.id).as_deref(), Some("3"));
+        assert!(gitlab_sticky_note(notes, MARKER, None, BotLogin::Unset).is_none());
     }
 
     #[test]

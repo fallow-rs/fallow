@@ -2392,7 +2392,7 @@ fn gitlab_sticky_comment_lookup_follows_next_page_past_a_filtered_short_page() {
                 method: "GET",
                 path_contains: "/projects/group%2Frepo/merge_requests/7/notes?per_page=100&page=2",
                 status: 200,
-                body: r#"[{"id":42,"body":"<!-- fallow-id: summary -->\nold body"}]"#,
+                body: r#"[{"id":42,"body":"<!-- fallow-id: summary -->\nold body","author":{"bot":true}}]"#,
             },
             "X-Next-Page: \r\n",
         ),
@@ -2428,6 +2428,67 @@ fn gitlab_sticky_comment_lookup_follows_next_page_past_a_filtered_short_page() {
     let json: serde_json::Value = serde_json::from_str(&stdout).expect("json output");
     assert_eq!(json["action"], "update", "plan:\n{stdout}");
     assert_eq!(json["comment_id"], "42", "plan:\n{stdout}");
+    assert_eq!(server.join().expect("server thread").len(), 2);
+}
+
+/// A note of another user with the sticky marker is not updated. The token
+/// user has no bot metadata, so fallow reads it from `/user` to compare.
+#[test]
+fn gitlab_sticky_comment_lookup_skips_a_note_of_another_user() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let body = dir.path().join("comment.md");
+    std::fs::write(&body, "<!-- fallow-id: summary -->\nnew body").expect("write body");
+    let (api_url, server) = serve_with_headers(vec![
+        (
+            MockResponse {
+                method: "GET",
+                path_contains: "/projects/group%2Frepo/merge_requests/7/notes?per_page=100&page=1",
+                status: 200,
+                body: r#"[{"id":42,"body":"<!-- fallow-id: summary -->\nold body","author":{"id":7,"username":"alice","bot":false}}]"#,
+            },
+            "X-Next-Page: \r\n",
+        ),
+        (
+            MockResponse {
+                method: "GET",
+                path_contains: "/user",
+                status: 200,
+                body: r#"{"id":9,"username":"ci-runner"}"#,
+            },
+            "",
+        ),
+    ]);
+
+    let output = Command::new(fallow_bin())
+        .args(["--format", "json", "--quiet", "ci", "post-pr-comment"])
+        .args([
+            "--provider",
+            "gitlab",
+            "--mr",
+            "7",
+            "--project-id",
+            "group/repo",
+        ])
+        .args(["--marker-id", "summary", "--dry-run", "--api-url", &api_url])
+        .arg("--body")
+        .arg(&body)
+        .env("NO_COLOR", "1")
+        .env("RUST_LOG", "")
+        .env("FALLOW_API_RETRIES", "1")
+        .env_remove("FALLOW_BOT_LOGIN")
+        .env("GITLAB_TOKEN", "test-token")
+        .output()
+        .expect("run fallow post-pr-comment");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "stderr:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let json: serde_json::Value = serde_json::from_str(&stdout).expect("json output");
+    assert_eq!(json["action"], "create", "plan:\n{stdout}");
     assert_eq!(server.join().expect("server thread").len(), 2);
 }
 
