@@ -286,11 +286,14 @@ jobs:
 
   # Profile-guided optimization (PGO). This job builds an instrumented
   # fallow-multicall on the release commit, runs scripts/pgo-train.sh on the
-  # pinned training fixtures, and uploads only the merged profile. The
-  # instrumented binary never leaves this job. A profile matches only a build
-  # for the same target on the same host toolchain, because Cargo hashes both
-  # into the crate symbol names. So each leg here uses the runner and the
-  # container of one build leg, and only these build legs get a profile. A
+  # pinned training fixtures, and uploads the merged profile. A profile
+  # matches only a build for the same target on the same host toolchain,
+  # because Cargo hashes both into the crate symbol names. So each leg here
+  # uses the runner and the container of one build leg, and only these build
+  # legs get a profile. A leg with `train_os` cross-compiles, so its runner
+  # cannot run the instrumented binary. That leg uploads the binary as a
+  # `pgo-instrumented-<target>` artifact, and only the pgo-profile-cross job
+  # downloads it and trains on a runner of the target architecture. A
   # failure here fails the release. With the `pgo` input set to false, this
   # job does no work and the build job compiles without PGO. The job always
   # runs, so a skipped job cannot skip the jobs after it.
@@ -315,6 +318,16 @@ jobs:
             container: rust:1.97.1-bullseye@sha256:33e0cd779c556a248ac05acabb695c1da0cffaccc1796da507451482ac94d277
           - target: aarch64-apple-darwin
             os: macos-latest
+          - target: x86_64-apple-darwin
+            os: macos-latest
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-26.04
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-26.04
+            container: rust:1.97.1-bullseye@sha256:33e0cd779c556a248ac05acabb695c1da0cffaccc1796da507451482ac94d277
+            train_os: ubuntu-24.04-arm
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
     steps:
       - name: Resolve PGO mode
         id: mode
@@ -341,26 +354,52 @@ jobs:
           components: llvm-tools
           cache-key: pgo-profile-instrumented-${{ matrix.target }}
 
+      # The same packages as the musl and aarch64 steps of the build job. Read
+      # those steps for the reason of each apt workaround.
+      - name: Install target tools
+        if: steps.mode.outputs.enabled == 'true' && (contains(matrix.target, 'musl') || matrix.target == 'aarch64-unknown-linux-gnu')
+        shell: bash
+        env:
+          FALLOW_TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          apt_get="apt-get"
+          sed_i="sed -i"
+          if command -v sudo >/dev/null 2>&1; then
+            apt_get="sudo apt-get"
+            sed_i="sudo sed -i"
+          fi
+          if [ -f /etc/apt/sources.list ] && grep -q 'deb.debian.org/debian-security' /etc/apt/sources.list; then
+            $sed_i 's|^deb http://deb.debian.org/debian-security|deb [check-valid-until=no] http://deb.debian.org/debian-security|' /etc/apt/sources.list
+            grep -q 'check-valid-until=no' /etc/apt/sources.list \
+              || { echo "could not scope the freshness exemption to bullseye-security"; exit 1; }
+          fi
+          $apt_get update || echo "apt-get update reported errors on at least one source"
+          case "$FALLOW_TARGET" in
+            *musl) $apt_get install -y musl-tools ;;
+            aarch64-unknown-linux-gnu) $apt_get install -y gcc-aarch64-linux-gnu ;;
+          esac
+
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        if: steps.mode.outputs.enabled == 'true'
+        if: steps.mode.outputs.enabled == 'true' && !matrix.train_os
         with:
           node-version: '26'
 
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
-        if: steps.mode.outputs.enabled == 'true'
+        if: steps.mode.outputs.enabled == 'true' && !matrix.train_os
         with:
           # pnpm 10 and later switch to the packageManager version of each project.
           version: 12.6.0
 
       - name: Cache training fixtures
-        if: steps.mode.outputs.enabled == 'true'
+        if: steps.mode.outputs.enabled == 'true' && !matrix.train_os
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: benchmarks/fixtures/real-world
-          key: pgo-train-fixtures-v1-${{ runner.os }}-${{ hashFiles('benchmarks/download-fixtures.mjs') }}
+          key: pgo-train-fixtures-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('benchmarks/download-fixtures.mjs') }}
 
       - name: Fetch training fixtures
-        if: steps.mode.outputs.enabled == 'true'
+        if: steps.mode.outputs.enabled == 'true' && !matrix.train_os
         shell: bash
         run: node benchmarks/download-fixtures.mjs --only preact,fastify,zod,vue-core,svelte
 
@@ -372,34 +411,154 @@ jobs:
       # profile LTO value into the crate symbol names, so a profile change
       # makes the profile match almost no function. Rustflags do not change
       # the hash. `-Clinker-plugin-lto=no` makes the crates emit object code,
-      # because a build without LTO cannot link bitcode-only crates.
+      # because a build without LTO cannot link bitcode-only crates. The
+      # aarch64 gnu leg uses the cross linker and the job limit of its build leg.
       - name: Build instrumented multicall binary
         if: steps.mode.outputs.enabled == 'true'
         shell: bash
         env:
           FALLOW_TARGET: ${{ matrix.target }}
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
         run: |
           set -euo pipefail
+          if [ "$FALLOW_TARGET" = aarch64-unknown-linux-gnu ]; then
+            export CARGO_BUILD_JOBS=1
+          fi
           mkdir -p target
           printf "[target.%s]\nrustflags = ['-Cprofile-generate=/tmp/pgo-raw', '-Clto=off', '-Clinker-plugin-lto=no']\n" "$FALLOW_TARGET" > target/pgo-generate.toml
           cargo build --release --locked --target "$FALLOW_TARGET" -p fallow-multicall --config target/pgo-generate.toml
 
+      # The x86_64 macOS leg builds on the arm64 runner of its build leg and
+      # runs the instrumented binary through Rosetta.
+      - name: Install Rosetta
+        if: steps.mode.outputs.enabled == 'true' && matrix.target == 'x86_64-apple-darwin'
+        shell: bash
+        run: |
+          /usr/bin/arch -x86_64 /usr/bin/true 2>/dev/null \
+            || sudo softwareupdate --install-rosetta --agree-to-license
+          /usr/bin/arch -x86_64 /usr/bin/true
+
       - name: Train PGO profile
-        if: steps.mode.outputs.enabled == 'true'
+        if: steps.mode.outputs.enabled == 'true' && !matrix.train_os
         shell: bash
         env:
           FALLOW_TARGET: ${{ matrix.target }}
         run: |
+          set -euo pipefail
+          bin="target/${FALLOW_TARGET}/release/fallow-multicall"
+          if [ -f "${bin}.exe" ]; then
+            bin="${bin}.exe"
+          fi
           scripts/pgo-train.sh \
-            "target/${FALLOW_TARGET}/release/fallow-multicall" \
+            "$bin" \
             benchmarks/fixtures/real-world \
             pgo-profile/fallow.profdata
           echo "PGO profile (${FALLOW_TARGET}): $(wc -c < pgo-profile/fallow.profdata) bytes" >> "$GITHUB_STEP_SUMMARY"
 
+      # Only pgo-profile-cross downloads this artifact. The name must not
+      # start with `fallow-`, `npm-` or `unsigned-binaries-`, because later
+      # jobs download those patterns as release content.
+      - name: Upload instrumented binary for cross training
+        if: steps.mode.outputs.enabled == 'true' && matrix.train_os
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: pgo-instrumented-${{ matrix.target }}
+          path: target/${{ matrix.target }}/release/fallow-multicall
+          if-no-files-found: error
+          retention-days: 1
+          include-hidden-files: false
+
       # Upload only the profile. The artifact name must not start with
       # `fallow-`: release-assets downloads that pattern as release assets.
       - name: Upload PGO profile
-        if: steps.mode.outputs.enabled == 'true'
+        if: steps.mode.outputs.enabled == 'true' && !matrix.train_os
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: pgo-profile-${{ matrix.target }}
+          path: pgo-profile/fallow.profdata
+          if-no-files-found: error
+          retention-days: 7
+          include-hidden-files: false
+
+  # Trains the PGO profile of each cross-compiled pgo-profile leg on a runner
+  # of the target architecture. It runs the instrumented binary of that leg
+  # and uploads only the merged profile. With the `pgo` input set to false,
+  # the job does no work and succeeds, so the build job still runs. It waits
+  # for every pgo-profile leg, so it adds its own minutes to the release.
+  pgo-profile-cross:
+    name: Train PGO profile on the target (${{ matrix.target }})
+    if: ${{ !inputs.auth_check }}
+    needs: pgo-profile
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: true
+      # One leg per pgo-profile leg with `train_os`.
+      matrix:
+        include:
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: needs.pgo-profile.outputs.enabled == 'true'
+        with:
+          persist-credentials: false
+
+      # llvm-profdata of the same toolchain merges the raw profiles.
+      - uses: ./.github/actions/setup-rust
+        if: needs.pgo-profile.outputs.enabled == 'true'
+        with:
+          components: llvm-tools
+          cache-key: pgo-profile-cross-${{ matrix.target }}
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        if: needs.pgo-profile.outputs.enabled == 'true'
+        with:
+          node-version: '26'
+
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+        if: needs.pgo-profile.outputs.enabled == 'true'
+        with:
+          # pnpm 10 and later switch to the packageManager version of each project.
+          version: 12.6.0
+
+      - name: Cache training fixtures
+        if: needs.pgo-profile.outputs.enabled == 'true'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: benchmarks/fixtures/real-world
+          key: pgo-train-fixtures-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('benchmarks/download-fixtures.mjs') }}
+
+      - name: Fetch training fixtures
+        if: needs.pgo-profile.outputs.enabled == 'true'
+        shell: bash
+        run: node benchmarks/download-fixtures.mjs --only preact,fastify,zod,vue-core,svelte
+
+      - name: Download instrumented binary
+        if: needs.pgo-profile.outputs.enabled == 'true'
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: pgo-instrumented-${{ matrix.target }}
+          path: target/pgo-instrumented
+
+      - name: Train PGO profile
+        if: needs.pgo-profile.outputs.enabled == 'true'
+        shell: bash
+        env:
+          FALLOW_TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          chmod +x target/pgo-instrumented/fallow-multicall
+          scripts/pgo-train.sh \
+            target/pgo-instrumented/fallow-multicall \
+            benchmarks/fixtures/real-world \
+            pgo-profile/fallow.profdata
+          echo "PGO profile (${FALLOW_TARGET}): $(wc -c < pgo-profile/fallow.profdata) bytes" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload PGO profile
+        if: needs.pgo-profile.outputs.enabled == 'true'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: pgo-profile-${{ matrix.target }}
@@ -411,9 +570,10 @@ jobs:
   build:
     name: Build (${{ matrix.target }})
     if: ${{ !inputs.auth_check }}
-    needs: [release-context, pgo-profile]
+    needs: [release-context, pgo-profile, pgo-profile-cross]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 150
+    # The PGO macOS legs take about 140 minutes.
+    timeout-minutes: 180
     container: ${{ matrix.container }}
     permissions:
       contents: read
@@ -428,6 +588,7 @@ jobs:
             lsp_binary: fallow-lsp
             mcp_binary: fallow-mcp
             npm_dir: darwin-x64
+            pgo_profile: true
           - target: aarch64-apple-darwin
             os: macos-latest
             binary: fallow
@@ -453,6 +614,7 @@ jobs:
             lsp_binary: fallow-lsp
             mcp_binary: fallow-mcp
             npm_dir: linux-arm64-gnu
+            pgo_profile: true
           - target: x86_64-unknown-linux-musl
             os: ubuntu-26.04
             binary: fallow
@@ -460,6 +622,7 @@ jobs:
             lsp_binary: fallow-lsp
             mcp_binary: fallow-mcp
             npm_dir: linux-x64-musl
+            pgo_profile: true
           - target: aarch64-unknown-linux-musl
             os: ubuntu-26.04
             binary: fallow
@@ -474,6 +637,7 @@ jobs:
             lsp_binary: fallow-lsp.exe
             mcp_binary: fallow-mcp.exe
             npm_dir: win32-x64-msvc
+            pgo_profile: true
           - target: aarch64-pc-windows-msvc
             os: windows-11-arm
             binary: fallow.exe

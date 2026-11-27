@@ -5,6 +5,17 @@ import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+// On Windows, npm and pnpm are .cmd files, which only a shell can start. The
+// arguments are fixed strings without spaces, so one joined command string is
+// safe. Node deprecates `shell: true` together with an argument array.
+const install = (command, args, cwd) => {
+  const options = { cwd, stdio: "pipe", timeout: 300_000 };
+  if (process.platform === "win32") {
+    execFileSync([command, ...args].join(" "), { ...options, shell: true });
+  } else {
+    execFileSync(command, args, options);
+  }
+};
 const fixturesDir = join(__dirname, "fixtures", "real-world");
 const INSTALL_LOG_TAIL_LINES = 20;
 
@@ -88,17 +99,9 @@ for (const fixture of selected) {
     });
     console.log(`  ${fixture.name}: installing dependencies...`);
     if (fixture.pm === "pnpm") {
-      execFileSync("pnpm", ["install", "--no-frozen-lockfile", "--ignore-scripts"], {
-        cwd: dest,
-        stdio: "pipe",
-        timeout: 300_000,
-      });
+      install("pnpm", ["install", "--no-frozen-lockfile", "--ignore-scripts"], dest);
     } else {
-      execFileSync("npm", ["install", "--ignore-scripts", "--no-audit", "--no-fund"], {
-        cwd: dest,
-        stdio: "pipe",
-        timeout: 300_000,
-      });
+      install("npm", ["install", "--ignore-scripts", "--no-audit", "--no-fund"], dest);
     }
     console.log(`  ${fixture.name}: ready (${countSourceFiles(dest)} source files)`);
   } catch (err) {
