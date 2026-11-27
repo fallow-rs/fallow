@@ -1215,10 +1215,15 @@ Each directory walk that reads ignore files starts from
 each ignore file to its end, so a FIFO or a link to a device stops the walk.
 The builder checks each file before the crate opens it: the `.gitignore` and
 `.ignore` files of the root and of its parent directories, the
-`.git/info/exclude` file (or the `.git` file of a linked worktree), and the
-global excludes file of Git. A file passes when it is a regular file of at
-most 1 MiB, or a link to such a file inside the project. The project is the
-nearest directory at or above the root that has a `.git` entry.
+`.git/info/exclude` file, and the global excludes file of Git. For a linked
+worktree, it checks the `.git` file, the `commondir` file of the repository
+directory and the `info/exclude` file that `commondir` names, in the order the
+crate reads them. A file passes when it is a regular file of at most 1 MiB, or
+a link to such a file inside the project. The project is the nearest directory
+at or above the root that has a `.git` entry. A file above the project, the
+repository files that a `.git` file names, and the global excludes file get
+only the type and size check, because a link there to a file of the user (for
+example a dotfiles repository) is normal.
 
 - A skipped file in the root or in a parent directory turns off that kind of
   ignore file for the whole walk.

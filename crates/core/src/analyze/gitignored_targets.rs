@@ -240,3 +240,33 @@ fn build_matcher(dir: &Path, repo_root: &Path, files: impl Iterator<Item = PathB
     }
     builder.build().unwrap_or_else(|_| Gitignore::empty())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn rules_of_a_gitignore_that_links_out_of_the_repository_do_not_apply() {
+        let outside = tempfile::tempdir().expect("outside directory");
+        std::fs::write(outside.path().join("rules"), "generated/\n").expect("rules");
+        let directory = tempfile::tempdir().expect("repository");
+        let root = directory.path();
+        std::fs::create_dir_all(root.join(".git")).expect("git directory");
+        std::fs::create_dir_all(root.join("src")).expect("src directory");
+        std::fs::write(root.join("src/index.ts"), "").expect("importer");
+        std::os::unix::fs::symlink(outside.path().join("rules"), root.join("src/.gitignore"))
+            .expect("link out of the repository");
+        let importer = root.join("src/index.ts");
+
+        assert!(
+            !GitignoredTargets::new(root).ignores_missing_target(&importer, "./generated/client")
+        );
+
+        std::fs::remove_file(root.join("src/.gitignore")).expect("remove link");
+        std::fs::write(root.join("src/.gitignore"), "generated/\n").expect("regular rules");
+        assert!(
+            GitignoredTargets::new(root).ignores_missing_target(&importer, "./generated/client")
+        );
+    }
+}

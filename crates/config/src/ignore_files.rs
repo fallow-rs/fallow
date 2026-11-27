@@ -70,10 +70,14 @@ fn check(path: &Path, scope: Option<&Path>) -> Result<bool, Refusal> {
         Err(_) => return Err(Refusal::NoMetadata),
     };
     let metadata = if metadata.file_type().is_symlink() {
-        // The `ignore` crate opens a file only when `Path::exists` is true, so a
-        // link that does not resolve is never read.
+        // A link whose target is missing is absent: the `ignore` crate skips it
+        // through `Path::exists`, and on Windows its open fails. A link that
+        // does not resolve for another reason, such as a loop, is refused.
         let Ok(target) = dunce::canonicalize(path) else {
-            return Ok(false);
+            return match std::fs::metadata(path) {
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+                _ => Err(Refusal::NoMetadata),
+            };
         };
         if scope.is_some_and(|scope| !target.starts_with(scope)) {
             return Err(Refusal::TargetOutsideProject);
@@ -146,40 +150,77 @@ struct DirReads {
 
 impl DirReads {
     /// The first ignore file of `dir` that the walk reads and that fails the
-    /// check, with the reason.
-    fn first_refusal(self, dir: &Path, scope: &Path) -> Option<(PathBuf, Refusal, &'static str)> {
+    /// check, with the reason. A link target must be inside `scope` when
+    /// `scope` is set.
+    fn first_refusal(
+        self,
+        dir: &Path,
+        scope: Option<&Path>,
+    ) -> Option<(PathBuf, Refusal, &'static str)> {
         let named = [
             (self.dot_ignore, ".ignore"),
             (self.sources.git_ignore, ".gitignore"),
         ];
         for (read, name) in named {
             let path = dir.join(name);
-            if read && let Err(refusal) = check(&path, Some(scope)) {
+            if read && let Err(refusal) = check(&path, scope) {
                 return Some((path, refusal, name));
             }
         }
         if self.sources.git_exclude {
-            let path = git_exclude_input(dir)?;
-            if let Err(refusal) = check(&path, Some(scope)) {
-                return Some((path, refusal, ".git/info/exclude"));
-            }
+            return git_exclude_refusal(dir, scope)
+                .map(|(path, refusal)| (path, refusal, ".git/info/exclude"));
         }
         None
     }
 }
 
-/// The file that the `ignore` crate reads for the exclude rules of `dir`.
+/// The first file that the `ignore` crate reads for the exclude rules of
+/// `dir` and that fails the check.
 ///
 /// A `.git` directory holds `info/exclude`. A `.git` file (a linked worktree)
-/// is read first to find the repository directory.
-fn git_exclude_input(dir: &Path) -> Option<PathBuf> {
+/// names the repository directory on its first line (`gitdir: <path>`). The
+/// `commondir` file of that directory names the shared directory that holds
+/// `info/exclude`. The crate reads these files in this order, the same as
+/// `resolve_git_commondir` in `ignore`. The files that the `.git` file names
+/// can be outside the project, so they get only the type and size check.
+fn git_exclude_refusal(dir: &Path, scope: Option<&Path>) -> Option<(PathBuf, Refusal)> {
+    let refused = |path: PathBuf, scope: Option<&Path>| {
+        check(&path, scope).err().map(|refusal| (path, refusal))
+    };
     let git = dir.join(".git");
     let metadata = std::fs::metadata(&git).ok()?;
     if metadata.is_dir() {
-        Some(git.join("info").join("exclude"))
-    } else {
-        metadata.is_file().then_some(git)
+        return refused(git.join("info").join("exclude"), scope);
     }
+    if !metadata.is_file() {
+        return None;
+    }
+    if let Some(refusal) = refused(git.clone(), scope) {
+        return Some(refusal);
+    }
+    let git_dir = PathBuf::from(first_line(&git)?.strip_prefix("gitdir: ")?);
+    let commondir_file = git_dir.join("commondir");
+    if let Some(refusal) = refused(commondir_file.clone(), None) {
+        return Some(refusal);
+    }
+    let commondir = first_line(&commondir_file)?;
+    let common = if commondir.starts_with('.') {
+        git_dir.join(commondir)
+    } else {
+        PathBuf::from(commondir)
+    };
+    refused(common.join("info").join("exclude"), None)
+}
+
+/// The first line of a file that passed the check, without its line end.
+/// `None` when the file is absent or the line is not valid UTF-8, the cases in
+/// which the `ignore` crate reads no exclude file.
+fn first_line(path: &Path) -> Option<String> {
+    let bytes = fallow_types::read_guard::read_bytes_bounded(path, MAX_IGNORE_FILE_BYTES).ok()?;
+    let line = bytes.split(|byte| *byte == b'\n').next()?;
+    let line = line.strip_suffix(b"\r").unwrap_or(line);
+    String::from_utf8(line.to_vec()).ok()
 }
 
 /// The ignore files of the walk root and of its parent directories that pass
@@ -190,7 +231,10 @@ fn checked_root_reads(canonical_root: &Path, scope: &Path, sources: IgnoreFileSo
         sources,
     };
     for dir in canonical_root.ancestors() {
-        let file_scope = if dir.starts_with(scope) { scope } else { dir };
+        // A file above the project belongs to the user, for example a
+        // `~/.gitignore` that links to a dotfiles repository, so only its type
+        // and size are checked.
+        let file_scope = dir.starts_with(scope).then_some(scope);
         while let Some((path, refusal, name)) = reads.first_refusal(dir, file_scope) {
             let consequence = format!("the walk reads no {name} files");
             warn_skipped(&path, refusal, &consequence);
@@ -256,7 +300,7 @@ where
             let is_dir = entry.file_type().is_some_and(|kind| kind.is_dir());
             if entry.depth() > 0
                 && is_dir
-                && let Some((path, refusal, _)) = reads.first_refusal(entry.path(), &scope)
+                && let Some((path, refusal, _)) = reads.first_refusal(entry.path(), Some(&scope))
             {
                 warn_skipped(&path, refusal, "the walk skips its directory");
                 return false;
@@ -264,4 +308,23 @@ where
             filter(entry)
         });
     builder
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn a_link_loop_is_refused_and_a_dangling_link_is_absent() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let looped = directory.path().join(".gitignore");
+        std::os::unix::fs::symlink(&looped, &looped).expect("link to itself");
+        let dangling = directory.path().join(".ignore");
+        std::os::unix::fs::symlink(directory.path().join("missing"), &dangling)
+            .expect("dangling link");
+
+        assert_eq!(check(&looped, None), Err(Refusal::NoMetadata));
+        assert_eq!(check(&dangling, None), Ok(false));
+    }
 }

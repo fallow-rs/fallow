@@ -264,6 +264,54 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    fn source_walk_reads_a_parent_gitignore_that_links_outside_the_project() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let base = directory.path();
+        write_file(&base.join("dotfiles/gitignore"), "*.log\n");
+        std::fs::create_dir_all(base.join("sites")).expect("sites directory");
+        std::os::unix::fs::symlink(
+            base.join("dotfiles/gitignore"),
+            base.join("sites/.gitignore"),
+        )
+        .expect("link to the dotfiles");
+        let root = base.join("sites/app");
+        std::fs::create_dir_all(root.join(".git")).expect("git directory");
+        write_file(&root.join(".gitignore"), "generated\n");
+        write_file(&root.join("src/index.ts"), "");
+        write_file(&root.join("generated/gen.ts"), "");
+
+        let walked =
+            walked_files_within(source_walk_builder(&root, |_| true), &root).expect("walk ends");
+        assert!(walked.contains(&"src/index.ts".to_string()), "{walked:?}");
+        assert!(
+            !walked.contains(&"generated/gen.ts".to_string()),
+            "the project .gitignore still applies: {walked:?}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn source_walk_checks_the_exclude_file_of_a_linked_worktree() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let base = directory.path();
+        let git_dir = base.join("repository-git");
+        std::fs::create_dir_all(git_dir.join("info")).expect("git info directory");
+        std::fs::write(git_dir.join("commondir"), ".\n").expect("commondir");
+        make_fifo(&git_dir.join("info/exclude"));
+        let root = base.join("worktree");
+        write_file(&root.join("src/index.ts"), "");
+        write_file(
+            &root.join(".git"),
+            &format!("gitdir: {}\n", git_dir.display()),
+        );
+
+        let walked = walked_files_within(source_walk_builder(&root, |_| true), &root)
+            .expect("the walk must end although the worktree exclude file is a FIFO");
+        assert!(walked.contains(&"src/index.ts".to_string()), "{walked:?}");
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn source_walk_skips_an_ignore_file_above_the_size_cap() {
         let directory = tempfile::tempdir().expect("temporary directory");
         let root = directory.path();
