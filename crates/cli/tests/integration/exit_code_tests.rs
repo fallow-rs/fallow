@@ -2071,6 +2071,99 @@ fn output_files_through_a_symlink_that_leaves_the_root_are_rejected() {
     }
 }
 
+/// The pr-comment sidecar files go through the same check as `--output-file`.
+/// A sidecar path that is a symlink to a file outside the root is not
+/// written, an existing target keeps its content, and a missing target is not
+/// created. The run still renders the comment and warns about each sidecar.
+#[cfg(unix)]
+#[test]
+fn pr_comment_sidecars_through_a_symlink_that_leaves_the_root_are_not_written() {
+    let (dir, root) = write_confinement_project();
+    let elsewhere = dir.path().join("elsewhere");
+    std::fs::create_dir_all(&elsewhere).unwrap();
+    let kept = elsewhere.join("kept.txt");
+    std::fs::write(&kept, "original\n").unwrap();
+    let sidecars = [
+        (
+            "FALLOW_PR_COMMENT_ENVELOPE_FILE",
+            "envelope.json",
+            kept.clone(),
+        ),
+        (
+            "FALLOW_PR_DECISION_FILE",
+            "decision.json",
+            elsewhere.join("decision-target.json"),
+        ),
+        (
+            "FALLOW_PR_DETAILS_FILE",
+            "details.json",
+            elsewhere.join("details-target.json"),
+        ),
+    ];
+    for (_, link, target) in &sidecars {
+        std::os::unix::fs::symlink(target, root.join(link)).unwrap();
+    }
+    let env: Vec<(&str, &std::path::Path)> = sidecars
+        .iter()
+        .map(|(key, link, _)| (*key, std::path::Path::new(link)))
+        .collect();
+    let saved = run_fallow_from(
+        dir.path(),
+        &root,
+        &["dead-code", "--format", "json", "--quiet"],
+    );
+    assert!(matches!(saved.code, 0 | 1), "{}", saved.stderr);
+    let results = dir.path().join("results.json");
+    std::fs::write(&results, &saved.stdout).unwrap();
+    let results = results.to_str().unwrap();
+    let runs: [&[&str]; 2] = [
+        &["dead-code", "--format", "pr-comment-gitlab", "--quiet"],
+        &[
+            "report",
+            "--from",
+            results,
+            "--root",
+            ".",
+            "--format",
+            "pr-comment-gitlab",
+            "--quiet",
+        ],
+    ];
+    for args in runs {
+        let output = run_fallow_from_env(dir.path(), &root, args, &env);
+        assert_ne!(output.code, 2, "{args:?}: {}", output.stderr);
+        assert!(!output.stdout.is_empty(), "{args:?} still renders");
+        assert_eq!(std::fs::read_to_string(&kept).unwrap(), "original\n");
+        assert!(!elsewhere.join("decision-target.json").exists(), "{args:?}");
+        assert!(!elsewhere.join("details-target.json").exists(), "{args:?}");
+        for (_, link, _) in &sidecars {
+            assert!(
+                output.stderr.contains(link),
+                "{args:?} warns about {link}: {}",
+                output.stderr
+            );
+        }
+    }
+}
+
+/// A pr-comment sidecar file inside the project root keeps working.
+#[test]
+fn pr_comment_sidecars_inside_the_project_keep_working() {
+    let (dir, root) = write_confinement_project();
+    let output = run_fallow_from_env(
+        dir.path(),
+        &root,
+        &["dead-code", "--format", "pr-comment-gitlab", "--quiet"],
+        &[(
+            "FALLOW_PR_DETAILS_FILE",
+            std::path::Path::new("details.json"),
+        )],
+    );
+    assert_ne!(output.code, 2, "{}", output.stderr);
+    let details = std::fs::read_to_string(root.join("details.json")).unwrap();
+    assert!(details.contains("fallow-pr-details/v1"), "{details}");
+}
+
 /// A committed `.fallow` symlink that points outside the project is not used
 /// for the cache. The run skips the cache, prints one note and succeeds.
 #[cfg(unix)]

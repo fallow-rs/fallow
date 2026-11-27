@@ -597,50 +597,46 @@ fn count_label(count: usize, singular: &str, plural: &str) -> String {
 }
 
 fn write_pr_comment_envelope_sidecar(envelope: &PrCommentEnvelope) {
-    let Ok(path) = std::env::var("FALLOW_PR_COMMENT_ENVELOPE_FILE") else {
-        return;
-    };
-    if path.trim().is_empty() {
-        return;
-    }
-    match serde_json::to_string_pretty(envelope)
-        .map_err(|e| e.to_string())
-        .and_then(|json| std::fs::write(&path, json).map_err(|e| e.to_string()))
-    {
-        Ok(()) => {}
-        Err(e) => eprintln!("warning: failed to write PR comment envelope '{path}': {e}"),
-    }
+    write_sidecar(
+        "FALLOW_PR_COMMENT_ENVELOPE_FILE",
+        "PR comment envelope",
+        envelope,
+    );
 }
 
 fn write_pr_decision_sidecar(surface: &PrDecisionSurface) {
-    let Ok(path) = std::env::var("FALLOW_PR_DECISION_FILE") else {
-        return;
-    };
-    if path.trim().is_empty() {
-        return;
-    }
-    match serde_json::to_string_pretty(surface)
-        .map_err(|e| e.to_string())
-        .and_then(|json| std::fs::write(&path, json).map_err(|e| e.to_string()))
-    {
-        Ok(()) => {}
-        Err(e) => eprintln!("warning: failed to write PR decision '{path}': {e}"),
-    }
+    write_sidecar("FALLOW_PR_DECISION_FILE", "PR decision", surface);
 }
 
 fn write_pr_details_sidecar(artifact: &PrDetailsArtifact) {
-    let Ok(path) = std::env::var("FALLOW_PR_DETAILS_FILE") else {
+    write_sidecar("FALLOW_PR_DETAILS_FILE", "PR details", artifact);
+}
+
+/// Write `value` as JSON to the path in the environment variable `var`, when
+/// it is set and not empty. The write goes through the same check as
+/// `--output-file`, so a sidecar path that resolves outside the allowed
+/// directories, for example through a symlink in the checkout, is not
+/// written. A failed write is a warning, because the comment itself is the
+/// main output.
+fn write_sidecar(var: &str, label: &str, value: &impl serde::Serialize) {
+    let Ok(path) = std::env::var(var) else {
         return;
     };
     if path.trim().is_empty() {
         return;
     }
-    match serde_json::to_string_pretty(artifact)
+    let result = serde_json::to_string_pretty(value)
         .map_err(|e| e.to_string())
-        .and_then(|json| std::fs::write(&path, json).map_err(|e| e.to_string()))
-    {
-        Ok(()) => {}
-        Err(e) => eprintln!("warning: failed to write PR details '{path}': {e}"),
+        .and_then(|json| {
+            fallow_engine::write_guard::write_file(
+                std::path::Path::new(&path),
+                json.as_bytes(),
+                fallow_engine::write_guard::WriteTarget::Path,
+            )
+            .map_err(|e| e.to_string())
+        });
+    if let Err(e) = result {
+        eprintln!("warning: failed to write {label} '{path}': {e}");
     }
 }
 
