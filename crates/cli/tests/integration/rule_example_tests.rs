@@ -83,16 +83,6 @@ impl fmt::Display for Check {
 /// stale.
 const KNOWN_GAPS: &[(&str, Check, &str)] = &[
     (
-        "dev-dependency-in-production",
-        Check::Output(Format::Compact),
-        "the compact line names the package only, with no file and no line",
-    ),
-    (
-        "duplicate-export",
-        Check::Output(Format::Compact),
-        "the compact line names the export only, with no file and no line",
-    ),
-    (
         "duplicate-prop-shape",
         Check::Output(Format::CodeClimate),
         "CodeClimate reports a component-health finding only at the `error` severity",
@@ -108,39 +98,9 @@ const KNOWN_GAPS: &[(&str, Check, &str)] = &[
         "the CodeClimate output of `fallow health` has no refactoring targets",
     ),
     (
-        "test-only-dependency",
-        Check::Output(Format::Compact),
-        "the compact line names the package only, with no file and no line",
-    ),
-    (
         "thin-wrapper",
         Check::Output(Format::CodeClimate),
         "CodeClimate reports a component-health finding only at the `error` severity",
-    ),
-    (
-        "type-only-dependency",
-        Check::Output(Format::Compact),
-        "the compact line names the package only, with no file and no line",
-    ),
-    (
-        "unlisted-dependency",
-        Check::Output(Format::Compact),
-        "the compact line names the package only, with no file and no line",
-    ),
-    (
-        "unused-dependency",
-        Check::Output(Format::Compact),
-        "the compact line names the package only, with no file and no line",
-    ),
-    (
-        "unused-dev-dependency",
-        Check::Output(Format::Compact),
-        "the compact line names the package only, with no file and no line",
-    ),
-    (
-        "unused-optional-dependency",
-        Check::Output(Format::Compact),
-        "the compact line names the package only, with no file and no line",
     ),
 ];
 

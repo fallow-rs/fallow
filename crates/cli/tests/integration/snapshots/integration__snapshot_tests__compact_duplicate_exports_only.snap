@@ -2,4 +2,5 @@
 source: crates/cli/tests/integration/snapshot_tests.rs
 expression: "lines.join(\"\\n\")"
 ---
-duplicate-export:Config
+duplicate-export:src/config.ts:15:Config
+duplicate-export:src/types.ts:30:Config

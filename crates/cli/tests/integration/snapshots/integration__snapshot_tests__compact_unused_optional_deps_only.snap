@@ -2,4 +2,4 @@
 source: crates/cli/tests/integration/snapshot_tests.rs
 expression: "lines.join(\"\\n\")"
 ---
-unused-optionaldep:fsevents
+unused-optionaldep:package.json:5:fsevents

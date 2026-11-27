@@ -5,17 +5,18 @@ expression: output
 unused-file:src/dead.ts
 unused-export:src/utils.ts:10:helperFn
 unused-type:src/types.ts:5:OldType
-unused-dep:lodash
-unused-devdep:jest
-unused-optionaldep:fsevents
+unused-dep:package.json:5:lodash
+unused-devdep:package.json:5:jest
+unused-optionaldep:package.json:5:fsevents
 unused-enum-member:src/enums.ts:8:Status.Deprecated
 unused-class-member:src/service.ts:42:UserService.legacyMethod
 unused-store-member:src/stores/counter.ts:24:useCounterStore.legacyAction
 unresolved-import:src/app.ts:3:./missing-module
-unlisted-dep:chalk
-duplicate-export:Config
-type-only-dep:zod
-test-only-dep:msw
+unlisted-dep:src/cli.ts:2:chalk
+duplicate-export:src/config.ts:15:Config
+duplicate-export:src/types.ts:30:Config
+type-only-dep:package.json:8:zod
+test-only-dep:package.json:12:msw
 circular-dependency:src/a.ts:3:src/a.ts → src/b.ts → src/a.ts
 re-export-cycle:src/api/index.ts:1:src/api/index.ts <-> src/api/internal/index.ts
 invalid-client-export:app/page.tsx:3:metadata (from "use client")
