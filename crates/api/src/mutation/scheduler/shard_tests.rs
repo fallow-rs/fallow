@@ -1,7 +1,7 @@
 use super::super::super::protocol::RunWorkerMode;
 use super::*;
 
-const FILES: [&str; 3] = ["test/a.test.ts", "test/b.test.ts", "test/c.test.ts"];
+pub(super) const FILES: [&str; 3] = ["test/a.test.ts", "test/b.test.ts", "test/c.test.ts"];
 
 fn file_test(file: &str, id: &str, status: TestStatus) -> DryTest {
     DryTest {
@@ -18,7 +18,7 @@ fn file_test(file: &str, id: &str, status: TestStatus) -> DryTest {
 /// The dry run of `files`: `a::t1` hits m0, m1 and m3, `b::u1` hits m2 and m3,
 /// `c::v1` hits nothing. Each file reports the sources that it does not
 /// load, so a path that no file loads stays in each report.
-fn dry_of(files: &[String], failing: Option<&str>) -> DryRunResult {
+pub(super) fn dry_of(files: &[String], failing: Option<&str>) -> DryRunResult {
     let mut dry = DryRunResult {
         worker_mode: None,
         tests: Vec::new(),
@@ -54,7 +54,7 @@ fn dry_of(files: &[String], failing: Option<&str>) -> DryRunResult {
     dry
 }
 
-fn shard_spawner(failing: Option<&'static str>) -> FakeSpawner {
+pub(super) fn shard_spawner(failing: Option<&'static str>) -> FakeSpawner {
     FakeSpawner::new(move |_, request| match request {
         Request::Init(_) => {
             let Response::Ready(mut ready) = ready(VITEST_CAPS, "5.0.4") else {
@@ -74,7 +74,7 @@ fn shard_spawner(failing: Option<&'static str>) -> FakeSpawner {
     })
 }
 
-fn shard_plan(ids: &[&str]) -> SchedulePlan {
+pub(super) fn shard_plan(ids: &[&str]) -> SchedulePlan {
     SchedulePlan {
         test_files: FILES.map(str::to_owned).to_vec(),
         file_test_files: BTreeMap::from([(
@@ -86,7 +86,7 @@ fn shard_plan(ids: &[&str]) -> SchedulePlan {
 }
 
 /// The test files of each dry run, with the companion index, in log order.
-fn dry_runs(spawner: &FakeSpawner) -> Vec<(usize, Vec<String>)> {
+pub(super) fn dry_runs(spawner: &FakeSpawner) -> Vec<(usize, Vec<String>)> {
     spawner
         .log
         .lock()
@@ -99,7 +99,7 @@ fn dry_runs(spawner: &FakeSpawner) -> Vec<(usize, Vec<String>)> {
         .collect()
 }
 
-fn verdicts(outcome: &ScheduleOutcome) -> Vec<(String, MutantStatus, Option<String>)> {
+pub(super) fn verdicts(outcome: &ScheduleOutcome) -> Vec<(String, MutantStatus, Option<String>)> {
     let mut verdicts: Vec<_> = outcome
         .results
         .iter()

@@ -13,13 +13,14 @@ use colored::Colorize as _;
 use fallow_api::mutation::split_control_run_failure;
 use fallow_output::{
     DUPLICATE_TEST_IDS_CODE, MutantEquivalenceHint, MutantResult, MutantStatus,
-    MutationCompletionStatus, MutationInspectOutput, MutationInspectStatus, MutationKillMatrix,
-    MutationKillMatrixStatus, MutationKillMatrixTargetMode, MutationKillMatrixTargetStatus,
-    MutationPlanDisposition, MutationPlanOutput, MutationReplayCall, MutationReplayOutcome,
-    MutationReplayOutput, MutationReplaySide, MutationReplayVerdict, MutationReport,
-    MutationResumeOutput, MutationScopeKind, MutationScopeOutput, MutationSkippedFile,
-    MutationStaleReason, MutationTargetOnlyKill, MutationTestKillRow, MutationTypecheckOutput,
-    MutationUnmatchedPath, SKIPPED_TESTS_CODE, TestReachClass,
+    MutationCacheOutput, MutationCompletionStatus, MutationInspectOutput, MutationInspectStatus,
+    MutationKillMatrix, MutationKillMatrixStatus, MutationKillMatrixTargetMode,
+    MutationKillMatrixTargetStatus, MutationPlanDisposition, MutationPlanOutput,
+    MutationReplayCall, MutationReplayOutcome, MutationReplayOutput, MutationReplaySide,
+    MutationReplayVerdict, MutationReport, MutationResumeOutput, MutationScopeKind,
+    MutationScopeOutput, MutationSkippedFile, MutationStaleReason, MutationTargetOnlyKill,
+    MutationTestKillRow, MutationTypecheckOutput, MutationUnmatchedPath, SKIPPED_TESTS_CODE,
+    TestReachClass,
 };
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -725,17 +726,41 @@ fn render_status_lines(out: &mut String, report: &MutationReport, min_score: Opt
     if let Some(typecheck) = &report.typecheck {
         let _ = writeln!(out, "{}", typecheck_line(typecheck));
     }
-    if let Some(cache) = report.cache.as_ref().filter(|cache| cache.hits > 0) {
-        let _ = writeln!(
-            out,
-            "Cache: {} {} from an earlier run. Pass --no-cache to run each mutant.",
-            cache.hits,
-            plural(cache.hits, "result came", "results came")
-        );
+    if let Some(cache) = report.cache.as_ref() {
+        let _ = cache_line(out, cache);
     }
     if let Some(resume) = &report.resume {
         let _ = writeln!(out, "{}", resume_line(resume));
     }
+}
+
+/// The line of a run that used the cache: the results and the dry-run test
+/// files that came from an earlier run. No line when nothing came from it.
+fn cache_line(out: &mut String, cache: &MutationCacheOutput) -> std::fmt::Result {
+    let results = (cache.hits > 0)
+        .then(|| format!("{} {}", cache.hits, plural(cache.hits, "result", "results")));
+    let dry_files = cache.dry_run_hits + cache.dry_run_misses;
+    let dry_runs = (cache.dry_run_hits > 0).then(|| {
+        format!(
+            "the dry run of {} of {dry_files} {}",
+            cache.dry_run_hits,
+            plural(dry_files, "test file", "test files")
+        )
+    });
+    let parts: Vec<String> = results.into_iter().chain(dry_runs).collect();
+    if parts.is_empty() {
+        return Ok(());
+    }
+    let opt_out = if cache.dry_run_hits > 0 {
+        "Pass --no-cache to run each mutant and dry-run each test file."
+    } else {
+        "Pass --no-cache to run each mutant."
+    };
+    writeln!(
+        out,
+        "Cache: {} came from an earlier run. {opt_out}",
+        parts.join(" and ")
+    )
 }
 
 /// The line of a `--resume` run.

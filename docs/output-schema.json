@@ -35474,7 +35474,7 @@
         },
         "dry_run_ms": {
           "type": "integer",
-          "description": "The dry run."
+          "description": "The first dry run: the test files without dry-run facts in the\ncache. Near zero when each file had stored facts."
         },
         "mutants_ms": {
           "type": "integer",
@@ -35911,6 +35911,18 @@
           "type": "integer",
           "description": "The results that this run added to the cache."
         },
+        "dry_run_hits": {
+          "type": "integer",
+          "description": "The test files whose dry-run facts came from the cache. The first dry\nrun of the run did not run them. The key parts are in the \"Dry-run\ncache\" section of the mutation testing docs."
+        },
+        "dry_run_misses": {
+          "type": "integer",
+          "description": "The test files with no valid dry-run facts in the cache. The first\ndry run of the run ran them."
+        },
+        "dry_run_stored": {
+          "type": "integer",
+          "description": "The test files whose dry-run facts this run added to the cache. A\nfile with a failed test or an error is not stored."
+        },
         "not_keyed": {
           "type": "array",
           "items": {
@@ -35922,6 +35934,9 @@
       "required": [
         "hits",
         "stored",
+        "dry_run_hits",
+        "dry_run_misses",
+        "dry_run_stored",
         "not_keyed"
       ],
       "description": "The result cache facts of a run."

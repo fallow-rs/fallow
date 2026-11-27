@@ -282,6 +282,9 @@ fn outcome(results: &[(&str, MutantStatus, bool)], keys: &[(&str, &str)]) -> Sch
     ScheduleOutcome {
         test_files: FxHashMap::default(),
         duplicate_test_ids: Vec::new(),
+        dry_run_reused: 0,
+        dry_run_missed: 0,
+        dry_run_entries: Vec::new(),
         ready: None,
         results: results
             .iter()

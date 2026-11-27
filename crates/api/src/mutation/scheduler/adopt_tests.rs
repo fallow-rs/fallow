@@ -3,13 +3,13 @@ use super::*;
 
 const FILES: [&str; 3] = ["test/a.test.ts", "test/b.test.ts", "test/c.test.ts"];
 
-const ADOPT_CAPS: Capabilities = Capabilities {
+pub(super) const ADOPT_CAPS: Capabilities = Capabilities {
     adopt: true,
     ..VITEST_CAPS
 };
 
 /// The taken tests of each companion, by companion index.
-type Taken = Arc<Mutex<FxHashMap<usize, Vec<String>>>>;
+pub(super) type Taken = Arc<Mutex<FxHashMap<usize, Vec<String>>>>;
 
 /// The dry run of `files`: `a::t1` hits m3, `b::u1` hits m2 and m3, and
 /// `c::v1` hits m1. Each passing test has an index entry, and the dry run
@@ -60,7 +60,7 @@ fn dry_of(files: &[String]) -> DryRunResult {
 /// A runner with the `adopt` capability. A mutant run gives `status`; a
 /// kill names a test that the companion took when it took one, else the
 /// first test.
-fn adopt_spawner(caps: Capabilities, status: RunStatus, taken: &Taken) -> FakeSpawner {
+pub(super) fn adopt_spawner(caps: Capabilities, status: RunStatus, taken: &Taken) -> FakeSpawner {
     let taken = Arc::clone(taken);
     FakeSpawner::new(move |index, request| match request {
         Request::Init(_) => {
@@ -99,7 +99,7 @@ fn adopt_spawner(caps: Capabilities, status: RunStatus, taken: &Taken) -> FakeSp
     })
 }
 
-fn adopt_plan(ids: &[&str]) -> SchedulePlan {
+pub(super) fn adopt_plan(ids: &[&str]) -> SchedulePlan {
     SchedulePlan {
         test_files: FILES.map(str::to_owned).to_vec(),
         file_test_files: BTreeMap::from([(
@@ -110,7 +110,7 @@ fn adopt_plan(ids: &[&str]) -> SchedulePlan {
     }
 }
 
-fn count_of(spawner: &FakeSpawner, kind: &str) -> usize {
+pub(super) fn count_of(spawner: &FakeSpawner, kind: &str) -> usize {
     spawner
         .log
         .lock()

@@ -277,6 +277,7 @@ fn plan(ids: &[&str]) -> SchedulePlan {
             "src/a.ts".to_owned(),
             vec!["test/a.test.ts".to_owned()],
         )]),
+        reaching_test_files: BTreeMap::new(),
     }
 }
 
@@ -304,6 +305,7 @@ fn config(concurrency: usize) -> ScheduleConfig {
         deadline: None,
         clock: Arc::new(SystemClock),
         cache: None,
+        dry_runs: None,
         journal: None,
     }
 }
@@ -3542,3 +3544,6 @@ mod adopt_tests;
 
 #[path = "split_tests.rs"]
 mod split_tests;
+
+#[path = "dry_store_tests.rs"]
+mod dry_store_tests;
