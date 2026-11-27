@@ -25,6 +25,7 @@ pub fn compute_semantic_usage_for_extractor_with_mode(
         SemanticReferenceCandidates {
             mode: gates.mode,
             call_facts: gates.call_facts,
+            component_contracts: gates.component_contracts,
             module_bindings: &module_binding_candidates,
             subclass_bindings: &subclass_candidates,
             callback_captures: &callback_candidates,

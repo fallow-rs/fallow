@@ -566,42 +566,56 @@ impl CacheStore {
     /// changed.
     ///
     /// An entry whose content hash still matches is rewritten only when its
-    /// metadata fingerprint moved or when this run adds complexity or call
-    /// facts that the entry lacks. A rewrite keeps the complexity and the call
-    /// facts that an earlier run stored and this run did not extract: a
-    /// module of such a run has none of them by design, so a copy would strip
-    /// the entry and make each later run that reads them parse the file again.
+    /// metadata fingerprint moved or when this run adds an optional fact
+    /// (complexity, call facts, feature flags, component contracts) that the
+    /// entry lacks. A rewrite keeps each optional fact that an earlier run
+    /// stored and this run did not extract: a module of such a run has none
+    /// of them by design, so a copy would strip the entry and make each later
+    /// run that reads them parse the file again.
     pub fn record_module(
         &mut self,
         path: &Path,
         module: &crate::ModuleInfo,
         fingerprint: fallow_types::source_fingerprint::SourceFingerprint,
-        need_complexity: bool,
-        need_call_facts: bool,
+        needs: crate::ParseNeeds,
     ) -> bool {
         let Some(cached) = self
             .get_by_path_only(path)
             .filter(|cached| cached.content_hash == module.content_hash)
         else {
-            self.insert(
-                path,
-                module_to_cached(module, fingerprint, need_complexity, need_call_facts),
-            );
+            self.insert(path, module_to_cached(module, fingerprint, needs));
             return true;
         };
-        let adds_complexity = need_complexity && !cached.complexity_extracted;
-        let adds_call_facts = need_call_facts && cached.call_facts.is_none();
-        if !adds_complexity && !adds_call_facts {
+        let stored = crate::ParseNeeds {
+            complexity: cached.complexity_extracted,
+            call_facts: cached.call_facts.is_some(),
+            flags: cached.flags_extracted,
+            component_contracts: cached.component_contracts_extracted,
+        };
+        if stored.covers(needs) {
             return cached.source_fingerprint() != fingerprint
                 && self.refresh_fingerprint(path, fingerprint);
         }
-        let mut refreshed = module_to_cached(module, fingerprint, need_complexity, need_call_facts);
-        if !need_complexity && cached.complexity_extracted {
+        let mut refreshed = module_to_cached(module, fingerprint, needs);
+        if !needs.complexity && stored.complexity {
             refreshed.complexity.clone_from(&cached.complexity);
             refreshed.complexity_extracted = true;
         }
-        if !need_call_facts {
+        if !needs.call_facts {
             refreshed.call_facts.clone_from(&cached.call_facts);
+        }
+        if !needs.flags && stored.flags {
+            refreshed.flag_uses.clone_from(&cached.flag_uses);
+            refreshed
+                .flag_registry_facts
+                .clone_from(&cached.flag_registry_facts);
+            refreshed.flags_extracted = true;
+        }
+        if !needs.component_contracts && stored.component_contracts {
+            refreshed
+                .component_contracts
+                .clone_from(&cached.component_contracts);
+            refreshed.component_contracts_extracted = true;
         }
         self.insert(path, refreshed);
         true

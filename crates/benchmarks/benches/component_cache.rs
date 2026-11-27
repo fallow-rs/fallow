@@ -334,7 +334,16 @@ fn create_cache_fixture() -> CacheFixture {
             BASE_MTIME_NS + u64::try_from(index).expect("fixture index fits in u64"),
             u64::try_from(source.len()).expect("fixture source length fits in u64"),
         );
-        modules.push(module_to_cached(&module, fingerprint, false, false));
+        modules.push(module_to_cached(
+            &module,
+            fingerprint,
+            fallow_extract::ParseNeeds {
+                complexity: false,
+                call_facts: false,
+                flags: true,
+                component_contracts: true,
+            },
+        ));
         paths.push(path);
     }
     CacheFixture {

@@ -641,6 +641,43 @@ fn parse_astro_to_module(
     )
 }
 
+/// Merge the contracts of the frontmatter script and of the template callers
+/// into the module.
+fn apply_component_contracts(
+    info: &mut ModuleInfo,
+    frontmatter_contracts: fallow_types::extract::ComponentContractFacts,
+    template: &str,
+    masked: &[(usize, usize)],
+    (frontmatter_offset, template_offset): (usize, usize),
+) {
+    crate::component_contracts::merge(
+        &mut info.component_contracts,
+        frontmatter_contracts,
+        frontmatter_offset as u32,
+        Some(fallow_types::extract::ComponentFramework::Astro),
+    );
+    let mut caller_source = template.as_bytes().to_vec();
+    for &(start, end) in masked {
+        caller_source[start..end].fill(b' ');
+    }
+    let Ok(caller_source) = std::str::from_utf8(&caller_source) else {
+        return;
+    };
+    let callers = crate::sfc_template::component_contracts::collect(
+        caller_source,
+        &info.imports,
+        fallow_types::extract::ComponentFramework::Astro,
+        template_offset as u32,
+        info.component_contracts
+            .as_deref()
+            .map_or(&[], |facts| facts.spread_bindings.as_slice()),
+        info.component_contracts
+            .as_deref()
+            .map_or(&[], |facts| facts.aliases.as_slice()),
+    );
+    crate::component_contracts::merge(&mut info.component_contracts, callers, 0, None);
+}
+
 pub(crate) fn parse_astro_to_module_with_mode(
     file_id: FileId,
     source: &str,
@@ -695,30 +732,14 @@ pub(crate) fn parse_astro_to_module_with_mode(
     let mut info = extractor.into_module_info(file_id, content_hash, parsed_suppressions);
     degradation.apply_to(&mut info);
     crate::visitor::mark_template_callers(&mut info);
-    crate::component_contracts::merge(
-        &mut info.component_contracts,
-        std::mem::take(&mut semantic_usage.component_contracts),
-        frontmatter_offset as u32,
-        Some(fallow_types::extract::ComponentFramework::Astro),
-    );
-    let mut caller_source = template.as_bytes().to_vec();
-    for &(start, end) in &masked {
-        caller_source[start..end].fill(b' ');
-    }
-    if let Ok(caller_source) = std::str::from_utf8(&caller_source) {
-        let callers = crate::sfc_template::component_contracts::collect(
-            caller_source,
-            &info.imports,
-            fallow_types::extract::ComponentFramework::Astro,
-            template_offset as u32,
-            info.component_contracts
-                .as_deref()
-                .map_or(&[], |facts| facts.spread_bindings.as_slice()),
-            info.component_contracts
-                .as_deref()
-                .map_or(&[], |facts| facts.aliases.as_slice()),
+    if gates.component_contracts {
+        apply_component_contracts(
+            &mut info,
+            std::mem::take(&mut semantic_usage.component_contracts),
+            template,
+            &masked,
+            (frontmatter_offset, template_offset),
         );
-        crate::component_contracts::merge(&mut info.component_contracts, callers, 0, None);
     }
 
     // Member-expression component tags (`<SC.Card />`) feed the same

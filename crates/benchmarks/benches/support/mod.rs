@@ -203,8 +203,12 @@ pub fn create_warm_hash_workspace_project() -> ExtractCacheInput {
         let cached = module_to_cached(
             &module,
             fallow_types::source_fingerprint::SourceFingerprint::new(1, 1),
-            false,
-            false,
+            fallow_extract::ParseNeeds {
+                complexity: false,
+                call_facts: false,
+                flags: true,
+                component_contracts: true,
+            },
         );
         cache.insert(&file.path, cached);
     }

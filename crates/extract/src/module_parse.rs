@@ -17,6 +17,12 @@ pub struct ExtractionOptions<'a> {
     /// whose rules do not read them leaves this off, and each module then
     /// has `function_contracts: None`.
     pub call_facts: bool,
+    /// Walk the program for feature flags (`ModuleInfo::flag_uses` and
+    /// `ModuleInfo::flag_registry_facts`). Off gives no flag facts.
+    pub flags: bool,
+    /// Collect the component contracts (`ModuleInfo::component_contracts`).
+    /// Off gives `component_contracts: None`.
+    pub component_contracts: bool,
 }
 
 impl ExtractionOptions<'_> {
@@ -24,6 +30,7 @@ impl ExtractionOptions<'_> {
         ExtractionGates {
             mode: self.mode,
             call_facts: self.call_facts,
+            component_contracts: self.component_contracts,
         }
     }
 }
@@ -34,6 +41,7 @@ impl ExtractionOptions<'_> {
 pub struct ExtractionGates {
     pub mode: fallow_types::shared_state::ExtractionMode,
     pub call_facts: bool,
+    pub component_contracts: bool,
 }
 
 #[cfg(test)]
@@ -42,6 +50,7 @@ impl ExtractionGates {
     pub const STANDARD: Self = Self {
         mode: fallow_types::shared_state::ExtractionMode::Standard,
         call_facts: true,
+        component_contracts: true,
     };
 }
 
@@ -94,6 +103,8 @@ pub fn parse_source_to_module_with_flags(
             flag_patterns,
             mode: fallow_types::shared_state::ExtractionMode::Standard,
             call_facts: true,
+            flags: true,
+            component_contracts: true,
         },
     )
 }
@@ -124,6 +135,10 @@ pub fn parse_source_without_bom(
         // The visitor and the HTML host mark call facts outside the gated
         // collection, so an empty marker must not reach a run without them.
         module.function_contracts = None;
+    }
+    if !options.component_contracts {
+        // The HTML host collects its template contracts outside the gate.
+        module.component_contracts = None;
     }
     module
 }
@@ -178,6 +193,8 @@ pub fn parse_source_to_module_with_mode(
             flag_patterns: &FlagPatterns::default(),
             mode,
             call_facts: true,
+            flags: true,
+            component_contracts: true,
         },
     )
 }

@@ -32,6 +32,7 @@ pub struct FeatureFlagsAnalysis {
 pub fn analyze_feature_flags_with_session(
     session: &AnalysisSession,
 ) -> crate::EngineResult<FeatureFlagsAnalysis> {
+    debug_assert_reads_flags(session);
     let modules = session.shared_parsed_modules_cancellable(false, "the feature-flag scan")?;
     let flags = collect_flags_for_modules(session, &modules)?;
     Ok(FeatureFlagsAnalysis {
@@ -52,6 +53,7 @@ pub fn analyze_feature_flags_with_session(
 pub fn analyze_feature_flags_for_retirement(
     session: &AnalysisSession,
 ) -> crate::EngineResult<(FeatureFlagsAnalysis, RetirementFacts)> {
+    debug_assert_reads_flags(session);
     let modules = session.shared_parsed_modules_cancellable(false, "the feature-flag scan")?;
     let (flags, dead_code) = collect_flags_and_dead_code(session, &modules)?;
     let facts = collect_retirement_facts(session, &modules, &flags, dead_code.as_ref());
@@ -288,6 +290,7 @@ pub fn analyze_feature_flags_with_session_and_results(
     session: &AnalysisSession,
     results: &AnalysisResults,
 ) -> FeatureFlagsAnalysis {
+    debug_assert_reads_flags(session);
     let modules = session.shared_parsed_modules(false);
     let mut flags = collect_flags_from_modules(session, &modules);
     correlate_with_dead_code(&mut flags, results);
@@ -295,6 +298,16 @@ pub fn analyze_feature_flags_with_session_and_results(
         flags,
         files_scanned: session.files().len(),
     }
+}
+
+/// The parse collects the flag facts only for a session whose config sets
+/// `feature_flags_requested`. A caller that forgets it gets an empty report,
+/// so a debug build stops at the first such caller.
+fn debug_assert_reads_flags(session: &AnalysisSession) {
+    debug_assert!(
+        session.config().reads_feature_flags(),
+        "a feature flag report needs `feature_flags_requested` before the session parses"
+    );
 }
 
 /// Built-in environment variable prefixes treated as feature flags.
@@ -509,6 +522,12 @@ fn flag_use_to_feature_flag(flag_use: &FlagUse, module: &ModuleInfo, path: &Path
 mod tests {
     use super::*;
 
+    fn flag_session(root: &Path) -> crate::EngineResult<AnalysisSession> {
+        AnalysisSession::load_with_config(root, None, |config| {
+            config.feature_flags_requested = true;
+        })
+    }
+
     #[test]
     fn session_runner_uses_session_discovery_instead_of_rediscovering() {
         let project = tempfile::tempdir().expect("temp dir");
@@ -525,7 +544,7 @@ mod tests {
         )
         .expect("initial source");
 
-        let session = AnalysisSession::load(root, None).expect("session loads");
+        let session = flag_session(root).expect("session loads");
 
         std::fs::write(
             root.join("src/late.ts"),
@@ -565,7 +584,7 @@ mod tests {
             std::fs::create_dir_all(path.parent().expect("parent")).expect("dirs");
             std::fs::write(path, source).expect("source");
         }
-        let session = AnalysisSession::load(root, None).expect("session loads");
+        let session = flag_session(root).expect("session loads");
         let mut flags = analyze_feature_flags_with_session(&session)
             .expect("flag scan")
             .flags;
@@ -589,7 +608,7 @@ mod tests {
              export const b = (): number => (process.env.FEATURE_DIFF ? 1 : 2);\n",
         )
         .expect("source");
-        let session = AnalysisSession::load(root, None).expect("session loads");
+        let session = flag_session(root).expect("session loads");
         let (analysis, facts) = analyze_feature_flags_for_retirement(&session).expect("flag scan");
         let plain = analyze_feature_flags_with_session(&session).expect("plain scan");
         assert_eq!(
@@ -646,7 +665,7 @@ mod tests {
              ];\n",
         )
         .expect("index");
-        let session = AnalysisSession::load(root, None).expect("session loads");
+        let session = flag_session(root).expect("session loads");
         let (analysis, facts) = analyze_feature_flags_for_retirement(&session).expect("flag scan");
         let sites = facts.sites_for(&analysis.flags);
         let mut unread: Vec<(&str, FlagSiteRole)> = sites
@@ -700,7 +719,7 @@ mod tests {
             "import { orphan } from './flags';\nexport const run = () => orphan();\n",
         )
         .expect("middleware");
-        let session = AnalysisSession::load(root, None).expect("session loads");
+        let session = flag_session(root).expect("session loads");
         let (analysis, facts) = analyze_feature_flags_for_retirement(&session).expect("flag scan");
         let sites = facts.sites_for(&analysis.flags);
         assert!(
@@ -728,7 +747,7 @@ mod tests {
              export const b = (): number => (FEATURE_HIDDEN ? 1 : 2);\n",
         )
         .expect("source");
-        let session = AnalysisSession::load(root, None).expect("session loads");
+        let session = flag_session(root).expect("session loads");
         let (analysis, facts) = analyze_feature_flags_for_retirement(&session).expect("flag scan");
         assert!(
             analysis.flags.is_empty(),

@@ -144,7 +144,10 @@ fn load_feature_flags_session(
     analysis: &AnalysisOptions,
 ) -> ProgrammaticResult<AnalysisSession> {
     let run = resolve_programmatic_run(analysis, &ProgrammaticEntry::FeatureFlags)?;
-    let session = crate::run::runnable(&run, PlannedAnalysis::DeadCode)?.open_session();
+    let runnable = crate::run::runnable(&run, PlannedAnalysis::DeadCode)?;
+    let session = crate::run::open_session_adjusted(&runnable, |config| {
+        config.feature_flags_requested = true;
+    })?;
     Ok(super::dead_code::attach_cancellation(session, resolved))
 }
 

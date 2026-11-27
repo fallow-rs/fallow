@@ -2,6 +2,20 @@
 use super::*;
 use fallow_types::discover::FileId;
 
+/// The optional facts that a parse of `config` must give. A fact without a
+/// reader in the run is not collected.
+pub(super) fn parse_needs(
+    config: &ResolvedConfig,
+    need_complexity: bool,
+) -> fallow_extract::ParseNeeds {
+    fallow_extract::ParseNeeds {
+        complexity: need_complexity,
+        call_facts: config.reads_call_facts(),
+        flags: config.reads_feature_flags(),
+        component_contracts: config.reads_component_contracts(),
+    }
+}
+
 pub(super) fn parse_files_with_config(
     config: &ResolvedConfig,
     files: &[DiscoveredFile],
@@ -37,10 +51,7 @@ pub(super) fn parse_files_with_config(
     let parse_result = crate::source::parse_all_files(
         files,
         cache.as_ref(),
-        fallow_extract::ParseNeeds {
-            complexity: need_complexity,
-            call_facts: config.reads_call_facts(),
-        },
+        parse_needs(config, need_complexity),
         cancellation,
         &config.flags.patterns(),
         config.extraction_mode,
@@ -64,7 +75,7 @@ pub(super) fn parse_files_with_config(
             &ParseCacheWrite {
                 modules: &modules,
                 files,
-                need_complexity,
+                needs: parse_needs(config, need_complexity),
                 metadata_hits: &parse_result.metadata_hits,
                 fingerprint_of: &|file: &DiscoveredFile| {
                     source_fingerprint(&file.path).for_content_read_at(read_started_ns)
@@ -108,7 +119,8 @@ fn update_parse_cache_if_enabled(
 pub(super) struct ParseCacheWrite<'a> {
     pub(super) modules: &'a [ModuleInfo],
     pub(super) files: &'a [DiscoveredFile],
-    pub(super) need_complexity: bool,
+    /// The optional facts that the modules hold.
+    pub(super) needs: fallow_extract::ParseNeeds,
     /// Files that the parse served from cache metadata, sorted by id. Their
     /// entries keep the stored fingerprint, and `fingerprint_of` is not called
     /// for them.
@@ -127,7 +139,7 @@ pub(super) fn write_parse_cache(
 
     let cache_max_size_bytes = crate::project_config::resolve_cache_max_size_bytes(config);
     let store = cache.get_or_insert_with(|| fallow_extract::cache::CacheStore::new(&config.root));
-    if update_parse_cache(store, write, config.reads_call_facts())
+    if update_parse_cache(store, write)
         && let Err(error) = store.save(
             config.cache_target(),
             config.cache_config_hash,
@@ -144,12 +156,11 @@ pub(super) fn write_parse_cache(
 fn update_parse_cache(
     store: &mut fallow_extract::cache::CacheStore,
     write: &ParseCacheWrite<'_>,
-    need_call_facts: bool,
 ) -> bool {
     let ParseCacheWrite {
         modules,
         files,
-        need_complexity,
+        needs,
         metadata_hits,
         fingerprint_of,
     } = *write;
@@ -159,13 +170,7 @@ fn update_parse_cache(
             continue;
         }
         if let Some(file) = files.get(module.file_id.0 as usize) {
-            dirty |= store.record_module(
-                &file.path,
-                module,
-                fingerprint_of(file),
-                need_complexity,
-                need_call_facts,
-            );
+            dirty |= store.record_module(&file.path, module, fingerprint_of(file), needs);
         }
     }
     store.retain_paths(files) || dirty
@@ -194,7 +199,12 @@ mod tests {
         let path = root.join("api.ts");
         let module = fallow_extract::parse_source_to_module(FileId(0), &path, SOURCE, 0, false);
         let mut store = fallow_extract::cache::CacheStore::new(&root);
-        store.record_module(&path, &module, STORED, false, false);
+        store.record_module(
+            &path,
+            &module,
+            STORED,
+            fallow_extract::ParseNeeds::default(),
+        );
         let files = [DiscoveredFile {
             id: FileId(0),
             path: path.clone(),
@@ -206,13 +216,12 @@ mod tests {
             &ParseCacheWrite {
                 modules: std::slice::from_ref(&module),
                 files: &files,
-                need_complexity: false,
+                needs: fallow_extract::ParseNeeds::default(),
                 metadata_hits,
                 fingerprint_of: &|file: &DiscoveredFile| {
                     source_fingerprint(&file.path).for_content_read_at(read_started_ns)
                 },
             },
-            false,
         );
         let stored = store
             .get_by_path_only(&path)
@@ -233,5 +242,68 @@ mod tests {
         let (changed, stored) = rewrite_missing_file(&[]);
         assert!(changed);
         assert_eq!(stored, SourceFingerprint::new(0, 0));
+    }
+
+    const SCANNED_SOURCE: &str = "export function Card({ flag }: { flag?: boolean }) { return <p>{String(flag)}</p>; }\n\
+export const enabled = process.env.FEATURE_CHECKOUT === \"1\";\n";
+
+    /// Resolve `config_json` for a project with one component file that also
+    /// reads a feature flag.
+    fn scanned_project_config(root: &Path, config_json: &str) -> ResolvedConfig {
+        std::fs::create_dir_all(root.join("src")).expect("create src");
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"name":"app","private":true,"main":"src/index.tsx"}"#,
+        )
+        .expect("write package.json");
+        std::fs::write(root.join("src/index.tsx"), SCANNED_SOURCE).expect("write source");
+        serde_json::from_str::<fallow_config::FallowConfig>(config_json)
+            .expect("config parses")
+            .resolve(
+                root.to_path_buf(),
+                fallow_config::OutputFormat::Human,
+                1,
+                true,
+                true,
+                None,
+            )
+    }
+
+    /// Whether the parsed module has flag facts and component contracts.
+    fn scan_facts(config: ResolvedConfig) -> (bool, bool) {
+        let session = AnalysisSession::from_resolved_config(config).expect("session");
+        let modules = session.shared_parsed_modules(false);
+        let module = modules.first().expect("one module");
+        (
+            !module.flag_uses.is_empty(),
+            module.component_contracts.is_some(),
+        )
+    }
+
+    #[test]
+    fn a_default_run_does_not_collect_flag_facts_or_component_contracts() {
+        let project = tempfile::tempdir().expect("project");
+        let config = scanned_project_config(project.path(), "{}");
+        assert_eq!(scan_facts(config), (false, false));
+    }
+
+    #[test]
+    fn each_reader_turns_on_its_own_scan() {
+        let project = tempfile::tempdir().expect("project");
+        let mut flags = scanned_project_config(project.path(), "{}");
+        flags.feature_flags_requested = true;
+        assert_eq!(scan_facts(flags), (true, false));
+
+        let contracts = scanned_project_config(
+            project.path(),
+            r#"{"rules":{"absent-component-props":"warn"}}"#,
+        );
+        assert_eq!(scan_facts(contracts), (false, true));
+
+        let override_only = scanned_project_config(
+            project.path(),
+            r#"{"overrides":[{"files":["src/**"],"rules":{"absent-component-props":"error"}}]}"#,
+        );
+        assert_eq!(scan_facts(override_only), (false, true));
     }
 }

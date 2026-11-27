@@ -11,16 +11,30 @@ pub struct CacheUpdate<'a> {
     pub files: &'a [discover::DiscoveredFile],
     /// Files that the parse served from cache metadata, sorted by id.
     pub metadata_hits: &'a [FileId],
-    pub need_complexity: bool,
-    pub need_call_facts: bool,
+    /// The optional facts that the modules hold.
+    pub needs: extract::ParseNeeds,
     /// The time before the parse read the sources.
     pub read_started_ns: u64,
 }
 
+/// The optional facts that a parse of `config` must give. A fact without a
+/// reader in the run is not collected.
+pub fn parse_needs(
+    config: &fallow_config::ResolvedConfig,
+    need_complexity: bool,
+) -> extract::ParseNeeds {
+    extract::ParseNeeds {
+        complexity: need_complexity,
+        call_facts: config.reads_call_facts(),
+        flags: config.reads_feature_flags(),
+        component_contracts: config.reads_component_contracts(),
+    }
+}
+
 /// Update cache: write freshly parsed modules, refresh stale metadata entries,
-/// and upgrade entries that a run without complexity or call facts wrote
-/// earlier. [`cache::CacheStore::record_module`] keeps the complexity and the
-/// call facts that an earlier run stored and this run did not extract.
+/// and upgrade entries that a run without an optional fact wrote earlier.
+/// [`cache::CacheStore::record_module`] keeps each optional fact that an
+/// earlier run stored and this run did not extract.
 ///
 /// A file in `metadata_hits` keeps its entry without a metadata read (see
 /// [`fallow_extract::is_metadata_hit`]).
@@ -39,13 +53,7 @@ pub fn update_cache(store: &mut cache::CacheStore, update: &CacheUpdate<'_>) -> 
         if let Some(file) = update.files.get(module.file_id.0 as usize) {
             let fingerprint =
                 file_fingerprint(&file.path).for_content_read_at(update.read_started_ns);
-            dirty |= store.record_module(
-                &file.path,
-                module,
-                fingerprint,
-                update.need_complexity,
-                update.need_call_facts,
-            );
+            dirty |= store.record_module(&file.path, module, fingerprint, update.needs);
         }
     }
     let removed_stale_paths = store.retain_paths(update.files);
@@ -94,7 +102,12 @@ mod tests {
         let path = root.join("api.ts");
         let module = fallow_extract::parse_source_to_module(FileId(0), &path, SOURCE, 0, false);
         let mut store = CacheStore::new(&root);
-        store.record_module(&path, &module, STORED, false, false);
+        store.record_module(
+            &path,
+            &module,
+            STORED,
+            fallow_extract::ParseNeeds::default(),
+        );
         let files = [DiscoveredFile {
             id: FileId(0),
             path: path.clone(),
@@ -106,8 +119,7 @@ mod tests {
                 modules: std::slice::from_ref(&module),
                 files: &files,
                 metadata_hits,
-                need_complexity: false,
-                need_call_facts: false,
+                needs: fallow_extract::ParseNeeds::default(),
                 read_started_ns: fallow_types::source_fingerprint::now_ns(),
             },
         );

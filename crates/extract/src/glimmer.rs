@@ -241,6 +241,53 @@ fn prev_identifier(bytes: &[u8], end: usize) -> &[u8] {
     &bytes[start..end]
 }
 
+/// Collect the component contracts of the `<template>` blocks of a Glimmer
+/// file and merge them into the contracts of its script.
+pub(crate) fn apply_template_contracts(module: &mut crate::ModuleInfo, source: &str) {
+    for range in find_template_ranges(source) {
+        let (start, end) = (range.start, range.end);
+        let mut callers = crate::sfc_template::component_contracts::collect(
+            &source[start..end],
+            &module.imports,
+            fallow_types::extract::ComponentFramework::Ember,
+            start as u32,
+            module
+                .component_contracts
+                .as_deref()
+                .map_or(&[], |facts| facts.spread_bindings.as_slice()),
+            module
+                .component_contracts
+                .as_deref()
+                .map_or(&[], |facts| facts.aliases.as_slice()),
+        );
+        let (reads, incomplete, dynamic) =
+            crate::sfc_template::glimmer::collect_argument_reads(&source[start..end]);
+        if dynamic {
+            callers
+                .incomplete_frameworks
+                .push(fallow_types::extract::ComponentFramework::Ember);
+        }
+        if let Some(facts) = &mut module.component_contracts {
+            let owners: Vec<_> = facts
+                .template_owners
+                .iter()
+                .filter(|owner| owner.start <= start as u32 && end as u32 <= owner.end)
+                .collect();
+            if let [owner] = owners.as_slice() {
+                for declaration in &mut facts.declarations {
+                    if declaration.component_span == owner.component_span
+                        && declaration.framework == fallow_types::extract::ComponentFramework::Ember
+                    {
+                        declaration.is_used |= reads.contains(&declaration.name);
+                        declaration.incomplete |= incomplete;
+                    }
+                }
+            }
+        }
+        crate::component_contracts::merge(&mut module.component_contracts, callers, 0, None);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

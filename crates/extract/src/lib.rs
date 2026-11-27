@@ -202,6 +202,33 @@ pub struct ParseNeeds {
     /// The call facts (`ModuleInfo::function_contracts`), for the rules that
     /// read them.
     pub call_facts: bool,
+    /// The feature flag facts (`ModuleInfo::flag_uses` and
+    /// `ModuleInfo::flag_registry_facts`), for the feature flag report.
+    pub flags: bool,
+    /// The component contract facts (`ModuleInfo::component_contracts`), for
+    /// the `absent-component-prop` rule.
+    pub component_contracts: bool,
+}
+
+impl ParseNeeds {
+    /// Every optional fact. A caller without a resolved config uses this to
+    /// get a full module.
+    pub const ALL: Self = Self {
+        complexity: true,
+        call_facts: true,
+        flags: true,
+        component_contracts: true,
+    };
+
+    /// Whether a parse that collected the facts of `self` gives every fact
+    /// that `needs` asks for.
+    #[must_use]
+    pub const fn covers(self, needs: Self) -> bool {
+        (self.complexity || !needs.complexity)
+            && (self.call_facts || !needs.call_facts)
+            && (self.flags || !needs.flags)
+            && (self.component_contracts || !needs.component_contracts)
+    }
 }
 
 /// Parse all files, extracting imports and exports.
@@ -259,6 +286,8 @@ pub fn parse_all_files_cancellable(
         ParseNeeds {
             complexity: need_complexity,
             call_facts: false,
+            flags: true,
+            component_contracts: true,
         },
         cancellation,
         flag_patterns,
@@ -469,10 +498,6 @@ fn parse_single_file_cached(
     flag_patterns: &FlagPatterns,
     mode: fallow_types::shared_state::ExtractionMode,
 ) -> ParseFileResult {
-    let ParseNeeds {
-        complexity: need_complexity,
-        call_facts: need_call_facts,
-    } = needs;
     let cached_by_path = cache.and_then(|store| store.get_by_path_only(&file.path));
 
     if let Some(cached) = cached_by_path
@@ -489,9 +514,7 @@ fn parse_single_file_cached(
                 fallow_types::source_fingerprint::SourceFingerprint::from_metadata(&metadata);
             if cached.source_fingerprint() == fingerprint
                 && fingerprint.is_trustworthy_without_content()
-                && (!need_complexity || cached.complexity_extracted)
-                && let Some(module) =
-                    cache::cached_hit_to_module(cached, file.id, need_complexity, need_call_facts)
+                && let Some(module) = cache::cached_hit_to_module(cached, file.id, needs)
             {
                 return ParseFileResult::cache_hit(module);
             }
@@ -507,9 +530,7 @@ fn parse_single_file_cached(
 
     if let Some(cached) = cached_by_path
         && cached.content_hash == content_hash
-        && (!need_complexity || cached.complexity_extracted)
-        && let Some(module) =
-            cache::cached_hit_to_module(cached, file.id, need_complexity, need_call_facts)
+        && let Some(module) = cache::cached_hit_to_module(cached, file.id, needs)
     {
         return ParseFileResult::cache_hit(module).with_source_bytes_read(raw.len());
     }
@@ -522,13 +543,15 @@ fn parse_single_file_cached(
         &file.path,
         source,
         content_hash,
-        need_complexity,
+        needs.complexity,
         &module_parse::ExtractionOptions {
             flag_patterns,
             mode,
-            // A cache hit of the same run gives no call facts, so a parsed
-            // module must not give them either.
-            call_facts: need_call_facts,
+            // A cache hit of the same run gives none of the facts that the run
+            // does not need, so a parsed module must not give them either.
+            call_facts: needs.call_facts,
+            flags: needs.flags,
+            component_contracts: needs.component_contracts,
         },
     );
     let parse_cpu_nanos = u64::try_from(parse_start.elapsed().as_nanos()).unwrap_or(u64::MAX);
@@ -554,6 +577,8 @@ pub fn parse_single_file(file: &DiscoveredFile) -> Option<ModuleInfo> {
             flag_patterns: &FlagPatterns::default(),
             mode: fallow_types::shared_state::ExtractionMode::Standard,
             call_facts: true,
+            flags: true,
+            component_contracts: true,
         },
     ))
 }
@@ -573,6 +598,8 @@ pub fn parse_from_content(file_id: FileId, path: &Path, content: &str) -> Module
             flag_patterns: &FlagPatterns::default(),
             mode: fallow_types::shared_state::ExtractionMode::Standard,
             call_facts: true,
+            flags: true,
+            component_contracts: true,
         },
     )
 }

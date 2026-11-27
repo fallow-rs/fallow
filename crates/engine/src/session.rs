@@ -344,7 +344,7 @@ impl AnalysisSession {
             &ParseCacheWrite {
                 modules: &cache.modules,
                 files,
-                need_complexity: cache.need_complexity,
+                needs: parse_needs(&self.config, cache.need_complexity),
                 metadata_hits: &[],
                 fingerprint_of: &|file: &DiscoveredFile| {
                     cache.fingerprints.get(file.id.0 as usize).map_or_else(
@@ -934,8 +934,7 @@ impl AnalysisSession {
         if !key.is_reusable() {
             return None;
         }
-        let need_call_facts = self.config.reads_call_facts();
-        if let Some(parse) = store.get(&key, need_complexity, need_call_facts) {
+        if let Some(parse) = store.get(&key, parse_needs(&self.config, need_complexity)) {
             // A parse records its read failures and parse degradations for the
             // project, and the session reads them back as workspace
             // diagnostics. Record the kept ones again, so the diagnostics of
@@ -962,8 +961,7 @@ impl AnalysisSession {
         if !token_is_set(cancellation) {
             store.put(
                 &key,
-                true,
-                need_call_facts,
+                parse_needs(&self.config, true),
                 WarmParse {
                     modules: Arc::clone(&modules),
                     read_failures: parsed.read_failures.clone().into(),
@@ -1077,10 +1075,7 @@ impl AnalysisSession {
         let parsed = crate::source::parse_all_files(
             &files,
             None,
-            fallow_extract::ParseNeeds {
-                complexity: cache.need_complexity,
-                call_facts: self.config.reads_call_facts(),
-            },
+            parse_needs(&self.config, cache.need_complexity),
             cancellation,
             &self.config.flags.patterns(),
             self.config.extraction_mode,
@@ -1174,7 +1169,7 @@ struct SourceProblems {
 mod duplication;
 #[path = "session_parse.rs"]
 mod parsing;
-use parsing::{ParseCacheWrite, parse_files_with_config, write_parse_cache};
+use parsing::{ParseCacheWrite, parse_files_with_config, parse_needs, write_parse_cache};
 fn token_is_set(cancellation: Option<&AtomicBool>) -> bool {
     cancellation.is_some_and(|cancelled| cancelled.load(Ordering::SeqCst))
 }

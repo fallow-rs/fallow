@@ -65,8 +65,12 @@ fn warm_metadata_cache_reports_source_that_becomes_unreadable() {
         module_to_cached(
             cold.modules.first().expect("cold parse produces module"),
             SourceFingerprint::from_metadata(&metadata),
-            false,
-            true,
+            fallow_core::extract::ParseNeeds {
+                complexity: false,
+                call_facts: true,
+                flags: true,
+                component_contracts: true,
+            },
         ),
     );
 
@@ -158,8 +162,12 @@ fn warm_metadata_cache_misses_an_equal_length_rewrite_with_a_restored_mtime() {
         module_to_cached(
             cold.modules.first().expect("cold parse produces module"),
             SourceFingerprint::from_metadata(&metadata),
-            false,
-            true,
+            fallow_core::extract::ParseNeeds {
+                complexity: false,
+                call_facts: true,
+                flags: true,
+                component_contracts: true,
+            },
         ),
     );
 
@@ -235,6 +243,8 @@ fn cache_roundtrip() {
         line_offsets: vec![],
         complexity: vec![],
         complexity_extracted: false,
+        flags_extracted: true,
+        component_contracts_extracted: true,
         flag_uses: vec![],
         flag_registry_facts: None,
         class_heritage: vec![],
@@ -420,8 +430,12 @@ fn incremental_with_cache_all_hits() {
                 fallow_core::cache::module_to_cached(
                     module,
                     fallow_types::source_fingerprint::SourceFingerprint::new(0, 0),
-                    false,
-                    true,
+                    fallow_core::extract::ParseNeeds {
+                        complexity: false,
+                        call_facts: true,
+                        flags: true,
+                        component_contracts: true,
+                    },
                 ),
             );
         }
@@ -448,8 +462,12 @@ fn incremental_results_identical() {
                 fallow_core::cache::module_to_cached(
                     module,
                     fallow_types::source_fingerprint::SourceFingerprint::new(0, 0),
-                    false,
-                    true,
+                    fallow_core::extract::ParseNeeds {
+                        complexity: false,
+                        call_facts: true,
+                        flags: true,
+                        component_contracts: true,
+                    },
                 ),
             );
         }
@@ -531,6 +549,8 @@ fn incremental_cache_prune_stale_entries() {
         line_offsets: vec![],
         complexity: vec![],
         complexity_extracted: false,
+        flags_extracted: true,
+        component_contracts_extracted: true,
         flag_uses: vec![],
         flag_registry_facts: None,
         class_heritage: vec![],
@@ -723,8 +743,12 @@ fn retain_paths_keeps_entries_for_files_that_still_exist() {
             fallow_core::cache::module_to_cached(
                 &module,
                 fallow_types::source_fingerprint::SourceFingerprint::new(0, 0),
-                false,
-                true,
+                fallow_core::extract::ParseNeeds {
+                    complexity: false,
+                    call_facts: true,
+                    flags: true,
+                    component_contracts: true,
+                },
             ),
         );
     }

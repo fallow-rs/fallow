@@ -1409,13 +1409,11 @@ fn parse_analysis_modules(
     };
 
     let read_started_ns = fallow_types::source_fingerprint::now_ns();
+    let needs = parse_cache::parse_needs(config, need_complexity);
     let parse_result = extract::parse_all_files_with_mode(
         files,
         cache_store.as_ref(),
-        extract::ParseNeeds {
-            complexity: need_complexity,
-            call_facts: config.reads_call_facts(),
-        },
+        needs,
         None,
         &config.flags.patterns(),
         fallow_types::shared_state::ExtractionMode::Standard,
@@ -1432,8 +1430,7 @@ fn parse_analysis_modules(
             modules: &modules,
             files,
             metadata_hits: &parse_result.metadata_hits,
-            need_complexity,
-            need_call_facts: config.reads_call_facts(),
+            needs,
             read_started_ns,
         },
     );
@@ -3521,8 +3518,10 @@ mod tests {
                 modules: &first.modules,
                 files: &discovered,
                 metadata_hits: &first.metadata_hits,
-                need_complexity: false,
-                need_call_facts: true,
+                needs: super::extract::ParseNeeds {
+                    complexity: false,
+                    ..super::extract::ParseNeeds::ALL
+                },
                 read_started_ns,
             },
         );
