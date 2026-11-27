@@ -495,7 +495,8 @@ export const selectProjects = (corpus, names) => {
     };
   }
   const wanted = [...new Set(names.map((name) => name.trim()).filter(Boolean))];
-  if (wanted.length === 0) return { ok: false, error: "--projects needs at least one project name" };
+  if (wanted.length === 0)
+    return { ok: false, error: "--projects needs at least one project name" };
   const unknown = wanted.filter((name) => !(name in corpus));
   return unknown.length > 0
     ? { ok: false, error: `--projects names ${unknown.join(", ")}, which is not in the corpus` }

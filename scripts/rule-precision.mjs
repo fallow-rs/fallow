@@ -248,7 +248,10 @@ const sample = (values) => {
   const version = fallowVersion(bin);
   const perRule = new Map();
   const { corpus } = readJson(LEDGER);
-  const selected = selectProjects(corpus, values.projects === undefined ? null : values.projects.split(","));
+  const selected = selectProjects(
+    corpus,
+    values.projects === undefined ? null : values.projects.split(","),
+  );
   if (!selected.ok) fail(selected.error);
   for (const name of selected.names) {
     const project = corpus[name];
