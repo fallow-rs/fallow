@@ -68,9 +68,36 @@ impl<'a> GitignoredTargets<'a> {
         !paths.is_empty() && paths.iter().all(|path| self.ignores_missing_path(path))
     }
 
+    /// Return `true` when `target`, or a file that the resolver tries for
+    /// it, is a missing path that an ignore rule of the repository ignores.
+    ///
+    /// An import usually leaves out the extension (`./keys.generated` for
+    /// `keys.generated.ts`), names a directory index, or names the `.js`
+    /// output of a `.ts` file. The ignore rule names the file on disk, so
+    /// each of these file names is tested too. When one of them exists, a
+    /// missing generated file does not explain the unresolved import.
+    ///
+    /// A rule such as `*.js` or `index.js` ignores a file name that fallow
+    /// built for any import, so it would hide a typo. A tried file name counts
+    /// only when the rule does not also ignore the same file name built from
+    /// another import name.
+    fn ignores_missing_path(&mut self, target: &Path) -> bool {
+        let candidates = module_file_candidates(target);
+        if candidates.iter().any(|candidate| candidate.path.exists()) {
+            return false;
+        }
+        candidates.iter().any(|candidate| {
+            self.ignores_missing_file(&candidate.path)
+                && candidate
+                    .name_probe
+                    .as_deref()
+                    .is_none_or(|probe| !self.ignores_missing_file(probe))
+        })
+    }
+
     /// Return `true` when `target` does not exist and an ignore rule of the
     /// repository ignores it or one of its parent directories.
-    fn ignores_missing_path(&mut self, target: &Path) -> bool {
+    fn ignores_missing_file(&mut self, target: &Path) -> bool {
         if target.exists() {
             return false;
         }
@@ -131,6 +158,70 @@ impl<'a> GitignoredTargets<'a> {
             )
         })
     }
+}
+
+/// The module extensions that the resolver appends to a specifier.
+const MODULE_EXTENSIONS: [&str; 9] = ["ts", "tsx", "d.ts", "mts", "cts", "js", "jsx", "mjs", "cjs"];
+
+/// The source extensions that a TypeScript import of an output extension
+/// names, for example `./api.js` for `api.ts`.
+const OUTPUT_TO_SOURCE_EXTENSIONS: [(&str, &[&str]); 4] = [
+    ("js", &["ts", "tsx", "d.ts"]),
+    ("jsx", &["tsx"]),
+    ("mjs", &["mts", "d.mts"]),
+    ("cjs", &["cts", "d.cts"]),
+];
+
+/// A file name that no import uses. It takes the place of the import name in
+/// the name probe of a candidate.
+const NAME_PROBE: &str = "fallow-name-probe";
+
+/// A file that the resolver tries for the missing target of an import.
+struct Candidate {
+    path: PathBuf,
+    /// The same file name built from [`NAME_PROBE`] in place of the import
+    /// name. `None` for the target itself, which fallow does not build.
+    name_probe: Option<PathBuf>,
+}
+
+/// `target` itself, then the files that the resolver tries for it: each
+/// module extension appended, each directory index, and the source files of
+/// an output extension.
+fn module_file_candidates(target: &Path) -> Vec<Candidate> {
+    let mut candidates = vec![Candidate {
+        path: target.to_path_buf(),
+        name_probe: None,
+    }];
+    let Some(name) = target.file_name().and_then(|name| name.to_str()) else {
+        return candidates;
+    };
+    let probe_target = target.with_file_name(NAME_PROBE);
+    for extension in MODULE_EXTENSIONS {
+        candidates.push(Candidate {
+            path: target.with_file_name(format!("{name}.{extension}")),
+            name_probe: Some(probe_target.with_file_name(format!("{NAME_PROBE}.{extension}"))),
+        });
+    }
+    for extension in MODULE_EXTENSIONS {
+        let index = format!("index.{extension}");
+        candidates.push(Candidate {
+            path: target.join(&index),
+            name_probe: Some(probe_target.join(&index)),
+        });
+    }
+    if let Some((stem, extension)) = name.rsplit_once('.')
+        && let Some((_, sources)) = OUTPUT_TO_SOURCE_EXTENSIONS
+            .iter()
+            .find(|(output, _)| *output == extension)
+    {
+        for source in *sources {
+            candidates.push(Candidate {
+                path: target.with_file_name(format!("{stem}.{source}")),
+                name_probe: Some(probe_target.with_file_name(format!("{NAME_PROBE}.{source}"))),
+            });
+        }
+    }
+    candidates
 }
 
 /// Build one matcher rooted at `dir` from the ignore files that exist. A line
