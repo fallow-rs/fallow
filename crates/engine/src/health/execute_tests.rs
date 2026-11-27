@@ -1496,6 +1496,7 @@ fn runtime_coverage_top_applies_after_baseline_filtering() {
             fallow_output::RuntimeCoverageHotPath {
                 cloud_context: None,
                 id: "fallow:hot:11111111".to_owned(),
+                legacy_id: None,
                 stable_id: None,
                 path: PathBuf::from("/project/src/hot-a.ts"),
                 function: "hotAlpha".to_owned(),
@@ -1509,6 +1510,7 @@ fn runtime_coverage_top_applies_after_baseline_filtering() {
             fallow_output::RuntimeCoverageHotPath {
                 cloud_context: None,
                 id: "fallow:hot:22222222".to_owned(),
+                legacy_id: None,
                 stable_id: None,
                 path: PathBuf::from("/project/src/hot-b.ts"),
                 function: "hotBeta".to_owned(),
@@ -1630,6 +1632,7 @@ fn runtime_coverage_changed_review_uses_hot_path_verdict() {
         hot_paths: vec![fallow_output::RuntimeCoverageHotPath {
             cloud_context: None,
             id: "fallow:hot:33333333".to_owned(),
+            legacy_id: None,
             stable_id: None,
             path: PathBuf::from("/project/src/hot.ts"),
             function: "renderHotPath".to_owned(),
@@ -1676,6 +1679,7 @@ fn runtime_coverage_changed_review_ignores_unmodified_hot_paths() {
         hot_paths: vec![fallow_output::RuntimeCoverageHotPath {
             cloud_context: None,
             id: "fallow:hot:44444444".to_owned(),
+            legacy_id: None,
             stable_id: None,
             path: PathBuf::from("/project/src/hot.ts"),
             function: "renderHotPath".to_owned(),
@@ -1739,6 +1743,7 @@ fn fx_hot_path(
     fallow_output::RuntimeCoverageHotPath {
         cloud_context: None,
         id: id.to_owned(),
+        legacy_id: None,
         stable_id: None,
         path: PathBuf::from(path),
         function: "renderHotPath".to_owned(),

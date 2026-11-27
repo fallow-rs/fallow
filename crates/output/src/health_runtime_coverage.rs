@@ -513,6 +513,14 @@ pub struct RuntimeCoverageFinding {
 pub struct RuntimeCoverageHotPath {
     /// Stable content-hash ID of the form `fallow:hot:<hash>`.
     pub id: String,
+    /// The file+line ID of the recipe before the line-independent `id`, for a
+    /// transition window. Present only in `coverage analyze --cloud`, where
+    /// `id` does not change when the function moves to another line. Match a
+    /// stored ID against `id` or `legacy_id`. The field goes away after the
+    /// window.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "schema", schemars(default))]
+    pub legacy_id: Option<String>,
     /// Cross-surface join key (`fallow:fn:<hash>`) for the hot function. Stable
     /// across line moves; shared with the same function's findings / blast /
     /// importance entries. `null` when no `FunctionIdentity` was supplied.
@@ -650,6 +658,14 @@ impl fmt::Display for RuntimeCoverageRiskBand {
 pub struct RuntimeCoverageBlastRadiusEntry {
     /// Stable content-hash ID of the form `fallow:blast:<hash>`.
     pub id: String,
+    /// The file+line ID of the recipe before the line-independent `id`, for a
+    /// transition window. Present only in `coverage analyze --cloud`, where
+    /// `id` does not change when the function moves to another line. Match a
+    /// stored ID against `id` or `legacy_id`. The field goes away after the
+    /// window.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "schema", schemars(default))]
+    pub legacy_id: Option<String>,
     /// Cross-surface join key (`fallow:fn:<hash>`) for the function. Stable
     /// across line moves; shared with the same function's findings / hot-path /
     /// importance entries. `null` when no `FunctionIdentity` was supplied.
@@ -690,6 +706,14 @@ pub struct RuntimeCoverageBlastRadiusEntry {
 pub struct RuntimeCoverageImportanceEntry {
     /// Stable content-hash ID of the form `fallow:importance:<hash>`.
     pub id: String,
+    /// The file+line ID of the recipe before the line-independent `id`, for a
+    /// transition window. Present only in `coverage analyze --cloud`, where
+    /// `id` does not change when the function moves to another line. Match a
+    /// stored ID against `id` or `legacy_id`. The field goes away after the
+    /// window.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "schema", schemars(default))]
+    pub legacy_id: Option<String>,
     /// Cross-surface join key (`fallow:fn:<hash>`) for the function. Stable
     /// across line moves; shared with the same function's findings / hot-path /
     /// blast-radius entries. `null` when no `FunctionIdentity` was supplied.
@@ -980,6 +1004,7 @@ mod tests {
         RuntimeCoverageHotPath {
             cloud_context: None,
             id: "fallow:hot:test".to_owned(),
+            legacy_id: None,
             stable_id: None,
             path: PathBuf::from("src/app.js"),
             function: "resolve".to_owned(),

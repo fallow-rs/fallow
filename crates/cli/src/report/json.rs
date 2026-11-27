@@ -1404,6 +1404,7 @@ mod tests {
                 hot_paths: vec![RuntimeCoverageHotPath {
                     cloud_context: None,
                     id: "fallow:hot:cafebabe".to_owned(),
+                    legacy_id: None,
                     stable_id: None,
                     path: root.join("src/hot.ts"),
                     function: "hotPath".to_owned(),
@@ -1445,10 +1446,7 @@ mod tests {
         let mut output = serde_json::to_value(&envelope).expect("should serialize health envelope");
         strip_root_prefix(&mut output, "/project/");
 
-        assert_eq!(
-            output["runtime_coverage"]["verdict"],
-            serde_json::Value::String("cold-code-detected".to_owned())
-        );
+        assert_eq!(output["runtime_coverage"]["verdict"], "cold-code-detected");
         assert_eq!(
             output["runtime_coverage"]["schema_version"],
             serde_json::Value::String("1".to_owned())

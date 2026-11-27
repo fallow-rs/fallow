@@ -46,6 +46,7 @@ pub use upload_static_findings::UploadStaticFindingsArgs;
 
 mod analyze;
 mod cloud_client;
+mod cloud_context_ids;
 mod cloud_join;
 mod cloud_reads;
 mod cloud_rows;

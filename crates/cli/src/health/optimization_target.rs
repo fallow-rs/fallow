@@ -507,6 +507,7 @@ mod tests {
         RuntimeCoverageHotPath {
             cloud_context: None,
             id: "fallow:hot:test".to_owned(),
+            legacy_id: None,
             stable_id: stable_id.map(str::to_owned),
             path: PathBuf::from("src/app.js"),
             function: "resolve".to_owned(),

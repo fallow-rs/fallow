@@ -11506,6 +11506,14 @@ export interface RuntimeCoverageHotPath {
  */
 id: string
 /**
+ * The file+line ID of the recipe before the line-independent `id`, for a
+ * transition window. Present only in `coverage analyze --cloud`, where
+ * `id` does not change when the function moves to another line. Match a
+ * stored ID against `id` or `legacy_id`. The field goes away after the
+ * window.
+ */
+legacy_id?: (string | null)
+/**
  * Cross-surface join key (`fallow:fn:<hash>`) for the hot function. Stable
  * across line moves; shared with the same function's findings / blast /
  * importance entries. `null` when no `FunctionIdentity` was supplied.
@@ -11606,6 +11614,14 @@ export interface RuntimeCoverageBlastRadiusEntry {
  */
 id: string
 /**
+ * The file+line ID of the recipe before the line-independent `id`, for a
+ * transition window. Present only in `coverage analyze --cloud`, where
+ * `id` does not change when the function moves to another line. Match a
+ * stored ID against `id` or `legacy_id`. The field goes away after the
+ * window.
+ */
+legacy_id?: (string | null)
+/**
  * Cross-surface join key (`fallow:fn:<hash>`) for the function. Stable
  * across line moves; shared with the same function's findings / hot-path /
  * importance entries. `null` when no `FunctionIdentity` was supplied.
@@ -11657,6 +11673,14 @@ export interface RuntimeCoverageImportanceEntry {
  * Stable content-hash ID of the form `fallow:importance:<hash>`.
  */
 id: string
+/**
+ * The file+line ID of the recipe before the line-independent `id`, for a
+ * transition window. Present only in `coverage analyze --cloud`, where
+ * `id` does not change when the function moves to another line. Match a
+ * stored ID against `id` or `legacy_id`. The field goes away after the
+ * window.
+ */
+legacy_id?: (string | null)
 /**
  * Cross-surface join key (`fallow:fn:<hash>`) for the function. Stable
  * across line moves; shared with the same function's findings / hot-path /

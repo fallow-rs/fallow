@@ -106,6 +106,7 @@ pub(super) fn cloud_blast_radius_entries(
             };
             fallow_output::RuntimeCoverageBlastRadiusEntry {
                 id: entry.id.clone(),
+                legacy_id: entry.legacy_id.clone(),
                 stable_id: entry.stable_id.clone(),
                 file: PathBuf::from(&entry.file),
                 function: entry.function.clone(),
@@ -143,6 +144,7 @@ pub(super) fn cloud_importance_entries(
             // cloud `importance_score` and `reason` stay as the cloud sent them.
             fallow_output::RuntimeCoverageImportanceEntry {
                 id: entry.id.clone(),
+                legacy_id: entry.legacy_id.clone(),
                 stable_id: entry.stable_id.clone(),
                 file: PathBuf::from(&entry.file),
                 function: entry.function.clone(),

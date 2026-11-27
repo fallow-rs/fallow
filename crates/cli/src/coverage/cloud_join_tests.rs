@@ -2,6 +2,7 @@
 //! `coverage analyze --cloud` (fallow-rs/fallow-cloud#328).
 
 use fallow_output::{RuntimeCoverageConfidence, RuntimeCoverageRiskBand, RuntimeCoverageVerdict};
+use sha2::Digest as _;
 
 use crate::coverage::analyze::tests::{
     cloud_context, cloud_function, static_index_with, static_info,
@@ -78,6 +79,7 @@ fn cloud_rows_take_local_structure_when_the_cloud_has_none() {
     snapshot.blast_radius = vec![
         crate::coverage::cloud_client::CloudRuntimeBlastRadiusEntry {
             id: "fallow:blast:cloud0001".to_owned(),
+            legacy_id: None,
             stable_id: Some(stable_id.clone()),
             file: "src/api.ts".to_owned(),
             function: "handler".to_owned(),
@@ -91,6 +93,7 @@ fn cloud_rows_take_local_structure_when_the_cloud_has_none() {
     ];
     snapshot.importance = vec![crate::coverage::cloud_client::CloudRuntimeImportanceEntry {
         id: "fallow:importance:cloud0001".to_owned(),
+        legacy_id: None,
         stable_id: Some(stable_id),
         file: "src/api.ts".to_owned(),
         function: "handler".to_owned(),
@@ -196,6 +199,7 @@ fn cloud_blast_row(
 ) -> crate::coverage::cloud_client::CloudRuntimeBlastRadiusEntry {
     crate::coverage::cloud_client::CloudRuntimeBlastRadiusEntry {
         id: "fallow:blast:cloud0001".to_owned(),
+        legacy_id: None,
         stable_id,
         file: "src/api.ts".to_owned(),
         function: "handler".to_owned(),
@@ -264,4 +268,97 @@ fn cloud_rows_without_stable_id_take_local_structure_by_position() {
         report.blast_radius[0].risk_band,
         RuntimeCoverageRiskBand::Medium
     );
+}
+
+/// The ids of one called function, as `coverage analyze --cloud` builds them
+/// without cloud blast-radius and importance rows.
+fn built_ids(start_line: u32) -> (String, Option<String>, String, String) {
+    let info = static_info("src/api.ts", "handler", start_line, start_line + 12);
+    let stable_id = info.stable_id.clone();
+    let static_index = static_index_with(vec![info]);
+    let mut function = cloud_function(
+        "src/api.ts",
+        "handler",
+        Some(start_line),
+        Some(start_line),
+        Some(start_line + 12),
+    );
+    function.tracking_state = CloudTrackingState::Called;
+    function.hit_count = Some(500);
+    function.stable_id = Some(stable_id);
+    let mut snapshot = cloud_context(1, 0);
+    snapshot.functions = vec![function];
+
+    let report = merge_cloud_snapshot(&snapshot, &static_index, 1).report;
+
+    (
+        report.hot_paths[0].id.clone(),
+        report.hot_paths[0].legacy_id.clone(),
+        report.blast_radius[0].id.clone(),
+        report.importance[0].id.clone(),
+    )
+}
+
+/// An edit above a function moves it to another line. Its hot-path,
+/// blast-radius and importance ids stay, and `legacy_id` keeps the
+/// file+line id of the protocol for the transition window
+/// (fallow-cloud#1597).
+#[test]
+fn cloud_join_ids_survive_a_line_move() {
+    let (hot_before, legacy_before, blast_before, importance_before) = built_ids(10);
+    let (hot_after, legacy_after, blast_after, importance_after) = built_ids(14);
+
+    assert_eq!(hot_after, hot_before);
+    assert_eq!(blast_after, blast_before);
+    assert_eq!(importance_after, importance_before);
+    assert_eq!(
+        legacy_before.as_deref(),
+        Some(fallow_cov_protocol::hot_path_id("src/api.ts", "handler", 10).as_str())
+    );
+    assert_ne!(legacy_after, legacy_before);
+}
+
+/// The cloud sends `legacy_id` on its rows (fallow-cloud#322). The report
+/// keeps it, so a reference on the old file+line id still resolves.
+#[test]
+fn cloud_rows_keep_the_cloud_legacy_id() {
+    let row: crate::coverage::cloud_client::CloudRuntimeBlastRadiusEntry = serde_json::from_str(
+        r#"{"id":"fallow:blast:new00001","legacy_id":"fallow:blast:old00001","file":"src/api.ts","function":"handler","line":10,"risk_band":"low"}"#,
+    )
+    .expect("cloud row should parse");
+    let (static_index, snapshot) = called_handler_snapshot(row);
+
+    let report = merge_cloud_snapshot(&snapshot, &static_index, 100).report;
+
+    assert_eq!(report.blast_radius[0].id, "fallow:blast:new00001");
+    assert_eq!(
+        report.blast_radius[0].legacy_id.as_deref(),
+        Some("fallow:blast:old00001")
+    );
+}
+
+/// The file has two `map` functions and only one of them ran. The id still
+/// comes from the `stable_id`, because the local AST has both, so the other
+/// `map` cannot take over the id in a later period.
+#[test]
+fn cloud_join_ids_count_same_name_functions_that_did_not_run() {
+    let ran = static_info("src/list.ts", "map", 3, 5);
+    let stable_id = ran.stable_id.clone();
+    let static_index = static_index_with(vec![ran, static_info("src/list.ts", "map", 9, 11)]);
+    let mut function = cloud_function("src/list.ts", "map", Some(3), Some(3), Some(5));
+    function.tracking_state = CloudTrackingState::Called;
+    function.hit_count = Some(500);
+    function.stable_id = Some(stable_id.clone());
+    let mut snapshot = cloud_context(1, 0);
+    snapshot.functions = vec![function];
+
+    let report = merge_cloud_snapshot(&snapshot, &static_index, 1).report;
+
+    let digest = sha2::Sha256::digest(format!("hot\0stable\0{stable_id}").as_bytes());
+    let expected: String = digest.iter().take(4).fold(String::new(), |mut hex, byte| {
+        use std::fmt::Write as _;
+        let _ = write!(hex, "{byte:02x}");
+        hex
+    });
+    assert_eq!(report.hot_paths[0].id, format!("fallow:hot:{expected}"));
 }
