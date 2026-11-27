@@ -555,3 +555,28 @@ fn each_run_option_has_a_result_key_decision() {
         resume: _,
     } = crate::mutation::MutationRunOptions::default();
 }
+
+/// The cache file is a path in the checkout. A named pipe there gives an
+/// empty cache and the open does not wait for a writer.
+#[cfg(unix)]
+#[test]
+fn a_cache_file_that_is_not_a_regular_file_gives_an_empty_cache() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().to_path_buf();
+    project(&root);
+    let cache_dir = root.join(".fallow/mutation");
+    fs::create_dir_all(&cache_dir).unwrap();
+    let made = std::process::Command::new("mkfifo")
+        .arg(cache_dir.join(RESULT_CACHE_FILE))
+        .status()
+        .expect("run mkfifo");
+    assert!(made.success());
+    let (send, receive) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = send.send(open(&root).get("m1", "k").is_none());
+    });
+    let empty = receive
+        .recv_timeout(std::time::Duration::from_secs(10))
+        .expect("the open does not wait for a writer");
+    assert!(empty);
+}

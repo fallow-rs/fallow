@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 
 use bitcode::{Decode, Encode};
 use fallow_config::ResolvedNormalization;
+use fallow_types::path_guard::CacheTarget;
 use fallow_types::source_fingerprint::SourceFingerprint;
 use fallow_types::suppress::{
     PolicyRuleSuppression, RangeMarkerProblem, RangeMarkerProblemKind, SuppressionScope,
@@ -19,7 +20,7 @@ use super::tokenize::{FileTokens, SourceToken, TokenKind};
 use crate::suppress::{IssueKind, Suppression};
 use fallow_extract::cache::DUPES_CACHE_VERSION;
 
-const MAX_DUPES_CACHE_SIZE: usize = 512 * 1024 * 1024;
+const MAX_DUPES_CACHE_SIZE: u64 = 512 * 1024 * 1024;
 
 /// Extracted token payload cached for one file.
 pub(super) struct TokenPayload<'a> {
@@ -144,10 +145,10 @@ impl TokenCache {
         let dir = cache_root
             .join("cache")
             .join(format!("dupes-tokens-v{DUPES_CACHE_VERSION}"));
-        let cache_file = dir.join("cache.bin");
-        let store = std::fs::read(&cache_file)
+        let store = CacheTarget::inside(write_base)
+            .with_dir(&dir)
+            .read_file("cache.bin", MAX_DUPES_CACHE_SIZE)
             .ok()
-            .filter(|data| data.len() <= MAX_DUPES_CACHE_SIZE)
             .and_then(|data| bitcode::decode::<CacheStore>(&data).ok())
             .filter(|store| store.version == DUPES_CACHE_VERSION)
             .unwrap_or_else(CacheStore::new);
@@ -635,6 +636,37 @@ mod tests {
         let cache = TokenCache::load(&root.join(".fallow"), &root);
         assert!(cache.save().is_err());
         assert_eq!(std::fs::read_dir(&outside).expect("outside").count(), 0);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn token_cache_reads_no_cache_file_link_out_of_the_base() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path().join("project");
+        let outside = dir.path().join("outside");
+        std::fs::create_dir_all(&root).expect("root");
+        let file = root.join("src.ts");
+        std::fs::write(&file, "const value = 1;\n").expect("write source");
+        let metadata = std::fs::metadata(&file).expect("metadata");
+        let mut cache = TokenCache::load(&outside, &outside);
+        insert_entry(
+            &mut cache,
+            &file,
+            &metadata,
+            mode(),
+            &entry("const value = 1;\n"),
+        );
+        cache.save().expect("save cache");
+
+        let linked = root
+            .join(".fallow")
+            .join(cache.dir.strip_prefix(&outside).expect("rel"));
+        std::fs::create_dir_all(&linked).expect("cache dir");
+        std::os::unix::fs::symlink(cache.dir.join("cache.bin"), linked.join("cache.bin"))
+            .expect("link");
+
+        let loaded = TokenCache::load(&root.join(".fallow"), &root);
+        assert!(loaded.get(&file, &metadata, mode()).is_none());
     }
 
     #[test]

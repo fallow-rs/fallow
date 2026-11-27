@@ -8,6 +8,7 @@ use std::cell::Cell;
 
 use fallow_types::cache_rejection::CacheRejection;
 use fallow_types::path_guard::CacheTarget;
+use fallow_types::read_guard::ReadRefusal;
 use rustc_hash::FxHashMap;
 
 use bitcode::{Decode, Encode};
@@ -17,6 +18,9 @@ use super::types::{
     CACHE_VERSION, CachedModule, DEFAULT_CACHE_MAX_SIZE, EVICTION_SIGNIFICANT_BPS,
     EVICTION_TARGET_BPS, EVICTION_TRIGGER_BPS,
 };
+
+/// The name of the cache file in the cache directory.
+const CACHE_FILE: &str = "cache.bin";
 
 #[cfg(test)]
 thread_local! {
@@ -149,38 +153,56 @@ impl CacheStore {
     /// the user paid the read and got nothing back. Only the missing-file case
     /// stays quiet.
     pub fn load(
-        cache_dir: &Path,
+        target: CacheTarget<'_>,
         root: &Path,
         expected_config_hash: u64,
         max_size_bytes: usize,
     ) -> Result<Self, CacheRejection> {
-        Self::load_counting_bytes(cache_dir, root, expected_config_hash, max_size_bytes).0
+        Self::load_counting_bytes(target, root, expected_config_hash, max_size_bytes).0
     }
 
     /// [`Self::load`], plus the number of cache bytes read from disk.
     ///
     /// The count is returned also when the cache is refused, because the run
     /// paid for the read either way. It is zero when no file was read.
+    ///
+    /// The read goes through [`CacheTarget::read_file`]: a file that resolves
+    /// outside the base of `target`, a file that is not a regular file, and a
+    /// file over the size ceiling are refused before a byte is read.
     pub fn load_counting_bytes(
-        cache_dir: &Path,
+        target: CacheTarget<'_>,
         root: &Path,
         expected_config_hash: u64,
         max_size_bytes: usize,
     ) -> (Result<Self, CacheRejection>, u64) {
-        let cache_file = cache_dir.join("cache.bin");
-        let data = match std::fs::read(&cache_file) {
+        let safety_ceiling = max_size_bytes.max(DEFAULT_CACHE_MAX_SIZE);
+        let data = match target.read_file(CACHE_FILE, safety_ceiling as u64) {
             Ok(data) => data,
-            Err(error) => {
-                if error.kind() != std::io::ErrorKind::NotFound {
-                    tracing::warn!("Cache file could not be read; check the path and permissions");
-                    return (Err(CacheRejection::Unreadable), 0);
-                }
-                return (Err(CacheRejection::Absent), 0);
+            Err(refusal) if refusal.is_not_found() => return (Err(CacheRejection::Absent), 0),
+            Err(ReadRefusal::TooLarge { max_bytes, .. }) => {
+                let size_bytes = std::fs::metadata(target.dir().join(CACHE_FILE))
+                    .map_or_else(|_| max_bytes.saturating_add(1), |meta| meta.len());
+                tracing::warn!(
+                    size_mb = size_bytes / (1024 * 1024),
+                    ceiling_mb = max_bytes / (1024 * 1024),
+                    "Cache file exceeds safety ceiling, ignoring"
+                );
+                return (
+                    Err(CacheRejection::Oversize {
+                        size_bytes,
+                        ceiling_bytes: max_bytes,
+                    }),
+                    0,
+                );
+            }
+            Err(refusal) => {
+                tracing::warn!("Cache file could not be read, rebuilding: {refusal}");
+                return (Err(CacheRejection::Unreadable), 0);
             }
         };
         let bytes_read = data.len() as u64;
         (
-            Self::decode_loaded(&data, root, expected_config_hash, max_size_bytes),
+            Self::decode_loaded(&data, root, expected_config_hash),
             bytes_read,
         )
     }
@@ -189,20 +211,7 @@ impl CacheStore {
         data: &[u8],
         root: &Path,
         expected_config_hash: u64,
-        max_size_bytes: usize,
     ) -> Result<Self, CacheRejection> {
-        let safety_ceiling = max_size_bytes.max(DEFAULT_CACHE_MAX_SIZE);
-        if data.len() > safety_ceiling {
-            tracing::warn!(
-                size_mb = data.len() / (1024 * 1024),
-                ceiling_mb = safety_ceiling / (1024 * 1024),
-                "Cache file exceeds safety ceiling, ignoring"
-            );
-            return Err(CacheRejection::Oversize {
-                size_bytes: data.len() as u64,
-                ceiling_bytes: safety_ceiling as u64,
-            });
-        }
         let payload = read_header(data)?;
         let mut store: Self = match bitcode::decode(payload) {
             Ok(s) => s,
@@ -302,7 +311,7 @@ impl CacheStore {
         }
 
         target
-            .write_file("cache.bin", &framed(self.version, &encoded))
+            .write_file(CACHE_FILE, &framed(self.version, &encoded))
             .map_err(|e| format!("Failed to write cache file: {e}"))
     }
 

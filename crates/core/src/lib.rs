@@ -1392,7 +1392,7 @@ fn parse_analysis_modules(
     } else {
         let load_start = Instant::now();
         let (loaded, bytes_read) = cache::CacheStore::load_counting_bytes(
-            &config.cache_dir,
+            config.cache_target(),
             &config.root,
             config.cache_config_hash,
             cache_max_size_bytes,

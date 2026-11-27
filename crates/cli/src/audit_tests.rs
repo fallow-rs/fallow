@@ -3129,6 +3129,35 @@ fn staged_base_snapshot_save_writes_in_a_worktree_of_a_bare_repository() {
     assert!(audit_base_snapshot_cache_file(&host.join("build/cache"), &key).exists());
 }
 
+#[cfg(unix)]
+#[test]
+fn base_snapshot_link_out_of_the_cache_dir_is_not_read() {
+    let tmp = tempfile::TempDir::new().expect("temp dir should be created");
+    let config_path = None;
+    let root = tmp.path().join("project");
+    let outside = tmp.path().join("outside");
+    fs::create_dir_all(&root).expect("root should be created");
+    let cache_root = root.join(".fallow");
+    let outside_root = outside.join(".fallow");
+    let key = AuditBaseSnapshotCacheKey {
+        hash: 0xfeed_beef,
+        base_sha: "abc123".to_string(),
+    };
+    let outside_opts = audit_review_benchmark_options(&outside, &config_path, &outside_root, 1);
+    save_cached_base_snapshot(&outside_opts, &outside, &key, &AuditKeySnapshot::default());
+    assert!(load_cached_base_snapshot(&outside_opts, &outside, &key).is_some());
+
+    let opts = audit_review_benchmark_options(&root, &config_path, &cache_root, 1);
+    fs::create_dir_all(audit_base_snapshot_cache_dir(&cache_root))
+        .expect("cache dir should be created");
+    std::os::unix::fs::symlink(
+        audit_base_snapshot_cache_file(&outside_root, &key),
+        audit_base_snapshot_cache_file(&cache_root, &key),
+    )
+    .expect("link should be created");
+    assert!(load_cached_base_snapshot(&opts, &root, &key).is_none());
+}
+
 #[test]
 fn base_snapshot_cache_hit_refreshes_the_file_age() {
     let tmp = tempfile::TempDir::new().expect("temp dir should be created");
@@ -3148,7 +3177,7 @@ fn base_snapshot_cache_hit_refreshes_the_file_age() {
         .and_then(|file| file.set_modified(old))
         .expect("mtime should be set");
 
-    assert!(load_cached_base_snapshot(&opts, &key).is_some());
+    assert!(load_cached_base_snapshot(&opts, opts.root, &key).is_some());
 
     let modified = fs::metadata(&path)
         .and_then(|metadata| metadata.modified())
@@ -3254,7 +3283,7 @@ fn audit_base_snapshot_cache_roundtrips_from_disk() {
         audit_base_snapshot_cache_file(&cache_root, &key).exists(),
         "snapshot should be saved below the configured cache directory"
     );
-    let loaded = load_cached_base_snapshot(&opts, &key).expect("snapshot should load");
+    let loaded = load_cached_base_snapshot(&opts, opts.root, &key).expect("snapshot should load");
 
     assert_eq!(loaded.dead_code, snapshot.dead_code);
     assert_eq!(loaded.health, snapshot.health);
@@ -3351,7 +3380,7 @@ fn audit_base_snapshot_cache_rejects_mismatched_key() {
     )
     .expect("cache file should be written");
 
-    assert!(load_cached_base_snapshot(&opts, &key).is_none());
+    assert!(load_cached_base_snapshot(&opts, opts.root, &key).is_none());
 }
 
 #[test]
@@ -4922,7 +4951,7 @@ fn audit_base_current_config_attribution_survives_cache_hit() {
     .expect("cache key should compute")
     .expect("cache key should exist");
     assert!(
-        load_cached_base_snapshot(&opts, &key).is_some(),
+        load_cached_base_snapshot(&opts, opts.root, &key).is_some(),
         "first audit should store a reusable base snapshot"
     );
 

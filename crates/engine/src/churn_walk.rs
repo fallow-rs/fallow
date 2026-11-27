@@ -100,10 +100,11 @@ mod tests {
     use std::path::Path;
 
     use super::super::{
-        ChurnCoverage, analyze_churn_cached, analyze_fresh_churn, extend_churn_cache, get_head_sha,
-        parse_since, read_churn_cache,
+        ChurnCoverage, ChurnEventState, analyze_churn_cached, analyze_fresh_churn,
+        extend_churn_cache, get_head_sha, parse_since, read_churn_cache, save_churn_cache,
     };
     use super::is_unknown_cutoff_filter;
+    use fallow_types::path_guard::CacheTarget;
 
     fn git(root: &Path, args: &[&str]) {
         let status = crate::git_fixture::fixture_git_command_with_identity(
@@ -170,7 +171,7 @@ mod tests {
         let second = commit(root, "b.ts");
         commit(root, "c.ts");
         let clock = crate::clock::AnalysisClock::for_repo(root);
-        let cache = read_churn_cache(cache_dir.path()).expect("saved entry");
+        let cache = read_churn_cache(CacheTarget::inside(cache_dir.path())).expect("saved entry");
         let extended = cache
             .coverage()
             .extended_to(&second, since.window.cutoff_secs(&clock));
@@ -190,5 +191,31 @@ mod tests {
             "fatal: unrecognized argument: --since-as-filter=@1"
         ));
         assert!(!is_unknown_cutoff_filter("fatal: bad revision 'abc'"));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn churn_cache_reads_no_cache_file_link_out_of_the_cache_dir() {
+        let state = ChurnEventState {
+            files: rustc_hash::FxHashMap::default(),
+            author_pool: Vec::new(),
+            commit_pool: Vec::new(),
+            git_log_bytes: 0,
+        };
+        let outside = tempfile::tempdir().expect("outside directory");
+        let coverage = ChurnCoverage {
+            head_sha: "abc123".to_owned(),
+            ..ChurnCoverage::default()
+        };
+        save_churn_cache(CacheTarget::inside(outside.path()), "1y", &state, &coverage);
+        assert!(read_churn_cache(CacheTarget::inside(outside.path())).is_some());
+
+        let cache_dir = tempfile::tempdir().expect("cache directory");
+        std::os::unix::fs::symlink(
+            outside.path().join("churn.bin"),
+            cache_dir.path().join("churn.bin"),
+        )
+        .expect("link");
+        assert!(read_churn_cache(CacheTarget::inside(cache_dir.path())).is_none());
     }
 }

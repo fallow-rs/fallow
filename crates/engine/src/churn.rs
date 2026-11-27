@@ -569,7 +569,7 @@ pub fn is_git_repo(root: &Path) -> bool {
 
 /// Maximum size of a churn cache file (64 MB). The incremental cache stores
 /// per-commit events, so it needs more headroom than the old aggregate rows.
-const MAX_CHURN_CACHE_SIZE: usize = 64 * 1024 * 1024;
+const MAX_CHURN_CACHE_SIZE: u64 = 64 * 1024 * 1024;
 
 /// Cache schema version. Bump when the on-disk shape of [`ChurnCache`]
 /// changes so older payloads are rejected on load. Version 5 stores paths in
@@ -653,14 +653,11 @@ struct ChurnEventState {
     git_log_bytes: u64,
 }
 
-/// Read the churn cache file. Returns `None` when the file is missing, too
-/// large, unreadable, or written by another cache version.
-fn read_churn_cache(cache_dir: &Path) -> Option<ChurnCache> {
-    let cache_file = cache_dir.join("churn.bin");
-    let data = std::fs::read(&cache_file).ok()?;
-    if data.len() > MAX_CHURN_CACHE_SIZE {
-        return None;
-    }
+/// Read the churn cache file of `target`. Returns `None` when the file is
+/// missing, too large, not a regular file, resolves outside the base of
+/// `target`, is unreadable, or is written by another cache version.
+fn read_churn_cache(target: CacheTarget<'_>) -> Option<ChurnCache> {
+    let data = target.read_file("churn.bin", MAX_CHURN_CACHE_SIZE).ok()?;
     let cache: ChurnCache = bitcode::decode(&data).ok()?;
     (cache.version == CHURN_CACHE_VERSION).then_some(cache)
 }
@@ -669,7 +666,8 @@ fn read_churn_cache(cache_dir: &Path) -> Option<ChurnCache> {
 /// or version mismatch.
 #[cfg(test)]
 fn load_churn_cache(cache_dir: &Path, window_token: &str) -> Option<ChurnCache> {
-    read_churn_cache(cache_dir).filter(|cache| cache.window_token == window_token)
+    read_churn_cache(CacheTarget::inside(cache_dir))
+        .filter(|cache| cache.window_token == window_token)
 }
 
 /// True when `outer` includes every commit that `inner` includes at `clock`.
@@ -786,7 +784,7 @@ fn try_reuse_churn_cache(
     wanted: &ChurnCoverage,
     clock: &crate::clock::AnalysisClock,
 ) -> Option<ChurnEventState> {
-    let cache = read_churn_cache(cache_dir)?;
+    let cache = read_churn_cache(CacheTarget::new(root, cache_dir))?;
     let have = cache.coverage();
     // A fetch that unshallows or deepens the clone adds history below the
     // cached commits. An extend scan never reaches that history, so only a

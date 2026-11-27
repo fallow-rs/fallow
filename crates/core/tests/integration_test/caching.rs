@@ -323,7 +323,7 @@ fn cache_roundtrip() {
         )
         .unwrap();
     let loaded = CacheStore::load(
-        &temp_dir,
+        fallow_types::path_guard::CacheTarget::inside(&temp_dir),
         std::path::Path::new(""),
         0,
         fallow_extract::cache::DEFAULT_CACHE_MAX_SIZE,

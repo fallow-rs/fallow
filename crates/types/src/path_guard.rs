@@ -590,6 +590,28 @@ impl<'a> CacheTarget<'a> {
         crate::atomic_file::write_atomic(&path, data)
     }
 
+    /// Read the file `name` of the cache directory in full, through
+    /// [`crate::read_guard::read_bytes_inside`] with the base of
+    /// [`Self::write_base`] as the root.
+    ///
+    /// A cache directory is a path in the checkout, so a clone can hold a
+    /// cache file. The read refuses a file that resolves outside the base,
+    /// a file that is not a regular file, and a file of more than
+    /// `max_bytes` bytes, before it reads a byte.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`crate::read_guard::ReadRefusal`] when a check fails or
+    /// the read fails. A missing file gives a refusal whose
+    /// [`crate::read_guard::ReadRefusal::is_not_found`] is true.
+    pub fn read_file(
+        &self,
+        name: &str,
+        max_bytes: u64,
+    ) -> Result<Vec<u8>, crate::read_guard::ReadRefusal> {
+        crate::read_guard::read_bytes_inside(&self.write_base(), &self.dir.join(name), max_bytes)
+    }
+
     /// Write `.gitignore` with `*`, so the cache directory is never
     /// committed. An equal file stays as it is.
     ///
@@ -707,6 +729,65 @@ mod tests {
         assert!(target.write_gitignore().is_err());
         assert!(target.write_file("cache.bin", b"data").is_err());
         assert_eq!(std::fs::read_dir(&f.outside).expect("outside").count(), 0);
+    }
+
+    #[test]
+    fn a_target_reads_a_file_of_its_cache_dir() {
+        let f = fixture();
+        let dir = f.root.join(".fallow/cache");
+        let target = CacheTarget::new(&f.root, &dir);
+        target.write_file("cache.bin", b"data").expect("file");
+        assert_eq!(target.read_file("cache.bin", 4).expect("read"), b"data");
+        let missing = target.read_file("other.bin", 4).expect_err("missing");
+        assert!(missing.is_not_found());
+    }
+
+    #[test]
+    fn a_target_refuses_a_cache_file_link_out_of_the_base() {
+        let f = fixture();
+        let dir = f.root.join(".fallow");
+        std::fs::create_dir_all(&dir).expect("cache");
+        std::fs::write(f.outside.join("cache.bin"), b"data").expect("outside file");
+        symlink(f.outside.join("cache.bin"), dir.join("cache.bin")).expect("link");
+        let refusal = CacheTarget::new(&f.root, &dir)
+            .read_file("cache.bin", 1024)
+            .expect_err("refused");
+        assert!(matches!(
+            refusal,
+            crate::read_guard::ReadRefusal::OutsideRoot { .. }
+        ));
+    }
+
+    #[test]
+    fn a_target_refuses_a_cache_file_that_is_not_a_regular_file() {
+        let f = fixture();
+        let dir = f.root.join(".fallow");
+        std::fs::create_dir_all(&dir).expect("cache");
+        let made = std::process::Command::new("mkfifo")
+            .arg(dir.join("cache.bin"))
+            .status()
+            .expect("run mkfifo");
+        assert!(made.success());
+        let refusal = CacheTarget::new(&f.root, &dir)
+            .read_file("cache.bin", 1024)
+            .expect_err("refused");
+        assert!(matches!(
+            refusal,
+            crate::read_guard::ReadRefusal::NotRegularFile { .. }
+        ));
+    }
+
+    #[test]
+    fn a_target_refuses_a_cache_file_over_the_limit_before_the_read() {
+        let f = fixture();
+        let dir = f.root.join(".fallow");
+        let target = CacheTarget::new(&f.root, &dir);
+        target.write_file("cache.bin", b"12345").expect("file");
+        let refusal = target.read_file("cache.bin", 4).expect_err("refused");
+        assert!(matches!(
+            refusal,
+            crate::read_guard::ReadRefusal::TooLarge { max_bytes: 4, .. }
+        ));
     }
 
     #[test]

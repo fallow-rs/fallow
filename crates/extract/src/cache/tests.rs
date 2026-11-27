@@ -940,7 +940,7 @@ fn module_to_cached_roundtrip_members() {
 #[test]
 fn cache_load_nonexistent_reports_absent() {
     let result = CacheStore::load(
-        Path::new("/nonexistent/path"),
+        at(Path::new("/nonexistent/path")),
         Path::new(""),
         0,
         DEFAULT_CACHE_MAX_SIZE,
@@ -970,7 +970,7 @@ fn cache_save_and_load_roundtrip() {
     store.insert(Path::new("test.ts"), module);
     store.save(at(&dir), 0, DEFAULT_CACHE_MAX_SIZE).unwrap();
 
-    let loaded = CacheStore::load(&dir, Path::new(""), 0, DEFAULT_CACHE_MAX_SIZE);
+    let loaded = CacheStore::load(at(&dir), Path::new(""), 0, DEFAULT_CACHE_MAX_SIZE);
     assert!(loaded.is_ok());
     let loaded = loaded.unwrap();
     assert_eq!(loaded.len(), 1);
@@ -996,7 +996,7 @@ fn cache_load_refuses_a_blob_whose_format_marker_was_mangled() {
     store.insert(Path::new("test.ts"), module);
     store.save(at(&dir), 0, DEFAULT_CACHE_MAX_SIZE).unwrap();
 
-    assert!(CacheStore::load(&dir, Path::new(""), 0, DEFAULT_CACHE_MAX_SIZE).is_ok());
+    assert!(CacheStore::load(at(&dir), Path::new(""), 0, DEFAULT_CACHE_MAX_SIZE).is_ok());
 
     let cache_file = dir.join("cache.bin");
     let mut data = std::fs::read(&cache_file).unwrap();
@@ -1004,7 +1004,7 @@ fn cache_load_refuses_a_blob_whose_format_marker_was_mangled() {
     data[0] = 255; // Mangle the format marker the header opens with.
     std::fs::write(&cache_file, &data).unwrap();
 
-    let result = CacheStore::load(&dir, Path::new(""), 0, DEFAULT_CACHE_MAX_SIZE);
+    let result = CacheStore::load(at(&dir), Path::new(""), 0, DEFAULT_CACHE_MAX_SIZE);
     assert_eq!(
         result.err(),
         Some(CacheRejection::Undecodable),
@@ -1581,8 +1581,8 @@ fn cache_save_no_eviction_when_under_threshold() {
         .save(at(&dir), 42, DEFAULT_CACHE_MAX_SIZE)
         .expect("save under threshold");
 
-    let loaded =
-        CacheStore::load(&dir, Path::new(""), 42, DEFAULT_CACHE_MAX_SIZE).expect("load round-trip");
+    let loaded = CacheStore::load(at(&dir), Path::new(""), 42, DEFAULT_CACHE_MAX_SIZE)
+        .expect("load round-trip");
     assert_eq!(loaded.len(), 10, "all 10 entries survive");
 
     let _ = std::fs::remove_dir_all(&dir);
@@ -1598,7 +1598,7 @@ fn cache_save_evicts_when_over_threshold() {
     let cap = 40 * 1024;
     store.save(at(&dir), 99, cap).expect("save with eviction");
 
-    let loaded = CacheStore::load(&dir, Path::new(""), 99, DEFAULT_CACHE_MAX_SIZE)
+    let loaded = CacheStore::load(at(&dir), Path::new(""), 99, DEFAULT_CACHE_MAX_SIZE)
         .expect("load after eviction");
     assert!(loaded.len() < 50, "eviction removed entries");
     let kept_max = (0..50u64)
@@ -1695,7 +1695,7 @@ fn cache_eviction_preserves_recent_entries_with_skewed_sizes() {
     CacheStore::reset_full_store_encode_count();
     store.save(at(&dir), 99, cap).expect("save skewed cache");
     let encode_count = CacheStore::full_store_encode_count();
-    let loaded = CacheStore::load(&dir, Path::new(""), 99, DEFAULT_CACHE_MAX_SIZE)
+    let loaded = CacheStore::load(at(&dir), Path::new(""), 99, DEFAULT_CACHE_MAX_SIZE)
         .expect("load skewed cache");
 
     assert!(
@@ -1732,7 +1732,7 @@ fn cache_save_always_honors_cap_with_huge_entries() {
         .save(at(&dir), 5, 1024)
         .expect("save honors cap with overshoot");
 
-    let loaded = CacheStore::load(&dir, Path::new(""), 5, DEFAULT_CACHE_MAX_SIZE)
+    let loaded = CacheStore::load(at(&dir), Path::new(""), 5, DEFAULT_CACHE_MAX_SIZE)
         .expect("load after overshoot save");
     assert_eq!(loaded.len(), 1, "single entry preserved under overshoot");
 
@@ -1749,12 +1749,12 @@ fn cache_load_returns_none_on_config_hash_mismatch() {
         .expect("save with config_hash A");
 
     assert!(
-        CacheStore::load(&dir, Path::new(""), 0xCAFE_BABE, DEFAULT_CACHE_MAX_SIZE).err()
+        CacheStore::load(at(&dir), Path::new(""), 0xCAFE_BABE, DEFAULT_CACHE_MAX_SIZE).err()
             == Some(CacheRejection::ConfigHashMismatch),
         "mismatched config_hash invalidates cache and names the reason"
     );
     assert!(
-        CacheStore::load(&dir, Path::new(""), 0xDEAD_BEEF, DEFAULT_CACHE_MAX_SIZE).is_ok(),
+        CacheStore::load(at(&dir), Path::new(""), 0xDEAD_BEEF, DEFAULT_CACHE_MAX_SIZE).is_ok(),
         "matching config_hash round-trips"
     );
 
@@ -1772,7 +1772,7 @@ fn cache_load_round_trip_with_matching_config_hash() {
         .save(at(&dir), hash, DEFAULT_CACHE_MAX_SIZE)
         .expect("save with hash");
 
-    let loaded = CacheStore::load(&dir, Path::new(""), hash, DEFAULT_CACHE_MAX_SIZE)
+    let loaded = CacheStore::load(at(&dir), Path::new(""), hash, DEFAULT_CACHE_MAX_SIZE)
         .expect("load with matching hash");
     assert_eq!(loaded.len(), 2);
     assert!(loaded.get(Path::new("a.ts"), 1).is_some());
@@ -1791,12 +1791,12 @@ fn cache_load_honors_user_max_size_above_default() {
         .expect("save under default");
 
     assert!(
-        CacheStore::load(&dir, Path::new(""), 0, 1).is_ok(),
+        CacheStore::load(at(&dir), Path::new(""), 0, 1).is_ok(),
         "tiny user cap does not discard valid existing cache"
     );
 
     assert!(
-        CacheStore::load(&dir, Path::new(""), 0, DEFAULT_CACHE_MAX_SIZE * 2).is_ok(),
+        CacheStore::load(at(&dir), Path::new(""), 0, DEFAULT_CACHE_MAX_SIZE * 2).is_ok(),
         "user cap above default round-trips"
     );
 
@@ -1812,7 +1812,7 @@ fn cache_load_reports_undecodable_for_a_blob_without_fallows_framing() {
     std::fs::write(dir.join("cache.bin"), bitcode::encode(&(7_u32, "legacy"))).unwrap();
 
     assert_eq!(
-        CacheStore::load(&dir, Path::new(""), 0, DEFAULT_CACHE_MAX_SIZE).err(),
+        CacheStore::load(at(&dir), Path::new(""), 0, DEFAULT_CACHE_MAX_SIZE).err(),
         Some(CacheRejection::Undecodable)
     );
 
@@ -1828,7 +1828,7 @@ fn cache_load_reports_undecodable_for_a_truncated_file() {
     std::fs::write(dir.join("cache.bin"), b"FLW").unwrap();
 
     assert_eq!(
-        CacheStore::load(&dir, Path::new(""), 0, DEFAULT_CACHE_MAX_SIZE).err(),
+        CacheStore::load(at(&dir), Path::new(""), 0, DEFAULT_CACHE_MAX_SIZE).err(),
         Some(CacheRejection::Undecodable)
     );
 
@@ -1854,7 +1854,7 @@ fn cache_load_refuses_a_declared_version_it_does_not_write() {
     .unwrap();
 
     assert_eq!(
-        CacheStore::load(&dir, Path::new(""), 0, DEFAULT_CACHE_MAX_SIZE).err(),
+        CacheStore::load(at(&dir), Path::new(""), 0, DEFAULT_CACHE_MAX_SIZE).err(),
         Some(CacheRejection::VersionMismatch)
     );
 
@@ -1874,7 +1874,7 @@ fn cache_load_reports_undecodable_for_a_damaged_payload_at_the_current_version()
     .unwrap();
 
     assert_eq!(
-        CacheStore::load(&dir, Path::new(""), 0, DEFAULT_CACHE_MAX_SIZE).err(),
+        CacheStore::load(at(&dir), Path::new(""), 0, DEFAULT_CACHE_MAX_SIZE).err(),
         Some(CacheRejection::Undecodable)
     );
 
@@ -1946,8 +1946,8 @@ fn warm_cache_load_matches_cold_parse() {
     store.insert(path, cold_cached);
     store.save(at(&dir), 0, DEFAULT_CACHE_MAX_SIZE).unwrap();
 
-    let loaded =
-        CacheStore::load(&dir, Path::new(""), 0, DEFAULT_CACHE_MAX_SIZE).expect("warm cache loads");
+    let loaded = CacheStore::load(at(&dir), Path::new(""), 0, DEFAULT_CACHE_MAX_SIZE)
+        .expect("warm cache loads");
     let warm_cached = loaded
         .get(path, cold_module.content_hash)
         .expect("entry present in warm cache");
@@ -2045,7 +2045,7 @@ fn warm_cache_written_under_one_root_is_reused_under_another() {
         .save(at(&dir), 0, DEFAULT_CACHE_MAX_SIZE)
         .expect("save under the original root");
 
-    let loaded = CacheStore::load(&dir, moved_root, 0, DEFAULT_CACHE_MAX_SIZE)
+    let loaded = CacheStore::load(at(&dir), moved_root, 0, DEFAULT_CACHE_MAX_SIZE)
         .expect("a relocated cache still loads");
     assert!(
         loaded.get(&moved_root.join("src/app.ts"), 7).is_some(),
@@ -2077,7 +2077,7 @@ fn cache_load_does_not_report_an_unreadable_cache_path_as_absent() {
     let dir = test_cache_dir("unreadable_cache_path");
     std::fs::create_dir_all(dir.join("cache.bin")).unwrap();
     assert_eq!(
-        CacheStore::load(&dir, Path::new(""), 0, DEFAULT_CACHE_MAX_SIZE).err(),
+        CacheStore::load(at(&dir), Path::new(""), 0, DEFAULT_CACHE_MAX_SIZE).err(),
         Some(CacheRejection::Unreadable)
     );
     let _ = std::fs::remove_dir_all(&dir);
@@ -2451,7 +2451,7 @@ fn concurrent_saves_never_leave_an_undecodable_cache_or_a_stray_temp_file() {
     let failures = failures.into_inner().expect("failure list");
     assert!(failures.is_empty(), "saves failed: {failures:?}");
 
-    let loaded = CacheStore::load(&dir, Path::new(""), 7, DEFAULT_CACHE_MAX_SIZE)
+    let loaded = CacheStore::load(at(&dir), Path::new(""), 7, DEFAULT_CACHE_MAX_SIZE)
         .expect("the cache written last decodes");
     assert_eq!(
         loaded.len(),
@@ -2511,7 +2511,7 @@ fn eviction_removes_out_of_scope_entries_before_stable_in_scope_entries() {
     let cap = 40 * 1024;
     store.save(at(&dir), 5, cap).expect("save with eviction");
 
-    let loaded = CacheStore::load(&dir, Path::new(""), 5, DEFAULT_CACHE_MAX_SIZE)
+    let loaded = CacheStore::load(at(&dir), Path::new(""), 5, DEFAULT_CACHE_MAX_SIZE)
         .expect("load after eviction");
     assert!(loaded.len() < 50, "the cap forced an eviction");
     let kept_out_of_scope = out_of_scope
@@ -2540,7 +2540,7 @@ fn simulate_cached_run(
     files: &[fallow_types::discover::DiscoveredFile],
     cap: usize,
 ) -> usize {
-    let mut store = CacheStore::load(dir, root, 5, DEFAULT_CACHE_MAX_SIZE)
+    let mut store = CacheStore::load(at(dir), root, 5, DEFAULT_CACHE_MAX_SIZE)
         .unwrap_or_else(|_| CacheStore::new(root));
     let mut misses = 0;
     for (i, file) in files.iter().enumerate() {
@@ -2634,7 +2634,7 @@ fn eviction_keeps_the_latest_working_set_above_the_low_target() {
     let cap = 64 * 1024;
     store.save(at(&dir), 5, cap).expect("save with eviction");
 
-    let loaded = CacheStore::load(&dir, Path::new(""), 5, DEFAULT_CACHE_MAX_SIZE)
+    let loaded = CacheStore::load(at(&dir), Path::new(""), 5, DEFAULT_CACHE_MAX_SIZE)
         .expect("load after eviction");
     let kept_stale = stale
         .iter()
@@ -2977,7 +2977,7 @@ fn working_set_eviction_counts_entries_when_working_set_exceeds_cap() {
         "working set exceeds cap, so working-set entries must be evicted"
     );
 
-    let loaded = CacheStore::load(&dir, Path::new(""), 1, DEFAULT_CACHE_MAX_SIZE)
+    let loaded = CacheStore::load(at(&dir), Path::new(""), 1, DEFAULT_CACHE_MAX_SIZE)
         .expect("load after eviction");
     assert_eq!(
         loaded.len(),
@@ -3014,7 +3014,7 @@ fn stale_eviction_alone_does_not_track_working_set_eviction() {
         "only stale entries should be evicted when working set fits cap"
     );
 
-    let loaded = CacheStore::load(&dir, Path::new(""), 1, DEFAULT_CACHE_MAX_SIZE)
+    let loaded = CacheStore::load(at(&dir), Path::new(""), 1, DEFAULT_CACHE_MAX_SIZE)
         .expect("load after eviction");
     assert!(
         loaded.len() < stale.len() + working_set.len(),
@@ -3051,8 +3051,8 @@ fn working_set_within_cap_is_not_evicted() {
         "no eviction when well under cap threshold"
     );
 
-    let loaded =
-        CacheStore::load(&dir, Path::new(""), 1, DEFAULT_CACHE_MAX_SIZE).expect("load succeeds");
+    let loaded = CacheStore::load(at(&dir), Path::new(""), 1, DEFAULT_CACHE_MAX_SIZE)
+        .expect("load succeeds");
     assert_eq!(loaded.len(), 10, "all 10 entries preserved");
 }
 
@@ -3102,4 +3102,28 @@ fn working_set_eviction_message_is_none_when_nothing_of_the_run_was_evicted() {
         encoded_bytes: 1024,
     };
     assert!(super::store::working_set_eviction_message(&eviction, 1024 * 1024).is_none());
+}
+
+/// A cache directory is a path in the checkout, so a clone can hold a
+/// `cache.bin` link. The loader reads no file that resolves outside the
+/// base of the cache directory.
+#[cfg(unix)]
+#[test]
+fn cache_load_refuses_a_cache_file_link_out_of_the_cache_dir() {
+    let dir = test_cache_dir("cache_file_link");
+    let outside = test_cache_dir("cache_file_link_outside");
+    let mut store = CacheStore::new(Path::new(""));
+    store.insert(Path::new("a.ts"), synthetic_module(1, 0, 1));
+    store
+        .save(at(&outside), 0, DEFAULT_CACHE_MAX_SIZE)
+        .expect("save outside");
+    std::os::unix::fs::symlink(outside.join("cache.bin"), dir.join("cache.bin")).expect("link");
+
+    let (result, bytes_read) =
+        CacheStore::load_counting_bytes(at(&dir), Path::new(""), 0, DEFAULT_CACHE_MAX_SIZE);
+    assert_eq!(result.err(), Some(CacheRejection::Unreadable));
+    assert_eq!(bytes_read, 0);
+
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&outside);
 }

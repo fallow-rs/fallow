@@ -28,6 +28,9 @@ use crate::clock::{AnalysisClock, utc_date, utc_timestamp};
 /// Cache file name under the cache directory.
 const CACHE_FILE: &str = "flag-age.json";
 
+/// The size limit of the age cache file.
+const MAX_CACHE_BYTES: u64 = 64 * 1024 * 1024;
+
 /// Cache format version. Bump it when the cached shape or meaning changes.
 const CACHE_VERSION: u32 = 1;
 
@@ -120,7 +123,7 @@ pub(crate) fn apply_flag_ages(
 
     let mut cache = request
         .cache_dir
-        .and_then(|dir| load_cache(dir, &head))
+        .and_then(|dir| load_cache(CacheTarget::new(request.root, dir), &head))
         .unwrap_or_else(|| AgeCache {
             version: CACHE_VERSION,
             head: head.clone(),
@@ -393,8 +396,11 @@ fn flag_commit(stamp: &CommitStamp) -> FlagCommit {
     }
 }
 
-fn load_cache(dir: &Path, head: &str) -> Option<AgeCache> {
-    let bytes = std::fs::read(dir.join(CACHE_FILE)).ok()?;
+/// Read the age cache of `target`. A file that resolves outside the base of
+/// `target`, is not a regular file, or is over [`MAX_CACHE_BYTES`] is not
+/// read.
+fn load_cache(target: CacheTarget<'_>, head: &str) -> Option<AgeCache> {
+    let bytes = target.read_file(CACHE_FILE, MAX_CACHE_BYTES).ok()?;
     let cache: AgeCache = serde_json::from_slice(&bytes).ok()?;
     (cache.version == CACHE_VERSION && cache.head == head).then_some(cache)
 }
@@ -418,6 +424,27 @@ mod tests {
 
     /// 2023-11-14T22:13:20Z.
     const BASE_EPOCH: u64 = 1_700_000_000;
+
+    #[test]
+    #[cfg(unix)]
+    fn a_cache_file_link_out_of_the_cache_dir_is_not_read() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path().join("project");
+        let outside = dir.path().join("outside");
+        let cache_dir = root.join(".fallow");
+        std::fs::create_dir_all(&cache_dir).expect("cache dir");
+        std::fs::create_dir_all(&outside).expect("outside");
+        let cache = AgeCache {
+            version: CACHE_VERSION,
+            head: "abc".to_owned(),
+            ..AgeCache::default()
+        };
+        save_cache(CacheTarget::inside(&outside), &cache);
+        assert!(load_cache(CacheTarget::inside(&outside), "abc").is_some());
+        std::os::unix::fs::symlink(outside.join(CACHE_FILE), cache_dir.join(CACHE_FILE))
+            .expect("link");
+        assert!(load_cache(CacheTarget::new(&root, &cache_dir), "abc").is_none());
+    }
 
     #[test]
     #[cfg(unix)]

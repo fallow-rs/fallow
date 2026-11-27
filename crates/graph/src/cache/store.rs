@@ -10,8 +10,6 @@
 //! loader names WHY it missed through [`CacheRejection`] so the run can report
 //! a refusal instead of leaving it indistinguishable from a first run.
 
-use std::path::Path;
-
 use fallow_types::cache_rejection::CacheRejection;
 use fallow_types::path_guard::CacheTarget;
 use serde::{Deserialize, Serialize};
@@ -21,6 +19,10 @@ use crate::graph::ModuleGraph;
 
 /// Filename of the persisted graph cache inside the cache directory.
 pub const GRAPH_CACHE_FILE: &str = "graph-cache.bin";
+
+/// The size limit of the graph cache file. The graph of a large monorepo
+/// stays far below it, and a larger file is not read.
+const MAX_GRAPH_CACHE_SIZE: u64 = 1024 * 1024 * 1024;
 
 /// On-disk graph cache entry: a manifest plus the graph it validates.
 #[derive(Serialize, Deserialize)]
@@ -60,15 +62,20 @@ impl GraphCacheStore {
     ///
     /// A file that existed and was then refused logs at warn: the run paid the
     /// read and the decode and reused nothing. A missing file stays quiet.
-    pub fn load(cache_dir: &Path) -> Result<Self, CacheRejection> {
-        let cache_file = cache_dir.join(GRAPH_CACHE_FILE);
-        let data = std::fs::read(&cache_file).map_err(|error| {
-            if error.kind() == std::io::ErrorKind::NotFound {
-                return CacheRejection::Absent;
-            }
-            tracing::warn!("Cache file could not be read; check the path and permissions");
-            CacheRejection::Unreadable
-        })?;
+    ///
+    /// The read goes through [`CacheTarget::read_file`]: a file that resolves
+    /// outside the base of `target`, a file that is not a regular file, and a
+    /// file over 1 GiB are refused before a byte is read.
+    pub fn load(target: CacheTarget<'_>) -> Result<Self, CacheRejection> {
+        let data = target
+            .read_file(GRAPH_CACHE_FILE, MAX_GRAPH_CACHE_SIZE)
+            .map_err(|refusal| {
+                if refusal.is_not_found() {
+                    return CacheRejection::Absent;
+                }
+                tracing::warn!("Graph cache could not be read, rebuilding: {refusal}");
+                CacheRejection::Unreadable
+            })?;
         let payload = read_header(&data)?;
         let mut store: Self = match postcard::from_bytes(payload) {
             Ok(store) => store,
@@ -221,5 +228,26 @@ mod tests {
         let blob = framed(GRAPH_CACHE_VERSION, b"payload");
 
         assert_eq!(read_header(&blob), Ok(b"payload".as_slice()));
+    }
+
+    /// A clone can hold a `graph-cache.bin` link. The loader reads no file
+    /// that resolves outside the base of the cache directory.
+    #[cfg(unix)]
+    #[test]
+    #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+    fn a_cache_file_link_out_of_the_cache_dir_is_not_read() {
+        let temp = tempfile::tempdir().expect("temp");
+        let dir = temp.path().join("cache");
+        let outside = temp.path().join("outside");
+        std::fs::create_dir_all(&dir).expect("cache dir");
+        std::fs::create_dir_all(&outside).expect("outside dir");
+        let file = outside.join(GRAPH_CACHE_FILE);
+        std::fs::write(&file, framed(GRAPH_CACHE_VERSION, b"data")).expect("file");
+        std::os::unix::fs::symlink(&file, dir.join(GRAPH_CACHE_FILE)).expect("link");
+
+        assert_eq!(
+            GraphCacheStore::load(CacheTarget::inside(&dir)).err(),
+            Some(CacheRejection::Unreadable)
+        );
     }
 }
