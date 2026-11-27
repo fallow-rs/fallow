@@ -14,6 +14,7 @@ import {
   renderSummary,
   ruleIdFromKey,
   seededSample,
+  selectProjects,
   clopperPearson,
   stratifiedPrecision,
   upsertRow,
@@ -80,6 +81,36 @@ test("only findings count, and each finding ID names its rule", () => {
     rules.get("stale-suppression").map((f) => f.finding_id),
     ["dc1:stale-suppression:3"],
   );
+});
+
+test("security findings group by category and keep their stable ID", () => {
+  const rules = findingsByRule({
+    kind: "security",
+    security_findings: [
+      { finding_id: "1a", stable_finding_id: "sec1:aa", category: "ssrf", path: "a.ts" },
+      { finding_id: "2b", stable_finding_id: "sec1:bb", category: "client-server-leak" },
+      { finding_id: "3c", stable_finding_id: "sec1:cc", category: "ssrf", path: "b.ts" },
+    ],
+  });
+  assert.deepEqual([...rules.keys()], ["ssrf", "client-server-leak"]);
+  assert.deepEqual(
+    rules.get("ssrf").map((f) => f.finding_id),
+    ["sec1:ssrf:aa", "sec1:ssrf:cc"],
+  );
+});
+
+test("a security finding without a stable ID gets an ID from its location", () => {
+  const site = { category: "dangerous-html", path: "src/App.vue", line: 4, col: 2 };
+  const rules = findingsByRule({
+    security_findings: [
+      { finding_id: "1a", ...site },
+      { finding_id: "2b", ...site },
+    ],
+  });
+  const ids = rules.get("dangerous-html").map((f) => f.finding_id);
+  assert.equal(ids.length, 2);
+  assert.match(ids[0], /^rp1:dangerous-html:[0-9a-f]+$/);
+  assert.equal(ids[1], `${ids[0]}~1`);
 });
 
 test("health and dupes findings get stable IDs from their identifying fields", () => {
@@ -355,6 +386,30 @@ test("a row measured at another commit than the corpus pin is an error", () => {
   assert.deepEqual(ledgerErrors({ schema_version: 1, corpus: {}, rows: [] }), [
     "the corpus needs at least one project",
   ]);
+});
+
+test("a project with default false joins a sample only by name", () => {
+  const mixed = { ...corpus, extra: { repo: "owner/extra", commit: SHA, default: false } };
+  assert.deepEqual(selectProjects(mixed, null), { ok: true, names: ["app"] });
+  assert.deepEqual(selectProjects(mixed, ["extra"]), { ok: true, names: ["extra"] });
+  assert.deepEqual(selectProjects(mixed, ["app", "ghost"]), {
+    ok: false,
+    error: "--projects names ghost, which is not in the corpus",
+  });
+  assert.deepEqual(selectProjects(mixed, [" extra ", "app", "extra"]), {
+    ok: true,
+    names: ["extra", "app"],
+  });
+  assert.deepEqual(selectProjects(mixed, ["", " "]), {
+    ok: false,
+    error: "--projects needs at least one project name",
+  });
+  const errors = ledgerErrors({
+    schema_version: 1,
+    corpus: { ...corpus, extra: { repo: "owner/extra", commit: SHA, default: "no" } },
+    rows: [],
+  });
+  assert.deepEqual(errors, ["corpus extra: default must be true or false"]);
 });
 
 test("ledger validation catches bad counts and unknown projects", () => {

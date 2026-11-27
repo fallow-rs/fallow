@@ -27,6 +27,12 @@ was tuned on them. Do not tune a rule on a corpus project and then record its
 row from the same project. When a fix needs a project for tuning, record the
 row on the other projects, or add a new held-out project.
 
+A project with `"default": false` joins a sample only when `--projects` names
+it. Such a project holds the findings of rules that the default projects do
+not report, for example the rules of one framework. The rows of the other
+rules then stay comparable over time, because a new sample of such a rule
+takes the same default projects.
+
 ## Method
 
 1. Build fallow from the commit that you measure.
@@ -54,7 +60,8 @@ row on the other projects, or add a new held-out project.
    styling finding. For each rule and project, the script takes up to 30
    findings (`--sample-size`) in a seeded random order. The seed is the rule,
    the project and the commit, so the same binary gives the same sample.
-   `--rules a,b` keeps only some rules.
+   `--rules a,b` keeps only some rules. `--projects a,b` runs only the named
+   projects.
 
    For each rule, the script writes these files to `<work dir>/<rule>/`:
 
@@ -128,6 +135,11 @@ Judge the finding against the contract of the command that reported it. For
   reaches the code only at runtime does not import it, so the claim holds.
   Code that only an end-to-end test runner starts, such as the app of a
   Playwright `webServer`, is not runtime code, so a finding on it is noise.
+  A `fallow security` finding is a candidate for verification, not a
+  confirmed vulnerability. Its claim is the data flow or reach that the
+  explain text and the `evidence` of the finding state. The finding is
+  `real` when that flow or reach exists in the code, also when an attack
+  needs more steps.
 - `noise`: the claim is false, or the fix changes behavior. Give a
   `class` that names the cause, for example "framework convention export",
   "dynamic import by string", or "used by a script outside the source tree".
@@ -147,7 +159,18 @@ These `health` outputs have no row:
   or false.
 
 `fallow dupes` clone groups and mirrored directories have rows, and so do the
-`health` coverage gaps, shallow directories and styling findings.
+`health` coverage gaps, shallow directories and styling findings. Each
+`fallow security` category has its own row, with `--command security`.
+
+These rules have no row, and the summary does not list them:
+
+- `boundary-violation`, `boundary-call-violation`, `boundary-coverage` and
+  `policy-violation` report only against the `boundaries` or `rulePacks`
+  config of the project. No corpus project has one. With a preset, a
+  reference app that follows the preset gives no finding.
+- a rule that reports no finding on the corpus projects. The framework
+  projects (`"default": false`) give findings for some framework rules, but
+  most framework rules report nothing on them.
 
 ## Freshness
 

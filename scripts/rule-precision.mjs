@@ -2,7 +2,7 @@
 /**
  * Measures and records the precision of fallow rules on a pinned public corpus.
  *
- *   sample   run fallow on each corpus project, write review sheets
+ *   sample   run fallow on the corpus projects, write review sheets
  *   record   merge the verdicts of a review into the ledger
  *   summary  write the summary from the ledger
  *   check    fail when the ledger is malformed or the summary is stale
@@ -32,6 +32,7 @@ import {
   renderSummary,
   reviewView,
   seededSample,
+  selectProjects,
   upsertRow,
 } from "./rule-precision/ledger.mjs";
 
@@ -246,7 +247,14 @@ const sample = (values) => {
   const wanted = values.rules ? new Set(values.rules.split(",")) : null;
   const version = fallowVersion(bin);
   const perRule = new Map();
-  for (const [name, project] of Object.entries(readJson(LEDGER).corpus)) {
+  const { corpus } = readJson(LEDGER);
+  const selected = selectProjects(
+    corpus,
+    values.projects === undefined ? null : values.projects.split(","),
+  );
+  if (!selected.ok) fail(selected.error);
+  for (const name of selected.names) {
+    const project = corpus[name];
     const dir = join(corpusDir, name);
     ensureCheckout(dir, project);
     console.error(`rule-precision: ${name}: fallow ${command}`);
@@ -309,6 +317,7 @@ const parseCli = () => {
         command: { type: "string", default: "dead-code" },
         args: { type: "string" },
         rules: { type: "string" },
+        projects: { type: "string" },
         "sample-size": { type: "string", default: String(DEFAULT_SAMPLE_SIZE) },
         in: { type: "string" },
         verdicts: { type: "string", multiple: true },
