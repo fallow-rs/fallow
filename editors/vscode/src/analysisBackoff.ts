@@ -8,7 +8,7 @@ interface BackoffEntry {
   readonly notified: boolean;
 }
 
-export interface AnalysisBackoffNotice {
+interface AnalysisBackoffNotice {
   readonly failures: number;
   readonly shouldNotify: boolean;
 }

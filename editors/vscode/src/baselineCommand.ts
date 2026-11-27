@@ -29,7 +29,7 @@ export interface BaselineCommandHost {
   readonly appendOutput: (line: string) => void;
 }
 
-export type BaselineCommandOutcome =
+type BaselineCommandOutcome =
   | "configured"
   | "already-configured"
   | "cancelled"

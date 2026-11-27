@@ -11,7 +11,7 @@ const PROJECT_COMPANION_SOURCE = "npm-wrapper";
 const COMPANION_PACKAGE = "fallow-type-aware";
 const COMPANION_FILE = "fallow-type-aware.mjs";
 
-export interface TypeAwareCommand {
+interface TypeAwareCommand {
   readonly binary: string;
   readonly script: string | null;
 }
@@ -104,7 +104,7 @@ const projectTypeAwareCompanion = (
   return existsSync(companion) ? companion : null;
 };
 
-export interface TypeAwareEnvironmentOptions {
+interface TypeAwareEnvironmentOptions {
   readonly bundled?: string | null;
   readonly env?: NodeJS.ProcessEnv;
   readonly platform?: NodeJS.Platform;

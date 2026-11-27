@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 
 /** Fallow settings that a sidebar welcome link can turn on. */
-export type FeatureToggleKey = "security.enabled" | "health.enabled";
+type FeatureToggleKey = "security.enabled" | "health.enabled";
 
 const FEATURE_LABELS: Readonly<Record<FeatureToggleKey, string>> = {
   "security.enabled": "security candidate scanning",

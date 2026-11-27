@@ -40,7 +40,7 @@ export const getLspPath = (): string => getConfig().get<string>("lspPath", "");
 export const getAllowRemoteExtends = (): boolean =>
   getConfig().get<boolean>("allowRemoteExtends", false);
 
-export type TypeAwareRequireSetting = "best-effort" | "complete";
+type TypeAwareRequireSetting = "best-effort" | "complete";
 
 export interface TypeAwareSettings {
   readonly enabled: boolean;

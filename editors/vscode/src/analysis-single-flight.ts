@@ -13,7 +13,7 @@
  *   schedules exactly one re-run after the current one settles. Multiple force
  *   calls in flight coalesce into a single re-run.
  */
-export interface SingleFlight {
+interface SingleFlight {
   /**
    * Run the task, coalescing with any in-flight run.
    *

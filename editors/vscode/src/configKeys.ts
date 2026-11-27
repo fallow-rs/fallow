@@ -54,7 +54,7 @@ export const HEALTH_CONFIG_KEYS = [
 
 export const DIAGNOSTIC_RENDER_CONFIG_KEYS = ["fallow.diagnostics.severity"] as const;
 
-export interface ConfigurationChangeLike {
+interface ConfigurationChangeLike {
   affectsConfiguration: (key: string) => boolean;
 }
 
