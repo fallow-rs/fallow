@@ -81,10 +81,24 @@ pub fn read_project_bytes(root: &Path, path: &Path) -> Option<Vec<u8>> {
 /// The entries of the project directory `dir`, or `None` when it is missing
 /// or resolves outside the read scope of `root`.
 pub fn read_project_dir(root: &Path, dir: &Path) -> Option<std::fs::ReadDir> {
+    #[cfg(test)]
+    GUARDED_DIR_READS.with(|reads| reads.set(reads.get() + 1));
     if !is_inside_root(&scope_base(root), dir) {
         return None;
     }
     std::fs::read_dir(dir).ok()
+}
+
+#[cfg(test)]
+std::thread_local! {
+    static GUARDED_DIR_READS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// The number of [`read_project_dir`] calls on this thread, for tests that
+/// check that a scan does not list a directory.
+#[cfg(test)]
+pub fn guarded_dir_reads_for_test() -> usize {
+    GUARDED_DIR_READS.with(std::cell::Cell::get)
 }
 
 /// True when `path` resolves inside the read scope of `root`.

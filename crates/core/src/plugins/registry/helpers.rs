@@ -655,6 +655,13 @@ fn discover_pattern_matches(root: &Path, pattern: &str) -> Vec<PathBuf> {
 }
 
 fn scan_dir_for_pattern(root: &Path, dir: &Path, file_pattern: &str) -> Vec<PathBuf> {
+    // The caller probes each pattern at every search root, and most roots do
+    // not have the directory. One stat rules it out. The scope check of
+    // `read_project_dir` resolves the full path of the root and of `dir`,
+    // which costs one system call per path component.
+    if !dir.is_dir() {
+        return Vec::new();
+    }
     let Ok(matcher) = globset::Glob::new(file_pattern).map(|g| g.compile_matcher()) else {
         return Vec::new();
     };
@@ -1136,6 +1143,28 @@ mod tests {
         );
         // A pattern present in no indexed directory yields nothing.
         assert!(match_pattern_in_index(root, "missing.json", &index).is_empty());
+    }
+
+    #[test]
+    fn glob_probe_skips_the_scope_check_for_a_missing_directory() {
+        let base = tempfile::tempdir().expect("create temp dir");
+        let root = base.path().join("project");
+        std::fs::create_dir_all(root.join("src")).expect("create project dirs");
+
+        let before = crate::discover::project_read::guarded_dir_reads_for_test();
+        assert!(discover_pattern_matches(&root.join("src"), ".config/*.ts").is_empty());
+        assert_eq!(
+            crate::discover::project_read::guarded_dir_reads_for_test(),
+            before,
+            "a probe of a missing directory listed the directory"
+        );
+
+        std::fs::create_dir_all(root.join("src/.config")).expect("create config dir");
+        std::fs::write(root.join("src/.config/tool.ts"), "").expect("write config");
+        assert_eq!(
+            discover_pattern_matches(&root.join("src"), ".config/*.ts"),
+            vec![root.join("src/.config/tool.ts")]
+        );
     }
 
     #[test]
