@@ -33,6 +33,7 @@ mod dry_phase;
 mod issues;
 pub mod modes;
 mod retry_set;
+mod split;
 pub mod targets;
 mod window;
 use adopt::{Proven, TestIndex};
@@ -352,6 +353,12 @@ struct Job {
     /// The dry-run time that the retry tests of a survivor add to `tests`.
     /// The time reserve of a budgeted first pass uses it (issue #3665).
     retry_extra_ms: u64,
+    /// `1.5 *` the dry-run time of `tests` and the setup time of their
+    /// files, rounded up. The split of a wide job compares it with the
+    /// queue (issue #5422).
+    estimate_ms: u64,
+    /// The split job that this job is a part of. `None` for a whole job.
+    part: Option<split::Part>,
 }
 
 impl Job {
@@ -387,6 +394,8 @@ impl Job {
     fn for_confirmation(mut self) -> Self {
         if let Some((tests, timeout_ms)) = self.confirmation.take() {
             self.first_tests = std::mem::replace(&mut self.tests, tests);
+            let extra = self.retry_extra_ms.saturating_mul(3).div_ceil(2);
+            self.estimate_ms = self.estimate_ms.saturating_add(extra);
             self.loop_budget_ms = loop_budget_ms(timeout_ms);
             self.timeout_ms = timeout_ms;
         }
@@ -1152,13 +1161,9 @@ fn build_jobs(
             .as_ref()
             .map_or(0, |(_, retry_total)| retry_extra_ms(*retry_total, total));
         let confirmation = confirmation.map(|(set, _)| set);
-        let setup_ms = scaled_ms(facts.setup_of(&tests));
-        let mut test_files: Vec<String> = tests
-            .iter()
-            .filter_map(|test| facts.passing.get(test).map(|(file, _)| file.clone()))
-            .collect();
-        test_files.sort_unstable();
-        test_files.dedup();
+        let setup = facts.setup_of(&tests);
+        let setup_ms = scaled_ms(setup);
+        let test_files = split::files_of(facts, &tests);
         let targets = job_targets(context, &tests);
         let cache_key = job_key(context, mutant, (&tests, &targets), &test_files);
         if record_stored(
@@ -1184,6 +1189,8 @@ fn build_jobs(
             confirmation,
             first_tests: Vec::new(),
             retry_extra_ms,
+            estimate_ms: scaled_ms(total + setup),
+            part: None,
         };
         if static_mutant {
             statics.push(job);
@@ -1217,6 +1224,8 @@ struct Phase<'a> {
     dry_run_timeout: Duration,
     memo: &'a ControlMemo,
     index: Option<&'a TestIndex>,
+    /// The dry-run facts that divide a wide job into parts.
+    facts: &'a DryRunFacts,
     /// Receives the count of finished jobs after each job.
     report: &'a (dyn Fn(usize) + Sync),
     /// Receives each finished job before the phase records it.
@@ -1249,8 +1258,20 @@ impl Phase<'_> {
     /// A job for another companion needs a new dry run, or the index entries
     /// of its files and a control run before a kill counts, so the worker
     /// leaves the last queued job of a share to its holder.
+    ///
+    /// The split of a wide job happens under the same lock, so no other
+    /// worker sees an empty queue and ends before the parts are queued.
     fn next_job(&self, slot: usize, worker: &Worker<'_>) -> Option<Job> {
         let mut jobs = self.jobs.lock().ok()?;
+        let job = self.pick(slot, worker, &mut jobs)?;
+        let job = self.spread(&mut jobs, job);
+        drop(jobs);
+        Some(job)
+    }
+
+    /// Removes the next job of the worker in `slot` from `jobs`, see
+    /// [`Self::next_job`].
+    fn pick(&self, slot: usize, worker: &Worker<'_>, jobs: &mut VecDeque<Job>) -> Option<Job> {
         let others: Vec<Vec<String>> = {
             let mut held = self.held.lock().ok()?;
             held[slot] = worker
@@ -1291,6 +1312,14 @@ impl Phase<'_> {
         }
     }
 
+    /// Stops the phase with its first fatal error.
+    fn fail(&self, error: ScheduleError) {
+        self.stop.store(true, Ordering::SeqCst);
+        if let Ok(mut fatal) = self.fatal.lock() {
+            fatal.get_or_insert(error);
+        }
+    }
+
     fn work(&self, slot: usize, primary: Option<WarmLink>) {
         let mut worker = Worker::new(
             self.spawner,
@@ -1314,6 +1343,13 @@ impl Phase<'_> {
             let Some(job) = self.next_job(slot, &worker) else {
                 break;
             };
+            if let Some(part) = job.part.clone() {
+                if let Err(error) = self.run_part(&mut worker, &job, &part) {
+                    self.fail(error);
+                    break;
+                }
+                continue;
+            }
             if self.deadline.as_ref().is_some_and(PhaseDeadline::passed) {
                 self.push(job, Attempt::decided(MutantStatus::Pending, None, None));
                 continue;
@@ -1323,10 +1359,7 @@ impl Phase<'_> {
             }) {
                 Ok(attempt) => self.push(job, attempt),
                 Err(error) => {
-                    self.stop.store(true, Ordering::SeqCst);
-                    if let Ok(mut fatal) = self.fatal.lock() {
-                        fatal.get_or_insert(error);
-                    }
+                    self.fail(error);
                     break;
                 }
             }
@@ -1357,16 +1390,21 @@ struct PhaseRunner<'a> {
 /// `primaries`, the companions that already did their dry run, and prefers
 /// the jobs whose test files its companion dry-ran. `event` makes the
 /// progress event of the phase from the finished and the total jobs.
-/// `finished` receives each finished job on its worker thread.
+/// `finished` receives each finished job on its worker thread. `facts`
+/// divide a wide job into parts.
 fn run_phase(
     runner: PhaseRunner<'_>,
     dry_files: &[String],
     jobs: Vec<Job>,
     deadline: Option<PhaseDeadline>,
-    (primaries, finished): (Vec<WarmLink>, Finished<'_>),
+    (primaries, finished, facts): (Vec<WarmLink>, Finished<'_>, &DryRunFacts),
     event: fn(usize, usize) -> MutationProgress,
 ) -> Result<(Vec<(Job, Attempt)>, usize), ScheduleError> {
-    let workers = runner.config.concurrency.max(1).min(jobs.len().max(1));
+    let workers = runner
+        .config
+        .concurrency
+        .max(1)
+        .min(split::capacity(&jobs, runner.index.is_some(), runner.caps).max(1));
     let total = jobs.len();
     let mut primaries = primaries;
     shutdown_all(primaries.split_off(workers.min(primaries.len())));
@@ -1394,6 +1432,7 @@ fn run_phase(
         ),
         memo: runner.memo,
         index: runner.index,
+        facts,
         report: &report,
         finished,
     };
@@ -1653,7 +1692,7 @@ fn run_first_pass(
         phase_files,
         jobs,
         PhaseDeadline::first_pass(config, start),
-        (links, &finished),
+        (links, &finished, facts),
         |done, total| MutationProgress::Mutants { done, total },
     )?;
     outcome.workers = workers;
@@ -1701,7 +1740,7 @@ fn retry_suspects(
         &retry_files,
         suspects,
         PhaseDeadline::retries(runner.config),
-        (Vec::new(), &finished),
+        (Vec::new(), &finished, facts),
         |done, total| MutationProgress::Retries { done, total },
     )?;
     note_control_failures(outcome, facts, runner.memo);

@@ -100,6 +100,15 @@ impl PhaseDeadline {
         reserve.note(retry, wall, job.retry_extra_ms, &job.test_files);
         Ok(attempt)
     }
+
+    /// Adds a job that ran outside [`Self::timed`] to the reserve: a split
+    /// job counts one time, with the wall time of all its parts.
+    pub(super) fn note(&self, job: &Job, attempt: &Attempt, wall: Duration) {
+        if let Some(reserve) = &self.reserve {
+            let retry = retry_of(reserve.target_full, job, attempt);
+            reserve.note(retry, wall, job.retry_extra_ms, &job.test_files);
+        }
+    }
 }
 
 /// Whether the time budget of `config` has ended.
