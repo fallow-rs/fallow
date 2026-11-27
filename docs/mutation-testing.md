@@ -1310,6 +1310,27 @@ mutant. Their results decide no mutant status.
   another worker holds. It takes a job of another share only when that share
   holds more than one queued job, and it takes that job from the end of the
   queue. With `--concurrency 1`, one companion dry-runs each file.
+- With the `adopt` capability, a mutant whose covering tests are in more
+  than one test file can run on more than one worker. When a worker takes a
+  job, the scheduler compares the estimated time of the job (1.5 times the
+  dry-run time of its tests plus the setup time of their files) with the
+  work of each worker if the job and the queue spread evenly. When the job
+  is longer, and it is at least 2 s, the scheduler divides it into parts of
+  whole test files with about equal time, one part for each share of work
+  and at most one for each worker. The other parts go to the front of the
+  queue. The parts give one result with the rules of one run: a kill in a
+  part decides `killed`, and `killed_by` is the killing test with the
+  smallest test id, so neither the part that ends first nor the measured
+  test durations change it. The mutant is `survived` only when each part
+  passes. A timeout, a runtime error or a pending part wins over a
+  survivor. A part whose smallest test id comes after a known killer does
+  not run. A kill-matrix run runs each part
+  and keeps each killing test. `duration_ms` is the wall time from the split
+  to the end of the last part. A static mutant splits only when the runner
+  loads fresh modules for each run. A `--kill-matrix-for` job does not
+  split. The survivor retry uses the same rule. The time reserve of a
+  budget counts the split mutant one time, and the result cache key does not
+  depend on the split. Each part keeps the timeout of the whole mutant.
 - A fault of any companion in the first dry run stops the run, the same as a
   fault of the first companion.
 - Companions that dry-run at the same time can fail on shared outside state,

@@ -2927,6 +2927,8 @@ fn load_kill_job() -> Job {
         confirmation: None,
         first_tests: Vec::new(),
         retry_extra_ms: 0,
+        estimate_ms: 0,
+        part: None,
     }
 }
 
@@ -3537,3 +3539,6 @@ mod shard_tests;
 
 #[path = "adopt_tests.rs"]
 mod adopt_tests;
+
+#[path = "split_tests.rs"]
+mod split_tests;
