@@ -243,7 +243,14 @@ fn a_taken_test_that_fails_in_the_control_run_leaves_the_companion() {
         .iter()
         .find(|failure| failure.test_id.as_ref() == Some(dropped[0]))
         .expect("the dropped test is a baseline failure");
-    assert_eq!(failure.mutant_ids, vec!["m3".to_owned()]);
+    // The companion that took the test can run `m1` before the control run
+    // drops the test, so `m1` can also be a mutant that ran without it.
+    assert!(
+        failure.mutant_ids.contains(&"m3".to_owned())
+            && failure.mutant_ids.iter().all(|id| id == "m1" || id == "m3"),
+        "{:?}",
+        failure.mutant_ids
+    );
     let message = failure.message.as_deref().unwrap_or_default();
     assert!(
         message.starts_with(super::super::control::ADOPTED_TEST_FAILURE),
