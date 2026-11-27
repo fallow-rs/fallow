@@ -417,3 +417,55 @@ fn remix_entry_server_exports_are_framework_used() {
         "a non-convention entry.server export stays reported, found: {unused:?}"
     );
 }
+
+/// React Router writes a `+types` directory beside each route module, so a
+/// nested route can import the types of a parent layout route with
+/// `../+types/layout`.
+#[test]
+fn react_router_parent_route_type_imports_are_not_unresolved() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path().canonicalize().expect("canonical temp dir");
+    let write = |relative: &str, content: &str| {
+        let path = root.join(relative);
+        std::fs::create_dir_all(path.parent().expect("file has a parent")).expect("parent dir");
+        std::fs::write(path, content).expect("write file");
+    };
+    write(
+        "package.json",
+        r#"{ "name": "parent-route-types", "devDependencies": { "@react-router/dev": "^7.0.0" } }"#,
+    );
+    write(
+        "app/routes.ts",
+        "export default [{ path: \"/settings\", file: \"settings/layout.tsx\" }];\n",
+    );
+    write(
+        "app/settings/layout.tsx",
+        "export default function Layout() { return null; }\n",
+    );
+    write(
+        "app/settings/[tab]/page.tsx",
+        r#"import type { Route } from "../+types/layout";
+import type { Missing } from "../+types-missing/layout";
+import { runtimeValue } from "../+types/runtime";
+export default function Page(props: Route.ComponentProps & Missing) {
+  return runtimeValue(props);
+}
+"#,
+    );
+
+    let config = create_config(root.clone());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let mut unresolved: Vec<String> = collect_unresolved_imports(&root, &results)
+        .into_iter()
+        .filter(|(path, _)| path == "app/settings/[tab]/page.tsx")
+        .map(|(_, spec)| spec)
+        .collect();
+    unresolved.sort();
+
+    assert_eq!(
+        unresolved,
+        vec!["../+types-missing/layout", "../+types/runtime"],
+        "only the type-only import of the generated parent route types is \
+         silenced; a runtime import and another directory stay reported"
+    );
+}

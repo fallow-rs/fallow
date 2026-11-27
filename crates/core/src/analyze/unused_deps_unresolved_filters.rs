@@ -38,6 +38,26 @@ fn is_plugin_virtual_spec(
             .any(|checked| checked.covers(&filters.config.root, from_file, spec))
 }
 
+/// Whether `spec` starts with a generated type prefix. A generator such as
+/// React Router typegen writes the `./+types/` directory beside each module,
+/// so `../+types/layout` names the generated types of a module in a parent
+/// directory and matches the `./+types/` prefix too.
+fn matches_generated_type_prefix(spec: &str, prefix: &str) -> bool {
+    if spec.starts_with(prefix) {
+        return true;
+    }
+    let Some(sibling) = prefix.strip_prefix("./") else {
+        return false;
+    };
+    let mut rest = spec;
+    let mut climbed = false;
+    while let Some(next) = rest.strip_prefix("../") {
+        rest = next;
+        climbed = true;
+    }
+    climbed && rest.starts_with(sibling)
+}
+
 /// Return `true` when an unresolvable specifier should be silenced (builtin,
 /// virtual, generated artifact, type-only generated prefix, or config-ignored).
 pub(super) fn unresolved_spec_is_silenced(
@@ -69,7 +89,7 @@ pub(super) fn unresolved_spec_is_silenced(
         && filters
             .generated_type_prefixes
             .iter()
-            .any(|prefix| spec.starts_with(prefix))
+            .any(|prefix| matches_generated_type_prefix(spec, prefix))
     {
         return true;
     }

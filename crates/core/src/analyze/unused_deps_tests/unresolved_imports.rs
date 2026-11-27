@@ -1576,3 +1576,53 @@ fn gitignore_rules_do_not_apply_without_a_git_repository() {
 
     assert_eq!(unresolved, vec!["../dist/out.js"]);
 }
+
+/// A generator writes `keys.generated.ts`, and the ignore rule names that
+/// file. The import leaves out the extension, as the resolver allows.
+#[test]
+fn extensionless_import_of_a_gitignored_generated_file_is_not_unresolved() {
+    let (_dir, root) = git_project();
+    write_file(&root.join(".gitignore"), "src/keys.generated.ts\n");
+
+    let unresolved = unresolved_specifiers(
+        &root,
+        "src/index.ts",
+        &["./keys.generated", "./keys.missing"],
+    );
+
+    assert_eq!(unresolved, vec!["./keys.missing"]);
+}
+
+/// An ignored directory index (`./generated` for `generated/index.ts`) and a
+/// `.js` specifier of an ignored `.ts` file name the same generated files.
+#[test]
+fn index_and_js_specifiers_of_gitignored_generated_files_are_not_unresolved() {
+    let (_dir, root) = git_project();
+    write_file(
+        &root.join(".gitignore"),
+        "src/client/index.ts\nsrc/*.gen.ts\n",
+    );
+
+    let unresolved = unresolved_specifiers(
+        &root,
+        "src/index.ts",
+        &["./client", "./api.gen.js", "./api.gen.css"],
+    );
+
+    assert_eq!(unresolved, vec!["./api.gen.css"]);
+}
+
+/// A rule that ignores every file with an extension, or every index file,
+/// does not name the file of one import. A typo stays reported.
+#[test]
+fn broad_extension_or_index_rules_do_not_hide_a_missing_import() {
+    let (_dir, root) = git_project();
+    write_file(
+        &root.join(".gitignore"),
+        "*.js\n*.d.ts\nindex.ts\nsrc/*.mjs\n",
+    );
+
+    let unresolved = unresolved_specifiers(&root, "src/index.ts", &["./typo-helper", "./nodir"]);
+
+    assert_eq!(unresolved, vec!["./typo-helper", "./nodir"]);
+}
