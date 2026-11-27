@@ -92,3 +92,49 @@ fn composite_action_step_credits_its_binary() {
         "`napi build` in a composite action must credit @napi-rs/cli: {unused:?}"
     );
 }
+
+#[test]
+fn github_action_path_in_composite_action_marks_scripts_as_used() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    std::fs::create_dir_all(root.join("lib")).unwrap();
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"action-test","private":true}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("action.yml"),
+        r#"name: a
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: node "${{ github.action_path }}/lib/expr.mjs"
+    - shell: bash
+      run: node "${GITHUB_ACTION_PATH}/lib/envvar.mjs"
+    - shell: bash
+      working-directory: packages/app
+      run: node "$GITHUB_ACTION_PATH/lib/from_subdir.mjs"
+"#,
+    )
+    .unwrap();
+    for file in ["expr.mjs", "envvar.mjs", "from_subdir.mjs", "orphan.mjs"] {
+        std::fs::write(root.join("lib").join(file), "console.log(1);\n").unwrap();
+    }
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let paths = unused_file_paths(&results);
+
+    for used in ["lib/expr.mjs", "lib/envvar.mjs", "lib/from_subdir.mjs"] {
+        assert!(
+            !paths.iter().any(|p| p.ends_with(used)),
+            "{used} is invoked via action path anchor and must not be unused: {paths:?}"
+        );
+    }
+    assert!(
+        paths.iter().any(|p| p.ends_with("lib/orphan.mjs")),
+        "lib/orphan.mjs is unreferenced and must remain unused: {paths:?}"
+    );
+}
