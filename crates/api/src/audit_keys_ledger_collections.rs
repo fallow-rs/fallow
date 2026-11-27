@@ -81,6 +81,7 @@ macro_rules! for_each_ledger_collection {
                 thin_wrappers,
                 duplicate_prop_shapes,
                 export_usages: _export_usages,
+                signature_backed_types: _signature_backed_types,
                 entry_point_summary: _entry_point_summary,
                 render_fan_in: _render_fan_in,
                 react_component_intel: _react_component_intel,

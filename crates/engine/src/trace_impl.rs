@@ -7,7 +7,6 @@ use fallow_types::trace::{
     ImportPathTraceSchemaVersion, PeerClosureSeeds, ReExportChain, SearchGapReason, ToolingCredit,
     TracedCloneGroup, TracedExport, TracedReExport,
 };
-use fallow_types::trace_chain::StarExportAmbiguity;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::trace_export_references::{crediting_export_references, implicit_default_references};
@@ -254,8 +253,12 @@ pub fn trace_export(
 ) -> Option<ExportTrace> {
     let module = find_module(graph, root, file_path)?;
 
-    let star_export_ambiguity =
-        trace_star_export_ambiguity(graph, root, module.file_id, export_name);
+    let star_export_ambiguity = super::trace_export_reason::trace_star_export_ambiguity(
+        graph,
+        root,
+        module.file_id,
+        export_name,
+    );
     let Some(surface) = select_export(graph, module, export_name) else {
         let ambiguity = star_export_ambiguity?;
         let namespace = ambiguity.namespaces.first().copied().unwrap_or_default();
@@ -272,6 +275,7 @@ pub fn trace_export(
             re_export_chains: Vec::new(),
             plugin_credits: Vec::new(),
             kept_by_tag: None,
+            kept_by_signature: None,
             reason: "Star re-export collision makes this name ambiguous".to_string(),
             semantic: None,
         });
@@ -321,6 +325,7 @@ pub fn trace_export(
         re_export_chains,
         plugin_credits: Vec::new(),
         kept_by_tag: kept_by_tag.map(str::to_owned),
+        kept_by_signature: None,
         reason,
         semantic: None,
     })
@@ -329,49 +334,6 @@ pub fn trace_export(
 /// The root-relative path of a module, or the path as it is outside `root`.
 pub(super) fn relative_module_path(path: &Path, root: &Path) -> PathBuf {
     path.strip_prefix(root).unwrap_or(path).to_path_buf()
-}
-
-fn trace_star_export_ambiguity(
-    graph: &ModuleGraph,
-    root: &Path,
-    file_id: crate::discover::FileId,
-    export_name: &str,
-) -> Option<StarExportAmbiguity> {
-    let collisions: Vec<_> = graph
-        .ambiguous_star_exports()
-        .into_iter()
-        .filter(|collision| {
-            collision.name.as_ref() == export_name
-                && (collision.barrel == file_id || collision.contributors.contains(&file_id))
-        })
-        .collect();
-    if collisions.is_empty() {
-        return None;
-    }
-    let mut sources: Vec<_> = collisions
-        .iter()
-        .flat_map(|collision| collision.contributors.iter())
-        .filter_map(|contributor| graph.module(*contributor))
-        .map(|module| relative_module_path(&module.path, root))
-        .collect();
-    sources.sort();
-    sources.dedup();
-    let mut namespaces: Vec<_> = collisions
-        .iter()
-        .map(|collision| match collision.namespace {
-            ExportNamespace::Type => fallow_types::semantic::SemanticNamespace::Type,
-            ExportNamespace::Value => fallow_types::semantic::SemanticNamespace::Value,
-        })
-        .collect();
-    namespaces.sort_unstable_by_key(|namespace| match namespace {
-        fallow_types::semantic::SemanticNamespace::Type => 0,
-        fallow_types::semantic::SemanticNamespace::Value => 1,
-    });
-    namespaces.dedup();
-    Some(StarExportAmbiguity {
-        sources,
-        namespaces,
-    })
 }
 
 /// Resolve the exact source identity required by the semantic sidecar for a
@@ -3305,6 +3267,7 @@ mod tests {
             }],
             plugin_credits: Vec::new(),
             kept_by_tag: None,
+            kept_by_signature: None,
             reason: "ok".to_string(),
             semantic: None,
         };

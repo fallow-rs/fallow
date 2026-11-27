@@ -109,7 +109,9 @@ fn signature_backing_types_preserve_path_identity_and_unbacked_findings() {
         finding("/project/a.ts", "Unbacked"),
     ];
 
-    suppress_signature_backing_types(&mut findings, &[], &graph, &[known, unknown]);
+    suppress_signature_backing_types(&mut findings, &[], &graph, &[known, unknown], &mut |_| {
+        Some(fallow_types::trace::SignatureBackingReason::PrivateTypeLeak)
+    });
 
     let retained: Vec<_> = findings
         .iter()
@@ -122,6 +124,37 @@ fn signature_backing_types_preserve_path_identity_and_unbacked_findings() {
             (std::path::Path::new("/project/a.ts"), "Unbacked"),
         ]
     );
+}
+
+#[test]
+fn signature_backing_types_stay_reported_without_a_keep_reason() {
+    use fallow_types::extract::{ModuleInfo, PublicSignatureTypeReference};
+
+    let graph = build_graph(&[("/project/a.ts", false)]);
+    let mut module = ModuleInfo::empty(FileId(0));
+    module.public_signature_type_references = vec![PublicSignatureTypeReference {
+        export_name: "publicFunction".to_owned(),
+        type_name: "Backed".to_owned(),
+        span: Span::new(0, 1),
+        from_satisfies: false,
+    }];
+    let mut findings = vec![UnusedExport {
+        path: PathBuf::from("/project/a.ts"),
+        export_name: "Backed".to_owned(),
+        is_type_only: true,
+        line: 1,
+        col: 0,
+        span_start: 0,
+        is_re_export: false,
+        deprecated: false,
+        deprecated_reason: None,
+    }];
+
+    let kept =
+        suppress_signature_backing_types(&mut findings, &[], &graph, &[module], &mut |_| None);
+
+    assert!(kept.is_empty());
+    assert_eq!(findings.len(), 1);
 }
 
 #[test]
@@ -173,7 +206,18 @@ fn signature_backing_types_need_a_live_backer() {
         finding("TreeNode", true),
     ];
 
-    suppress_signature_backing_types(&mut findings, &unused_values, &graph, &[module]);
+    let kept = suppress_signature_backing_types(
+        &mut findings,
+        &unused_values,
+        &graph,
+        &[module],
+        &mut |_| Some(fallow_types::trace::SignatureBackingReason::PrivateTypeLeak),
+    );
+    let entry_backers = kept
+        .iter()
+        .find(|kept| kept.export_name == "Entry")
+        .map(|kept| kept.backing.backers.clone());
+    assert_eq!(entry_backers, Some(vec!["usedReader".to_owned()]));
 
     let retained: Vec<_> = findings
         .iter()

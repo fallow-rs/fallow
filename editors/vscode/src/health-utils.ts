@@ -261,7 +261,7 @@ export const formatComplexityOffense = (finding: {
 };
 
 /** A single penalty contributor to the health score, for the score tooltip. */
-export interface PenaltyContribution {
+interface PenaltyContribution {
   readonly key: string;
   readonly points: number;
 }

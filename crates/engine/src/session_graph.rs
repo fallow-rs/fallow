@@ -107,3 +107,18 @@ pub fn resolve_or_build_dead_code_graph(
         core_backend::build_dead_code_graph(prelude, &mut resolved.project, entry_points, modules);
     (resolved, graph, rejection)
 }
+
+/// The content hash of each parsed file, by path.
+pub fn collect_file_hashes(
+    modules: &[ModuleInfo],
+    files: &[fallow_types::discover::DiscoveredFile],
+) -> rustc_hash::FxHashMap<std::path::PathBuf, u64> {
+    modules
+        .iter()
+        .filter_map(|module| {
+            files
+                .get(module.file_id.0 as usize)
+                .map(|file| (file.path.clone(), module.content_hash))
+        })
+        .collect()
+}

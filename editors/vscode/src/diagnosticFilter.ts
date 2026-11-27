@@ -8,7 +8,7 @@ import type {
 } from "vscode-languageclient/node";
 import type { DiagnosticSeveritySetting } from "./types.js";
 import { DIAGNOSTIC_CATEGORIES, type DiagnosticCategory } from "./generated/issue-types.js";
-export { DIAGNOSTIC_CATEGORIES, type DiagnosticCategory };
+export { DIAGNOSTIC_CATEGORIES };
 
 const STATE_KEY = "fallow.diagnosticFilter.v1";
 const FALLOW_SOURCE = "fallow";

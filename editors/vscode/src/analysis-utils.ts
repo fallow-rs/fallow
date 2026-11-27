@@ -270,7 +270,7 @@ export const stripArgument = (args: ReadonlyArray<string>, flag: string): string
   return result;
 };
 
-export type DegradationPlan =
+type DegradationPlan =
   | { readonly kind: "rethrow" }
   | { readonly kind: "retry"; readonly args: string[]; readonly dropped: string };
 
@@ -490,7 +490,7 @@ export const ENFORCED_ONLY_FINDING_KEYS = [
   "duplicate_prop_shapes",
 ] as const satisfies ReadonlyArray<CheckFindingKey>;
 
-export type EnforcedOnlyFindingKey = (typeof ENFORCED_ONLY_FINDING_KEYS)[number];
+type EnforcedOnlyFindingKey = (typeof ENFORCED_ONLY_FINDING_KEYS)[number];
 
 /** The findings of `key` at `error` severity. */
 export const countEnforcedFindings = (
@@ -538,7 +538,7 @@ export const countDuplicationGroups = (result: FallowDupesResult | null): number
   return result.stats.clone_groups;
 };
 
-export interface CleanAnalysisSummary {
+interface CleanAnalysisSummary {
   readonly notification: string;
   readonly outputLines: readonly string[];
 }

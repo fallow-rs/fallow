@@ -606,6 +606,7 @@ mod severity_gate {
             // usages drive Code Lens; entry points are informational.
             feature_flags: _,
             export_usages: _,
+            signature_backed_types: _,
             entry_point_summary: _,
             // Whole-project descriptive render fan-in metric (component-graph
             // analogue of module fan-in); surfaced via health vital signs, not a

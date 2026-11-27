@@ -68,6 +68,7 @@ mod unused_load_data_key;
 mod unused_overrides;
 mod unused_server_action;
 mod unused_svelte_event;
+mod unused_type_findings;
 
 mod member_detectors;
 use member_detectors::run_member_detectors;
@@ -105,7 +106,7 @@ use fallow_types::output_dead_code::{
     UnusedEffectLayerFinding, UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding,
     UnusedLoadDataKeyFinding, UnusedNamespaceMemberFinding, UnusedOptionalDependencyFinding,
     UnusedProtectedClassMemberFinding, UnusedStoreMemberFinding, UnusedSvelteEventFinding,
-    UnusedTaggedErrorFinding, UnusedTypeFinding,
+    UnusedTaggedErrorFinding,
 };
 
 use crate::results::{
@@ -146,10 +147,7 @@ use unused_deps::{
     find_type_only_dependencies, find_unlisted_dependencies, find_unresolved_imports,
     find_unused_dependencies,
 };
-use unused_exports::{
-    collect_export_usages, find_private_type_leaks, find_unused_exports,
-    suppress_signature_backing_types,
-};
+use unused_exports::{collect_export_usages, find_private_type_leaks, find_unused_exports};
 use unused_files::find_unused_file_scan;
 use unused_load_data_key::find_unused_load_data_keys;
 use unused_overrides::{
@@ -158,6 +156,7 @@ use unused_overrides::{
 };
 use unused_server_action::reclassify_unused_server_actions;
 use unused_svelte_event::find_unused_svelte_events;
+use unused_type_findings::populate_unused_type_findings;
 mod effect_findings;
 use effect_findings::populate_effect_findings;
 
@@ -1621,6 +1620,7 @@ impl ParallelDeadCodeDetectorResults {
             private_type_leaks: self.export_results.private_type_leaks,
             deprecated_exports_in_use: self.export_results.deprecated_exports_in_use,
             stale_suppressions: self.export_results.stale_suppressions,
+            signature_backed_types: self.export_results.signature_backed_types,
             unused_enum_members: self.member_results.unused_enum_members,
             unused_class_members: self.member_results.unused_class_members,
             unused_store_members: self.member_results.unused_store_members,
@@ -2049,25 +2049,6 @@ fn populate_unused_export_findings(
     results.unused_exports = exports
         .into_iter()
         .map(UnusedExportFinding::with_actions)
-        .collect();
-}
-
-fn populate_unused_type_findings(
-    results: &mut AnalysisResults,
-    config: &ResolvedConfig,
-    graph: &ModuleGraph,
-    modules: &[ModuleInfo],
-    types: Vec<UnusedExport>,
-    unused_values: &[UnusedExport],
-) {
-    if config.rules.unused_types == Severity::Off {
-        return;
-    }
-    let mut typed = types;
-    suppress_signature_backing_types(&mut typed, unused_values, graph, modules);
-    results.unused_types = typed
-        .into_iter()
-        .map(UnusedTypeFinding::with_actions)
         .collect();
 }
 

@@ -137,8 +137,11 @@ fn then_callback_credits_accessed_exports() {
         .iter()
         .map(|t| t.export.export_name.as_str())
         .collect();
+    // Only the signature of `startInspector` uses `InspectorOptions`, no file
+    // imports it, and the fixture emits no declarations, so its export is
+    // unused (issue #5280).
     assert!(
-        !unused_type_names.contains(&"InspectorOptions"),
-        "InspectorOptions is used by startInspector, unused types: {unused_type_names:?}"
+        unused_type_names.contains(&"InspectorOptions"),
+        "InspectorOptions needs no export, unused types: {unused_type_names:?}"
     );
 }

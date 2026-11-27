@@ -82,6 +82,7 @@ pub(super) fn handle_type_aware_trace_output(
             fallow_engine::trace::trace_export(graph, &config.root, file_path, export_name)
         {
             trace.apply_plugin_credits(trace_provenance);
+            trace.apply_signature_backing(trace_provenance);
             let Some(symbol) = fallow_engine::trace::semantic_symbol_for_export(
                 graph,
                 &config.root,
@@ -246,6 +247,7 @@ fn handle_trace_export(
     if let Some(mut trace) = fallow_engine::trace::trace_export(graph, root, file_path, export_name)
     {
         trace.apply_plugin_credits(trace_provenance);
+        trace.apply_signature_backing(trace_provenance);
         report::print_export_trace(&trace, output, json_style);
         return Some(ExitCode::SUCCESS);
     }

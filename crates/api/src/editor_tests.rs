@@ -869,6 +869,7 @@ pub fn merge_test_source_with_all_fields() -> EditorAnalysisResults {
             reference_count: 3,
             reference_locations: vec![],
         }],
+        signature_backed_types: Vec::new(),
         private_type_leaks: vec![super::editor_results::PrivateTypeLeakFinding::with_actions(
             super::editor_results::PrivateTypeLeak {
                 path: "/f.ts".into(),

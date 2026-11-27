@@ -592,6 +592,10 @@ impl<'a> AnalysisSession<'a> {
             retain_modules,
         );
         output.trace_provenance = trace_provenance;
+        output.trace_provenance.push_signature_backed_types(
+            &self.config.root,
+            std::mem::take(&mut output.results.signature_backed_types),
+        );
         Ok(output)
     }
 }
@@ -1228,7 +1232,7 @@ fn assemble_full_output(
     retain: bool,
     retain_modules: bool,
 ) -> AnalysisOutput {
-    let file_hashes = collect_file_hashes(&core.modules, files);
+    let file_hashes = parse_cache::collect_file_hashes(&core.modules, files);
     AnalysisOutput {
         results: core.result,
         timings: retained_pipeline_timings(retain, profile),
@@ -1642,20 +1646,6 @@ fn build_analysis_graph(input: &mut BuildAnalysisGraphInput<'_>) -> graph::Modul
     }
 
     graph
-}
-
-fn collect_file_hashes(
-    modules: &[extract::ModuleInfo],
-    files: &[discover::DiscoveredFile],
-) -> rustc_hash::FxHashMap<std::path::PathBuf, u64> {
-    modules
-        .iter()
-        .filter_map(|module| {
-            files
-                .get(module.file_id.0 as usize)
-                .map(|file| (file.path.clone(), module.content_hash))
-        })
-        .collect()
 }
 
 fn trace_pipeline_profile(profile: &PipelineProfile) {

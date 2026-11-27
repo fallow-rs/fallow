@@ -219,6 +219,7 @@ mod sfc_callee_line_tests;
 mod shallow_directory_tests;
 mod sidecar_discovery_spawn_tests;
 mod signal_tests;
+mod signature_backing_trace_tests;
 mod snapshot_tests;
 mod stable_ci_fingerprint_tests;
 mod stdout_pipe_tests;

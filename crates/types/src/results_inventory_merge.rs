@@ -15,6 +15,8 @@ impl AnalysisResults {
         self.security_unresolved_callee_diagnostics
             .extend(parts.security_unresolved_callee_diagnostics);
         self.export_usages.extend(parts.export_usages);
+        self.signature_backed_types
+            .extend(parts.signature_backed_types);
         self.active_suppressions.extend(parts.active_suppressions);
         self.suppression_count += parts.suppression_count;
         self.cascade_hidden += parts.cascade_hidden;

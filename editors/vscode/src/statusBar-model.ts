@@ -18,7 +18,7 @@ import type { AuditOutput } from "./types.js";
 import { WORKSPACE_SCOPE_DISCLOSURE } from "./workspacePicker-utils.js";
 
 /** State of the dead-code and duplication analysis. */
-export type AnalysisStatus =
+type AnalysisStatus =
   | { readonly kind: "idle" }
   | { readonly kind: "analyzing" }
   | { readonly kind: "error" }
@@ -41,7 +41,7 @@ export type LicenseIndicator =
   | { readonly kind: "status"; readonly status: LicenseStatusJson };
 
 /** Health score of the last health run, for example grade `C` and label `C (72)`. */
-export interface HealthSummary {
+interface HealthSummary {
   readonly grade: string;
   readonly label: string;
 }
@@ -82,13 +82,10 @@ export interface StatusModel {
 }
 
 /** Theme color key for the item background, or null for no background. */
-export type StatusBackground =
-  | "statusBarItem.errorBackground"
-  | "statusBarItem.warningBackground"
-  | null;
+type StatusBackground = "statusBarItem.errorBackground" | "statusBarItem.warningBackground" | null;
 
 /** The rendered item. */
-export interface StatusPresentation {
+interface StatusPresentation {
   readonly text: string;
   /** Trusted markdown with codicons. */
   readonly tooltipMarkdown: string;

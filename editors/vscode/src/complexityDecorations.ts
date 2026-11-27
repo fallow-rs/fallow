@@ -254,7 +254,7 @@ export const hoverForLine = (
  * dim `+N kind` token. The controller anchors it at the END of the line (so the
  * text never shifts the code) once it has the document to read line lengths.
  */
-export interface ComplexityDecorationSpec {
+interface ComplexityDecorationSpec {
   /** 0-based line the decoration attaches to. */
   readonly line: number;
   /** Dim end-of-line token (`+N kind`). */

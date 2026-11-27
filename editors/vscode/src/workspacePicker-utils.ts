@@ -13,7 +13,7 @@ import type { WorkspaceInfo, WorkspacesOutput } from "./types.js";
 export const CLEAR_WORKSPACE_SCOPE = "";
 
 /** A real package and a generated/platform package, split for display. */
-export interface PartitionedWorkspaces {
+interface PartitionedWorkspaces {
   readonly real: ReadonlyArray<WorkspaceInfo>;
   readonly internal: ReadonlyArray<WorkspaceInfo>;
 }
@@ -117,7 +117,7 @@ export const shouldShowWorkspacePicker = (output: WorkspacesOutput | null): bool
 };
 
 /** Kinds of entries the picker renders, so the UI layer needs no `vscode` enum here. */
-export type WorkspaceQuickPickItemKind = "clear" | "package" | "separator" | "refresh";
+type WorkspaceQuickPickItemKind = "clear" | "package" | "separator" | "refresh";
 
 /**
  * A vscode-agnostic description of one QuickPick row. The picker maps these to

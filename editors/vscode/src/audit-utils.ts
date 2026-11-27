@@ -110,9 +110,9 @@ export const buildAuditArgs = (options: AuditArgsOptions): BuiltCliArgs => {
  * severity theme colors so the surface respects the user's theme rather than
  * hard-coding any color.
  */
-export type AuditSeverityKey = "statusBarItem.errorBackground" | "statusBarItem.warningBackground";
+type AuditSeverityKey = "statusBarItem.errorBackground" | "statusBarItem.warningBackground";
 
-export interface AuditVerdictPresentation {
+interface AuditVerdictPresentation {
   readonly icon: string;
   readonly label: AuditVerdict;
   readonly background: AuditSeverityKey | null;

@@ -15,13 +15,11 @@ import type {
   IssueTypeConfig,
 } from "./types.js";
 
-export type { PackageBaselineStatus } from "./generated/output-contract.js";
-
 /** Whether the LSP server applied or dropped a requested changed-since scope. */
-export type ChangedSinceScopeState = "applied" | "dropped";
+type ChangedSinceScopeState = "applied" | "dropped";
 
 /** Structured changed-since status reported by the LSP server. */
-export interface ChangedSinceScopeStatus {
+interface ChangedSinceScopeStatus {
   readonly requestedRef: string;
   readonly state: ChangedSinceScopeState;
   readonly reason?: string;

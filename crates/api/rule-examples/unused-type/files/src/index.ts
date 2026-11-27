@@ -1,3 +1,4 @@
-import { renderButton } from "./button";
+import { renderButton, type ButtonProps } from "./button";
 
-console.log(renderButton({ label: "Pay" }));
+const props: ButtonProps = { label: "Pay" };
+console.log(renderButton(props));

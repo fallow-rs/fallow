@@ -1,4 +1,4 @@
-export interface CommonScopeArgs {
+interface CommonScopeArgs {
   readonly changedSince: string;
   readonly workspace?: string;
   readonly configPath: string;

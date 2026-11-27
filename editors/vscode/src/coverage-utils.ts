@@ -18,7 +18,7 @@ export const formatConfidence = (confidence: RuntimeCoverageConfidence): string 
 export const COVERAGE_ANALYZE_MIN_VERSION = "2.57.0";
 
 /** Options for building the `coverage analyze` argument vector. */
-export interface CoverageArgsOptions {
+interface CoverageArgsOptions {
   /** Absolute path to a local runtime-coverage capture (file or directory). */
   readonly capturePath: string;
   /**
@@ -67,7 +67,7 @@ export const buildCoverageArgs = (options: CoverageArgsOptions): string[] => {
 };
 
 /** Cleanup candidates partitioned by verdict. */
-export interface CleanupCandidates {
+interface CleanupCandidates {
   readonly safeToDelete: readonly RuntimeCoverageFinding[];
   readonly reviewRequired: readonly RuntimeCoverageFinding[];
 }

@@ -526,6 +526,12 @@ pub struct AnalysisResults {
     /// Skipped during serialization: this is internal LSP data, not part of the JSON output schema.
     #[serde(skip)]
     pub export_usages: Vec<ExportUsage>,
+    /// The type exports that `unused-type` keeps because a same-file
+    /// signature uses them. Internal: the trace reads it to give the same
+    /// reason as the report. Skipped in machine output.
+    #[serde(skip)]
+    #[cfg_attr(feature = "schema", schemars(skip))]
+    pub signature_backed_types: Vec<crate::trace::SignatureBackedType>,
     /// Summary of detected entry points, grouped by discovery source.
     /// Not included in issue counts -- this is informational metadata.
     /// Skipped during serialization: rendered separately in JSON output.
@@ -713,6 +719,7 @@ struct AnalysisResultsMetadataMergeParts {
     security_unresolved_callee_sites: usize,
     security_unresolved_callee_diagnostics: Vec<SecurityUnresolvedCalleeDiagnostic>,
     export_usages: Vec<ExportUsage>,
+    signature_backed_types: Vec<crate::trace::SignatureBackedType>,
     entry_point_summary: Option<EntryPointSummary>,
     render_fan_in: Option<RenderFanInMetric>,
     react_component_intel: Vec<ReactComponentIntel>,

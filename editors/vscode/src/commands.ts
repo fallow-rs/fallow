@@ -433,7 +433,7 @@ const execInspectWithManagedFallback = async (
   }
 };
 
-export interface RunAnalysisOptions {
+interface RunAnalysisOptions {
   readonly force?: boolean;
   readonly backoff?: AnalysisFailureBackoff;
   /**
@@ -444,7 +444,7 @@ export interface RunAnalysisOptions {
   readonly silent?: boolean;
 }
 
-export interface InspectArgsOptions {
+interface InspectArgsOptions {
   readonly filePath: string;
   readonly symbol?: string;
   readonly production: boolean | undefined;
@@ -1350,7 +1350,7 @@ export const runHealthAnalysis = async (
  * - `{ ok: false, retryable: true }`: transient failure; the latch should reset
  *   so a later reveal retries.
  */
-export type SecurityScanResult =
+type SecurityScanResult =
   | { readonly ok: true; readonly data: SecurityOutput | null }
   | { readonly ok: false; readonly retryable: boolean };
 

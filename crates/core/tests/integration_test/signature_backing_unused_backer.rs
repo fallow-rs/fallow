@@ -1,6 +1,7 @@
 //! An exported type that backs the signature of another export stays hidden
 //! only while at least one backing export is live. When every backing export is
-//! itself unused, the type is unused too and must be reported.
+//! itself unused, the type is unused too and must be reported. The fixture
+//! emits declarations, which is a reason to keep a backing type.
 
 use super::common::{create_config, fixture_path};
 
