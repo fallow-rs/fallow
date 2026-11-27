@@ -2689,6 +2689,49 @@ fn a_timeout_of_the_self_check_is_reported_as_a_timeout_not_as_a_broken_run_path
 }
 
 #[test]
+fn a_self_check_timeout_suggests_a_longer_value_than_the_setup_timeout() {
+    for (setup, example) in [(3, "5m"), (300, "10m"), (900, "30m")] {
+        let spawner = FakeSpawner::new(script(
+            |_| standard_dry(),
+            |_, run| Ok(run_result(run, RunStatus::Killed, Some(&run.test_ids[0]))),
+        ))
+        .with_control(|_, _| Err(LinkFault::Timeout));
+        let mut config = config(1);
+        config.runner_timeout = Duration::from_secs(setup);
+        let error = run_schedule(&spawner, &plan(&["m1"]), &config).unwrap_err();
+        let ScheduleError::RunPath { help, .. } = &error else {
+            panic!("expected a run-path error, got {error:?}");
+        };
+        assert!(
+            help.contains(&format!("for example {example}")),
+            "{setup}s: {help}"
+        );
+    }
+}
+
+#[test]
+fn a_self_check_timeout_suggests_a_longer_value_than_the_job_timeout() {
+    // t1 takes 400 s, so the job timeout of m1 is 605 s: longer than the
+    // 60 s setup timeout. Only a value above 605 s changes the control run.
+    let spawner = FakeSpawner::new(script(
+        |_| {
+            let mut dry = standard_dry();
+            dry.tests[0] = test("t1", 400_000.0, TestStatus::Pass);
+            dry
+        },
+        |_, run| Ok(run_result(run, RunStatus::Killed, Some(&run.test_ids[0]))),
+    ))
+    .with_control(|_, _| Err(LinkFault::Timeout));
+    let mut config = config(1);
+    config.runner_timeout = Duration::from_secs(60);
+    let error = run_schedule(&spawner, &plan(&["m1"]), &config).unwrap_err();
+    let ScheduleError::RunPath { help, .. } = &error else {
+        panic!("expected a run-path error, got {error:?}");
+    };
+    assert!(help.contains("for example 21m"), "{help}");
+}
+
+#[test]
 fn a_control_run_waits_at_least_the_setup_timeout() {
     let spawner = FakeSpawner::new(script(
         |_| standard_dry(),
