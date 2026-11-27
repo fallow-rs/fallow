@@ -2,7 +2,11 @@
 
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
-use super::super::protocol::RunWorkerMode;
+use fallow_output::MutantStatus;
+
+use super::super::protocol::{RunResult, RunWorkerMode};
+use super::Job;
+use super::classification::classify;
 
 /// The mutant runs of one worker mode and the sum of their run times.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -56,6 +60,18 @@ impl WorkerModeTally {
         tally
             .duration_ms
             .fetch_add(whole_ms(duration_ms), Ordering::Relaxed);
+    }
+
+    /// Counts the worker mode of a mutant run, also when the scheduler then
+    /// rejects its result, and classifies the result.
+    pub(super) fn classified(
+        &self,
+        job: &Job,
+        tests: &[String],
+        result: &RunResult,
+    ) -> Result<(MutantStatus, Option<String>), String> {
+        self.record(result.worker_mode, result.duration_ms);
+        classify(job, tests, result)
     }
 
     /// The use of each mode, or `None` when no mutant run stated a mode.

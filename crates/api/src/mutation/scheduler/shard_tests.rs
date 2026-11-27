@@ -323,3 +323,28 @@ fn a_runner_without_a_worker_mode_gives_no_counts() {
     let outcome = run_schedule(&spawner, &shard_plan(&["m1"]), &config(1)).expect("run");
     assert_eq!(outcome.worker_modes, None);
 }
+
+#[test]
+fn a_run_result_that_the_scheduler_rejects_still_counts_its_worker_mode() {
+    let plain = shard_spawner(None);
+    let spawner = FakeSpawner::new(move |index, request| match request {
+        Request::Run(run) => {
+            let Response::Run(mut result) = run_result(run, RunStatus::RuntimeError, None) else {
+                unreachable!("run_result gives a run response");
+            };
+            result.worker_mode = Some(RunWorkerMode::Shared);
+            Ok(Response::Run(result))
+        }
+        other => (plain.script)(index, other),
+    });
+    let outcome = run_schedule(&spawner, &shard_plan(&["m1"]), &config(1)).expect("run");
+
+    let mutant_runs = spawner
+        .runs()
+        .iter()
+        .filter(|(_, run)| run.mutant_id.is_some())
+        .count();
+    assert!(mutant_runs > 0);
+    let counts = outcome.worker_modes.expect("the runs stated a mode");
+    assert_eq!(counts.shared.runs, mutant_runs);
+}

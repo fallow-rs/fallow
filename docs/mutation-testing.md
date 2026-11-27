@@ -1872,12 +1872,17 @@ of mutant runs) and `duration_ms` (the sum of their run times).
 - `reused`: the test files of the run shared the kept worker process of the
   companion (see [Vitest reused workers](#vitest-reused-workers)).
 
-Each `run` request with a mutant counts one time: the first run, the retry
-of a survivor, and the run again of a new killer or a load kill. A run with no
-mutant (a control run) does not count. The companion can repeat a shared run
-inside one request, for example in isolated workers after a kill in a later
-test file. That request counts one time, in the mode of the run that gave its
-result.
+Each `run` request with a mutant that gives a `run_result` counts one time,
+also when the scheduler rejects the result. A mutant can send more than one
+request: the retry of a survivor, the run again after a check of the taken
+tests, and the second request of the target mode. A run with no mutant (a
+control run) does not count. A request that the watchdog stops gives no
+`run_result` and does not count.
+
+The companion can repeat a shared run inside one request, for example in
+isolated workers after a kill in a later test file. That request counts one
+time, in the mode of the run that gave its result. Its `duration_ms` includes
+the repeat.
 
 The object is absent when no mutant run stated a mode: the runner is
 `node:test` or `bun test`, the result cache or the journal gave each result,

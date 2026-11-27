@@ -36,7 +36,7 @@ mod retry_set;
 pub mod targets;
 mod window;
 use adopt::{Proven, TestIndex};
-use classification::{attempt_record, classify, is_load_kill, kill_kind, matrix_evidence};
+use classification::{attempt_record, is_load_kill, kill_kind, matrix_evidence};
 use dry_facts::{DryRunFacts, covering_tests, read_dry_run, record_dry_run, reported_duplicates};
 use dry_phase::{DryPhase, WarmLink, checked_jobs, holds, shutdown_all, timed_dry_phase};
 use issues::{no_covering_test_message, static_map_miss_issue, undiscovered_issue};
@@ -614,11 +614,8 @@ impl<'a> Worker<'a> {
         };
         let mut load_kill = false;
         let mut attempt = match link.request(&request, watchdog) {
-            Ok(Response::Run(result)) => match classify(job, &tests, &result) {
+            Ok(Response::Run(result)) => match self.memo.modes.classified(job, &tests, &result) {
                 Ok((status, killed_by)) => {
-                    self.memo
-                        .modes
-                        .record(result.worker_mode, result.duration_ms);
                     load_kill = is_load_kill(&result, status, killed_by.as_ref());
                     let kind = kill_kind(&result, status, killed_by.as_deref());
                     let decided = Attempt::decided(status, killed_by, round_ms(result.duration_ms));
