@@ -890,7 +890,7 @@ fn format_markdown_unused_load_data_key(
     rel: &dyn Fn(&Path) -> String,
 ) -> Vec<String> {
     vec![format!(
-        "- {}:{} {} is returned from load() but no consumer reads it",
+        "- {}:{} {} is returned from a route load() or loader but no consumer reads it",
         markdown_code_span(&rel(&k.key.path)),
         k.key.line,
         markdown_code_span(&k.key.key_name),

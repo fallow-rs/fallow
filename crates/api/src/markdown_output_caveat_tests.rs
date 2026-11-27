@@ -120,3 +120,20 @@ fn a_clean_run_renders_no_caveat() {
 
     assert!(!out.contains("caveat"), "{out}");
 }
+
+#[test]
+fn unused_load_data_key_line_names_load_and_loader() {
+    let finding = fallow_types::output_dead_code::UnusedLoadDataKeyFinding::with_actions(
+        fallow_types::results::UnusedLoadDataKey {
+            path: PathBuf::from("/project/app/routes/home.tsx"),
+            key_name: "draftCount".to_string(),
+            line: 7,
+            col: 4,
+            route_dir: None,
+        },
+    );
+    let rel = |path: &Path| path.display().to_string();
+    let lines = super::format_markdown_unused_load_data_key(&finding, &rel);
+    assert_eq!(lines.len(), 1);
+    assert!(lines[0].contains("load() or loader"), "{}", lines[0]);
+}
