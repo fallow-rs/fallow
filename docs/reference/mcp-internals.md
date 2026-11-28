@@ -666,14 +666,30 @@ a parameter, so a new tool gets the same behavior without a signature change.
   ends, the call counts as abandoned, in the same count that Code Mode reads
   before it starts in-process work. The `audit` base worktree is removed on
   drop, so an early stop does not leave it behind.
-- Code Mode runs its snippet on a blocking thread, outside the task-local
-  scope. `code_execute` therefore reads the request token before
-  `spawn_blocking` and passes it to `execute_code_mode`. A cancel then acts at
-  each place where the deadline acts. The sandbox interrupt handler stops the
-  snippet. A new host call or batch element runs nothing. A subprocess host
-  call kills its process tree in the `run_fallow_sync` poll loop. An in-process
-  host call sets its cancellation flag and counts as abandoned, as on a
-  timeout.
+- Code Mode runs each snippet in a snippet process: the server binary,
+  started again with the internal `--code-mode-worker` flag
+  (`crates/mcp/src/tools/code_mode_worker.rs`). The JS engine calls its
+  interrupt handler between bytecode steps, not inside a native builtin, so
+  one builtin call (for example `reverse` on an array-like object with a
+  `length` of `2 ** 53 - 1`) can run for years. A thread cannot be stopped
+  from outside, but a process can. The server kills the snippet process tree
+  when `timeout_ms` plus a grace time of 2 seconds passes, or on a cancel, and
+  answers with `code mode execution timed out` or the cancel error. A killed
+  snippet has an empty `calls[]`. The snippet process also ends itself 4
+  seconds after `timeout_ms`, for the case that the server is gone.
+- The snippet process starts no process and runs no analysis. It sends each
+  host call and each `fallow.all` batch to the server as one line of JSON on
+  its stdout and reads the result on its stdin. The host calls therefore run
+  in the server process, with the warm parse store and the abandoned-call
+  count of the server. The server also keeps its own `max_host_calls` budget
+  and output cap for the snippet process.
+- The server waits for the snippet process on a blocking thread, outside the
+  task-local scope. `code_execute` therefore reads the request token before
+  `spawn_blocking` and passes it to `execute_code_mode_isolated`. A cancel
+  then acts at each place where the deadline acts. The server kills the
+  snippet process. A subprocess host call kills its process tree in the
+  `run_fallow_sync` poll loop. An in-process host call sets its cancellation
+  flag and counts as abandoned, as on a timeout.
 
 A cancelled call gets no response on the wire. rmcp removes the request from
 its pool when `notifications/cancelled` arrives, and drops the response that

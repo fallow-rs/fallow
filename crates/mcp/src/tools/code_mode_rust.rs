@@ -5,7 +5,7 @@ use std::path::Path;
 
 use serde_json::json;
 
-use super::error_envelope;
+use super::code_mode_envelope::error_envelope;
 
 /// Code Mode has no Rust route yet, so it fails closed on a Rust root instead
 /// of running the JavaScript analysis on a Cargo workspace.

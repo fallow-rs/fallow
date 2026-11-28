@@ -28,6 +28,7 @@ impl Client {
             tool_router: FallowMcp::tool_router(),
             confirm_timeout: crate::tools::CONFIRM_TIMEOUT,
             tasks: crate::tasks::TaskStore::new(),
+            code_mode_worker: None,
         };
         let (client, server_io) = tokio::io::duplex(64 * 1024);
         let (server_read, server_write) = tokio::io::split(server_io);

@@ -60,6 +60,7 @@ impl Fixture {
             tool_router: FallowMcp::tool_router(),
             confirm_timeout: crate::tools::CONFIRM_TIMEOUT,
             tasks: crate::tasks::TaskStore::new(),
+            code_mode_worker: None,
         };
         Self { dir, server }
     }

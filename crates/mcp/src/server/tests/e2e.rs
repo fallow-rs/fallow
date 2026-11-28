@@ -22,7 +22,7 @@ use crate::tools::{
 /// `<target>/<profile>/build/<pkg>/<hash>/out`. The `fallow` binary is in
 /// `<target>/<profile>` for both, so this follows `CARGO_TARGET_DIR` and
 /// `build.target-dir`.
-fn cargo_profile_dir() -> PathBuf {
+pub(super) fn cargo_profile_dir() -> PathBuf {
     let exe = std::env::current_exe().expect("test binary path");
     let dir = exe.parent().expect("test binary directory");
     dir.ancestors()

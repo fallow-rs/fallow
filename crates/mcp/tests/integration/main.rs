@@ -5,6 +5,7 @@
 //! file in `tests/`.
 
 mod cloud_runtime_context;
+mod code_mode_stop;
 mod consent_form;
 mod in_process_telemetry;
 mod inspect_target_cloud;

@@ -68,7 +68,11 @@ pub use cloud_runtime_context::build_get_cloud_runtime_context_args;
 pub use cloud_runtime_context::run_get_cloud_runtime_context;
 #[cfg(test)]
 pub use code_mode::code_mode_subprocess_aliases;
+#[cfg(test)]
 pub use code_mode::execute_code_mode;
+pub use code_mode::{
+    CODE_MODE_WORKER_FLAG, CodeModeWorker, execute_code_mode_isolated, run_code_mode_worker,
+};
 pub use decision_surface::run_decision_surface;
 pub use dupes::{build_find_dupes_args, run_find_dupes};
 pub use explain::{build_explain_args, run_explain};

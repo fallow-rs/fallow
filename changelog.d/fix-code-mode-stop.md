@@ -1,0 +1,3 @@
+### Fixed
+
+- **A `code_execute` snippet now always ends at its `timeout_ms`.** The MCP server runs each Code Mode snippet in a separate process and kills that process when `timeout_ms` plus 2 seconds passes, or when the client cancels the call. Before, a snippet inside one long native builtin call (for example `Array.prototype.reverse` on an array-like object with a very large `length`) did not see the deadline or the cancel. The call then got no answer, used a full CPU core, and kept `fallow-mcp` running after the client disconnected. Host calls still run in the server process, so the shared parse store and the existing limits do not change.
