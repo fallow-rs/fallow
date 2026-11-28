@@ -341,7 +341,7 @@ fn refusal_reason(refusal: CatalogEditRefusal) -> (&'static str, &'static str) {
         ),
         CatalogEditRefusal::UnsupportedStyle => (
             "unsupported_yaml_style",
-            "Skipped: fallow fix only edits block-style catalog keys in a catalog map with no anchor or merge key (`<<`); edit this catalog manually",
+            "Skipped: fallow fix only edits block-style catalog keys; edit this catalog manually",
         ),
         CatalogEditRefusal::MultiDocument => ("multi_document_yaml", MULTI_DOCUMENT_DESCRIPTION),
         CatalogEditRefusal::InvalidYaml | CatalogEditRefusal::DeltaMismatch => (

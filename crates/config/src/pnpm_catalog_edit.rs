@@ -232,9 +232,6 @@ fn resolve(
                 return Resolved::Refused(CatalogEditRefusal::NotFound);
             };
             match block_lines(found.location, lines.len()) {
-                Ok((key_idx, _)) if catalog_map_is_shared(lines, key_idx) => {
-                    Resolved::Refused(CatalogEditRefusal::UnsupportedStyle)
-                }
                 Ok((key_idx, end)) => Resolved::Entry {
                     catalog: index,
                     range: comment_block_start(lines, key_idx, comments).unwrap_or(key_idx)..end,
@@ -282,34 +279,6 @@ fn block_lines(
         return Err(CatalogEditRefusal::UnsupportedStyle);
     }
     Ok((line as usize - 1, end))
-}
-
-/// True when the catalog map of the entry at `key_idx` has an anchor on its
-/// header or a merge key (`<<`) in its body. With an anchor, another key can
-/// be an alias of the map. With a merge key, the map takes keys from another
-/// map, so the removal of a key line can expose the merged value of that
-/// key. A line edit then changes more than the one entry.
-fn catalog_map_is_shared(lines: &[&str], key_idx: usize) -> bool {
-    let Some(header_idx) = find_parent_header(lines, key_idx) else {
-        return true;
-    };
-    let header_has_anchor = split_header(lines[header_idx])
-        .is_none_or(|(_, colon_end)| lines[header_idx][colon_end..].trim_start().starts_with('&'));
-    if header_has_anchor {
-        return true;
-    }
-    let header_indent = leading_spaces(lines[header_idx]);
-    lines[header_idx + 1..]
-        .iter()
-        .take_while(|line| {
-            let content = line.trim();
-            content.is_empty() || content.starts_with('#') || leading_spaces(line) > header_indent
-        })
-        .any(|line| {
-            line.trim_start()
-                .strip_prefix("<<")
-                .is_some_and(|rest| rest.trim_start().starts_with(':'))
-        })
 }
 
 /// The `{}` rewrites of the headers of catalogs that the plan empties.
@@ -789,41 +758,33 @@ mod tests {
         }
     }
 
-    /// The planner refuses an entry of a catalog map with an anchor or a
-    /// merge key. With a merge key, the removal of `tar` from `app` would
-    /// give `app` the `tar` version of `base`.
+    /// The delta check refuses a removal that changes a merged map, and it
+    /// keeps a removal that changes only the removed entry. With a merge key,
+    /// the removal of `tar` from `app` would give `app` the `tar` version of
+    /// `base`, so that removal is refused.
     #[test]
-    fn entry_of_a_catalog_map_with_an_anchor_or_merge_key_is_refused() {
-        for (source, removal) in [
+    fn removal_from_a_catalog_map_with_an_anchor_or_merge_key_follows_the_delta_check() {
+        let shadowing =
+            "catalogs:\n  base: &base\n    tar: 6.0.0\n  app:\n    <<: *base\n    tar: 6.2.1\n";
+        assert_eq!(
+            plan_catalog_edits(shadowing, &[entry("app", "tar")], Never),
+            Err(CatalogEditRefusal::DeltaMismatch)
+        );
+        for (source, removal, expected) in [
             (
                 "catalog: &c\n  react: ^18\n  tar: 6.2.1\n",
                 entry("default", "tar"),
+                "catalog: &c\n  react: ^18\n",
             ),
             (
-                "catalogs:\n  pins: &pins # shared\n    tar: 6.2.1\n    zod: ^3\n",
-                entry("pins", "tar"),
-            ),
-            (
-                "catalogs:\n  base: &base\n    tar: 6.0.0\n  app:\n    <<: *base\n    tar: 6.2.1\n",
+                "catalogs:\n  base: &base\n    react: ^18\n  app:\n    <<: *base\n    react: ^18\n    tar: 6.2.1\n",
                 entry("app", "tar"),
-            ),
-            (
-                "catalogs:\n  base: &base\n    react: ^18\n  app:\n    tar: 6.2.1\n    << : *base\n",
-                entry("app", "tar"),
+                "catalogs:\n  base: &base\n    react: ^18\n  app:\n    <<: *base\n    react: ^18\n",
             ),
         ] {
-            assert_eq!(
-                refused(source, removal),
-                (CatalogEditRefusal::UnsupportedStyle, 0),
-                "{source:?}",
-            );
+            let plan = plan_catalog_edits(source, &[removal], Never).unwrap();
+            assert_eq!(apply(source, &plan), expected, "{source:?}");
         }
-        let plain = "catalogs:\n  base:\n    react: ^18\n  app:\n    tar: 6.2.1\n    zod: ^3\n";
-        let plan = plan_catalog_edits(plain, &[entry("app", "tar")], Never).unwrap();
-        assert_eq!(
-            apply(plain, &plan),
-            "catalogs:\n  base:\n    react: ^18\n  app:\n    zod: ^3\n"
-        );
     }
 
     #[test]
