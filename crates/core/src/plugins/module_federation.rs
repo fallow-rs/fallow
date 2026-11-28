@@ -28,6 +28,10 @@ use oxc_ast_visit::{Visit, walk};
 
 use super::{Plugin, PluginResult, ProvidedDependencyRule, config_parser};
 
+#[path = "module_federation_options.rs"]
+mod options;
+use options::{OptionsMemo, ResolvedOptions, read_options_object, resolve_options};
+
 const ENABLERS: &[&str] = &[
     "@module-federation/enhanced",
     "@module-federation/modern-js",
@@ -89,7 +93,7 @@ const EXPOSE_EXTENSIONS: &str = super::REQUEST_EXTENSIONS;
 const SCOPE_SUFFIX: &str = "**/*";
 
 /// What one Federation options object statically declares.
-#[derive(Debug, Default, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
 struct FederationConfig {
     /// Local module targets from `exposes`, as written in the config.
     pub exposed_targets: Vec<String>,
@@ -600,15 +604,16 @@ fn read_config_object_options(
     config_path: &Path,
     options: &mut ResolvedOptions,
 ) -> bool {
+    let mut memo = OptionsMemo::default();
     if config_parser::find_module_export_expression(program)
-        .is_some_and(|export| resolve_options(program, config_path, export, 0, options))
+        .is_some_and(|export| resolve_options(program, config_path, export, 0, options, &mut memo))
     {
         return true;
     }
     let Some(config_object) = config_parser::find_config_object(program) else {
         return false;
     };
-    read_options_object(program, config_path, config_object, 0, options);
+    read_options_object(program, config_path, config_object, 0, options, &mut memo);
     true
 }
 
@@ -624,6 +629,8 @@ struct FederationCallCollector<'a, 'p> {
     config: FederationConfig,
     unread: Vec<UnreadDeclaration>,
     declares_key: bool,
+    /// Shared by every plugin call of the program, see [`OptionsMemo`].
+    memo: OptionsMemo,
 }
 
 impl<'a, 'p> FederationCallCollector<'a, 'p> {
@@ -634,6 +641,7 @@ impl<'a, 'p> FederationCallCollector<'a, 'p> {
             config: FederationConfig::default(),
             unread: Vec::new(),
             declares_key: false,
+            memo: OptionsMemo::default(),
         }
     }
 
@@ -645,7 +653,14 @@ impl<'a, 'p> FederationCallCollector<'a, 'p> {
             return;
         };
         let mut options = ResolvedOptions::default();
-        if !resolve_options(self.program, self.config_path, argument, 0, &mut options) {
+        if !resolve_options(
+            self.program,
+            self.config_path,
+            argument,
+            0,
+            &mut options,
+            &mut self.memo,
+        ) {
             return;
         }
         self.merge(options, callee_name != AMBIGUOUS_CALLEE);
@@ -718,279 +733,6 @@ impl<'a, 'p> FederationCallCollector<'a, 'p> {
             }
         }
     }
-}
-
-/// How many steps of indirection the options resolver follows. A binding, a
-/// spread, an `Object.assign` argument and an import are one step each.
-const MAX_OPTIONS_DEPTH: usize = 4;
-
-/// What one Federation options value declares, read from every object literal
-/// the value resolves to.
-#[derive(Debug, Default)]
-struct ResolvedOptions {
-    config: FederationConfig,
-    unread: Vec<UnreadDeclaration>,
-    /// The Federation keys the readable part declares.
-    declared: Vec<FederationKey>,
-    /// Whether a spread or an `Object.assign` argument did not resolve, so the
-    /// value can declare more than what was read.
-    unreadable_spread: bool,
-    /// Whether a followed relative import or `require` target could not be
-    /// read.
-    unreadable_import: bool,
-    /// Whether the options pass through a call that is not a known identity
-    /// wrapper, so what was read is a lower bound.
-    unrecognized_call: bool,
-    /// The Federation keys that the argument of an unrecognized call declares.
-    unrecognized_keys: Vec<FederationKey>,
-}
-
-impl ResolvedOptions {
-    /// Take what a nested resolution read.
-    fn absorb(&mut self, other: Self) {
-        for target in other.config.exposed_targets {
-            push_unique(&mut self.config.exposed_targets, target);
-        }
-        for package in other.config.exposed_packages {
-            push_unique(&mut self.config.exposed_packages, package);
-        }
-        for alias in other.config.remote_aliases {
-            push_unique(&mut self.config.remote_aliases, alias);
-        }
-        for package in other.config.shared_packages {
-            push_unique(&mut self.config.shared_packages, package);
-        }
-        for declaration in other.unread {
-            push_unique(&mut self.unread, declaration);
-        }
-        for key in other.declared {
-            push_unique(&mut self.declared, key);
-        }
-        for key in other.unrecognized_keys {
-            push_unique(&mut self.unrecognized_keys, key);
-        }
-        self.unreadable_spread |= other.unreadable_spread;
-        self.unreadable_import |= other.unreadable_import;
-        self.unrecognized_call |= other.unrecognized_call;
-    }
-}
-
-/// Read every object literal that an options expression resolves to: an object
-/// literal, a top-level binding of the same file, a relative ESM import or
-/// `require`, a spread of one of these, `Object.assign(...)` over them, and the
-/// argument of a wrapper call.
-///
-/// Returns `false` when the expression itself does not resolve. A package
-/// `require` does not resolve. A relative import or `require` whose target
-/// cannot be read resolves, and is recorded as unreadable.
-fn resolve_options(
-    program: &Program<'_>,
-    path: &Path,
-    expr: &Expression<'_>,
-    depth: usize,
-    options: &mut ResolvedOptions,
-) -> bool {
-    if depth > MAX_OPTIONS_DEPTH {
-        return false;
-    }
-    match unwrap_expression(expr) {
-        Expression::ObjectExpression(object) => {
-            read_options_object(program, path, object, depth, options);
-            true
-        }
-        Expression::CallExpression(call) if config_parser::is_require_call(call) => {
-            resolve_required_options(path, call, depth, options)
-        }
-        Expression::CallExpression(call) if is_object_assign(&call.callee) => {
-            for argument in &call.arguments {
-                let resolved = argument.as_expression().is_some_and(|argument| {
-                    resolve_options(program, path, argument, depth + 1, options)
-                });
-                options.unreadable_spread |= !resolved;
-            }
-            true
-        }
-        Expression::CallExpression(call) => {
-            resolve_wrapped_options(program, path, unwrap_expression(expr), call, depth, options)
-        }
-        Expression::Identifier(identifier) => {
-            resolve_options_name(program, path, &identifier.name, depth, options)
-        }
-        _ => false,
-    }
-}
-
-/// Read the options a wrapper call receives.
-///
-/// A known identity wrapper passes its argument through unchanged. Any other
-/// call can add to or change what it returns, so the object literal passed to
-/// it is read as a lower bound and the call is recorded. A call with no
-/// readable argument does not resolve.
-fn resolve_wrapped_options(
-    program: &Program<'_>,
-    path: &Path,
-    expr: &Expression<'_>,
-    call: &CallExpression<'_>,
-    depth: usize,
-    options: &mut ResolvedOptions,
-) -> bool {
-    // Resolve the argument on its own, so the keys it declares are known.
-    let mut received = ResolvedOptions::default();
-    let resolved = call
-        .arguments
-        .first()
-        .and_then(Argument::as_expression)
-        .is_some_and(|argument| resolve_options(program, path, argument, depth + 1, &mut received))
-        || config_parser::extract_object_from_expression(expr).is_some_and(|object| {
-            read_options_object(program, path, object, depth + 1, &mut received);
-            true
-        });
-    if !resolved {
-        return false;
-    }
-    if !is_identity_wrapper(&call.callee) {
-        received.unrecognized_call = true;
-        received.unrecognized_keys.clone_from(&received.declared);
-    }
-    options.absorb(received);
-    true
-}
-
-/// Whether a callee is a known identity wrapper, called by name or as a
-/// member.
-fn is_identity_wrapper(callee: &Expression<'_>) -> bool {
-    let name = match unwrap_expression(callee) {
-        Expression::Identifier(identifier) => identifier.name.as_str(),
-        Expression::StaticMemberExpression(member) => member.property.name.as_str(),
-        _ => return false,
-    };
-    IDENTITY_WRAPPERS.contains(&name)
-}
-
-/// Read the declarations of one options object literal, and follow each spread
-/// in it.
-fn read_options_object(
-    program: &Program<'_>,
-    path: &Path,
-    object: &ObjectExpression<'_>,
-    depth: usize,
-    options: &mut ResolvedOptions,
-) {
-    for key in [
-        FederationKey::Exposes,
-        FederationKey::Remotes,
-        FederationKey::Shared,
-    ] {
-        if config_parser::property_expr(object, key.name()).is_some() {
-            push_unique(&mut options.declared, key);
-        }
-    }
-    read_exposes(object, &mut options.config, &mut options.unread);
-    read_remotes(object, &mut options.config, &mut options.unread);
-    read_shared(object, &mut options.config);
-    for property in &object.properties {
-        if let ObjectPropertyKind::SpreadProperty(spread) = property {
-            let resolved = resolve_options(program, path, &spread.argument, depth + 1, options);
-            options.unreadable_spread |= !resolved;
-        }
-    }
-}
-
-/// Resolve a name to its options: a stable top-level binding of the same file
-/// first, then a relative ESM import.
-fn resolve_options_name(
-    program: &Program<'_>,
-    path: &Path,
-    name: &str,
-    depth: usize,
-    options: &mut ResolvedOptions,
-) -> bool {
-    if let Some(init) = config_parser::find_stable_binding_init(program, name, false) {
-        return resolve_options_init(program, path, init, depth + 1, options);
-    }
-    let Some((specifier, imported_name)) =
-        config_parser::find_relative_import_binding(program, name)
-    else {
-        return false;
-    };
-    resolve_module_options(path, &specifier, imported_name.as_deref(), depth, options)
-}
-
-/// Record a followed import target that could not be read. The import is
-/// still a resolved value: what it holds is unknown, not absent.
-fn record_unreadable_import(resolved: bool, options: &mut ResolvedOptions) -> bool {
-    options.unreadable_import |= !resolved;
-    true
-}
-
-/// Resolve the options a relative `require('./x')` names: the value that module
-/// exports as a whole. A package `require` does not resolve, and a relative
-/// target that cannot be read is recorded.
-fn resolve_required_options(
-    path: &Path,
-    call: &CallExpression<'_>,
-    depth: usize,
-    options: &mut ResolvedOptions,
-) -> bool {
-    let Some(specifier) = config_parser::get_require_source(call)
-        .filter(|specifier| config_parser::is_relative_specifier(specifier))
-    else {
-        return false;
-    };
-    resolve_module_options(path, &specifier, None, depth, options)
-}
-
-/// Read the options a relative sibling module exports: under `export_name`,
-/// or as the whole module when `export_name` is `None`. A target that cannot
-/// be read is recorded, and the value still counts as resolved.
-fn resolve_module_options(
-    path: &Path,
-    specifier: &str,
-    export_name: Option<&str>,
-    depth: usize,
-    options: &mut ResolvedOptions,
-) -> bool {
-    let Some((module_path, source)) = config_parser::resolve_sibling_module(path, specifier) else {
-        return record_unreadable_import(false, options);
-    };
-    let resolved = config_parser::extract_from_source(&source, &module_path, |module| {
-        let init = match export_name {
-            Some(name) => config_parser::find_exported_init(module, Some(name))?,
-            None => config_parser::find_module_export_expression(module)?,
-        };
-        resolve_options_init(module, &module_path, init, depth + 1, options).then_some(())
-    })
-    .is_some();
-    record_unreadable_import(resolved, options)
-}
-
-/// Resolve the value a binding or an export holds. Beyond the shapes of
-/// [`resolve_options`], this accepts a function that returns the options.
-fn resolve_options_init(
-    program: &Program<'_>,
-    path: &Path,
-    init: &Expression<'_>,
-    depth: usize,
-    options: &mut ResolvedOptions,
-) -> bool {
-    if resolve_options(program, path, init, depth, options) {
-        return true;
-    }
-    let Some(object) = config_parser::extract_object_from_expression(init) else {
-        return false;
-    };
-    read_options_object(program, path, object, depth, options);
-    true
-}
-
-/// Whether a callee is `Object.assign`.
-fn is_object_assign(callee: &Expression<'_>) -> bool {
-    matches!(
-        unwrap_expression(callee),
-        Expression::StaticMemberExpression(member)
-            if member.property.name == "assign"
-                && matches!(&member.object, Expression::Identifier(object) if object.name == "Object")
-    )
 }
 
 impl<'a> Visit<'a> for FederationCallCollector<'a, '_> {
