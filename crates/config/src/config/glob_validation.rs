@@ -1400,4 +1400,112 @@ mod tests {
             assert!(error.contains("cannot be compiled"), "{field}: {error}");
         }
     }
+
+    /// Glob texts from tokens that make regex classes, groups, repeats and
+    /// multibyte literals, with a fixed seed.
+    fn generated_globs(count: usize) -> Vec<String> {
+        const TOKENS: &[&str] = &[
+            "a",
+            "/",
+            "*",
+            "**",
+            "**/",
+            "?",
+            "[a-z]",
+            "[!a]",
+            "[[]",
+            "[]]",
+            "[\u{e9}-\u{fc}]",
+            "[\u{65e5}\u{672c}]",
+            "\u{65e5}",
+            "\\*",
+            "@(",
+            "|",
+            ")",
+            "!(",
+            "+(",
+            "-",
+            ".",
+            "[",
+            "]",
+            "[^/]",
+            "\u{1f600}",
+            "[\u{1f600}-\u{1f602}]",
+        ];
+        let mut state: u64 = 0x9E37_79B9_7F4A_7C15;
+        let mut next = move || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            usize::try_from(state % 1024).unwrap_or(0)
+        };
+        let mut globs = Vec::with_capacity(count + 8);
+        for _ in 0..count {
+            let len = next() % 520;
+            let mut text = String::new();
+            while text.len() < len {
+                text.push_str(TOKENS[next() % TOKENS.len()]);
+            }
+            globs.push(text);
+        }
+        globs.extend([
+            "*".repeat(512),
+            "**/".repeat(170),
+            "?".repeat(512),
+            "[a-z]".repeat(102),
+            "[!a]".repeat(128),
+            "\u{65e5}".repeat(170),
+            "[\u{65e5}-\u{672c}]".repeat(56),
+            "\u{1f600}".repeat(128),
+        ]);
+        globs
+    }
+
+    /// `try_compile_matcher` skips the regex check for a glob without `{`
+    /// that is not longer than `MAX_GLOB_BYTES`. The matcher of each such
+    /// glob must build.
+    #[test]
+    #[cfg_attr(miri, ignore = "thousands of regex builds are too slow under Miri")]
+    fn a_glob_without_braces_within_the_limit_always_compiles() {
+        let mut checked = 0;
+        for text in generated_globs(3_000) {
+            if text.contains('{') || text.len() > MAX_GLOB_BYTES {
+                continue;
+            }
+            for literal_separator in [true, false] {
+                let Ok(glob) = GlobBuilder::new(&text)
+                    .literal_separator(literal_separator)
+                    .empty_alternates(true)
+                    .build()
+                else {
+                    continue;
+                };
+                let regex = regex::bytes::RegexBuilder::new(glob.regex())
+                    .dot_matches_new_line(true)
+                    .size_limit(GLOB_REGEX_SIZE_LIMIT)
+                    .build();
+                assert!(regex.is_ok(), "{text}");
+                let _ = glob.compile_matcher();
+                checked += 1;
+            }
+        }
+        assert!(checked > 1_000, "only {checked} globs parsed");
+    }
+
+    /// The regex check refuses exactly the brace globs whose matcher build
+    /// panics in `globset`.
+    #[test]
+    fn try_compile_matcher_agrees_with_the_matcher_build() {
+        for depth in [120, 124, 125, 126, 130] {
+            for text in [
+                format!("{}b{}", "a{".repeat(depth), "}".repeat(depth)),
+                format!("{}b{}", "{a,".repeat(depth), "}".repeat(depth)),
+            ] {
+                let glob = compile_path_glob(&text).unwrap();
+                let checked = try_compile_matcher(&glob).is_ok();
+                let built = std::panic::catch_unwind(|| glob.compile_matcher()).is_ok();
+                assert_eq!(checked, built, "depth {depth}: {text}");
+            }
+        }
+    }
 }

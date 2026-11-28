@@ -274,6 +274,10 @@ mod tests {
     fn an_include_glob_that_does_not_compile_gives_no_matcher() {
         let nested = format!("./pages/{}b{}.js", "{a,".repeat(126), "}".repeat(126));
         assert!(ExtglobMatcher::new(&nested, &[]).is_none());
+    }
+
+    #[test]
+    fn an_extglob_group_that_does_not_compile_gives_no_matcher() {
         let extglob = format!("./{}b{}.js", "@(a|".repeat(126), ")".repeat(126));
         assert!(ExtglobMatcher::new(&extglob, &[]).is_none());
     }
