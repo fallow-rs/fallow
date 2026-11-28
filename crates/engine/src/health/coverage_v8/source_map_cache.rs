@@ -370,7 +370,9 @@ mod tests {
                 std::fs::create_dir_all(dir.path().join("outside/probe")).unwrap();
             }
             let base = dir.path().join("outside/probe/../../dist");
-            let found = resolve_original_source("webpack://app/./a.ts", Some(&base)).unwrap();
+            let found =
+                resolve_original_source("webpack://app/./a.ts", Some(&base), Some(dir.path()))
+                    .unwrap();
             assert_eq!(
                 std::fs::canonicalize(found).unwrap(),
                 std::fs::canonicalize(dir.path().join("dist/a.ts")).unwrap(),
