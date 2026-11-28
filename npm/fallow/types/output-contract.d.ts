@@ -23265,7 +23265,8 @@ retry_ms: number
  * Summed worker time, not wall time. It covers the survivor retries
  * that ran each passing test of their test files, not only the
  * covering tests. It can be larger than `retry_ms` when more than one
- * worker runs retries. Zero when no such retry ran.
+ * worker runs retries. A retry that ran as parts on more workers
+ * counts its wall time. Zero when no such retry ran.
  */
 retry_wide_worker_ms: number
 /**
