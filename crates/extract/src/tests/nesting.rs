@@ -627,3 +627,86 @@ fn ordinary_template_expressions_still_parse() {
     assert!(!info.parse_nesting_too_deep);
     assert!(!info.parse_panicked);
 }
+
+/// A release-notes page whose prose holds many bare `<`. The text of a markup
+/// host is not script, so the whole-file scan must not refuse it.
+fn release_notes_page() -> String {
+    let filler = "The layout code now keeps the column in place. ".repeat(16);
+    let items = format!("<li>Fix a crash when the width is < 3 px. {filler}</li>\n").repeat(60);
+    format!(
+        "<!doctype html>\n<html><body><ul>\n{items}</ul>\n\
+         <script type=\"module\" src=\"./main.ts\"></script></body></html>\n"
+    )
+}
+
+/// An MDX page whose prose escapes many `<` as `\<`.
+fn escaped_less_than_page() -> String {
+    format!(
+        "import {{ Note }} from './Note';\n\n<Note />\n\n{}",
+        "The value \\< limit stays open in this line of prose text.\n".repeat(400)
+    )
+}
+
+fn import_sources(info: &ModuleInfo) -> Vec<&str> {
+    info.imports
+        .iter()
+        .map(|import| import.source.as_str())
+        .collect()
+}
+
+#[test]
+fn bare_less_than_in_markup_prose_keeps_the_page_parsed() {
+    let html = parse("index.html", &release_notes_page());
+    assert!(!html.parse_nesting_too_deep);
+    assert!(
+        import_sources(&html).contains(&"./main.ts"),
+        "{:?}",
+        import_sources(&html)
+    );
+    let mdx = parse("docs/page.mdx", &escaped_less_than_page());
+    assert!(!mdx.parse_nesting_too_deep);
+    assert!(
+        import_sources(&mdx).contains(&"./Note"),
+        "{:?}",
+        import_sources(&mdx)
+    );
+}
+
+/// A quote pair in HTML comments hides an Astro template expression from the
+/// whole-file scan, so the expression gets its own scan.
+#[test]
+fn a_hidden_astro_template_expression_degrades() {
+    let source = format!(
+        "---\nconst b = 1;\n---\n<div><!-- ' --><p>{{{}}}</p><!-- ' --></div>\n",
+        nested_type_arguments()
+    );
+    assert!(parse("src/pages/index.astro", &source).parse_nesting_too_deep);
+}
+
+/// The same quote pair hides an inline script of an Astro page.
+#[test]
+fn a_hidden_astro_inline_script_degrades() {
+    let source = format!(
+        "---\nconst b = 1;\n---\n<!-- ' --><script>export const x = {};</script><!-- ' -->\n",
+        nested_type_arguments()
+    );
+    assert!(parse("src/pages/index.astro", &source).parse_nesting_too_deep);
+}
+
+/// The module federation scan parses each script block of a component on
+/// its own, so each block gets its own scan.
+#[test]
+fn a_nested_script_block_refuses_the_federation_scan() {
+    let source = format!(
+        "<template><!-- ` --><p>x</p></template>\n<script setup lang=\"ts\">\n\
+         import {{ init }} from '@module-federation/runtime';\nexport const x = {};\n\
+         </script>\n<!-- ` -->\n",
+        nested_type_arguments()
+    );
+    crate::nesting::take_refused_fragment();
+    let _ = crate::federation_runtime::extract_federation_runtime_facts(
+        Path::new("src/App.vue"),
+        &source,
+    );
+    assert!(crate::nesting::take_refused_fragment());
+}

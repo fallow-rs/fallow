@@ -344,7 +344,7 @@ scope = "production"
 message = "{path} calls a parser outside the listed sites. Run the parse inside fallow_extract::parse_bounded, then add the file to the allow list of this rule in Cargo.toml"
 allow = [
     { path = "crates/core/src/plugins/config_parser.rs", max = 1, require = ["parse_bounded("] },
-    { path = "crates/engine/src/duplication_detector/tokenize/mod.rs", max = 4, require = ["parse_bounded("] },
+    { path = "crates/engine/src/duplication_detector/tokenize/mod.rs", max = 4, require = ["parse_bounded_for_file("] },
     { path = "crates/engine/src/import_bindings.rs", max = 1, require = ["parse_bounded("] },
     { path = "crates/engine/src/search_visibility.rs", max = 2, require = ["parse_bounded("] },
     { path = "crates/engine/src/post_edit.rs", max = 1, require = ["parse_bounded("] },

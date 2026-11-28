@@ -44,6 +44,9 @@ use fallow_types::extract::ModuleInfo;
 
 use crate::visitor::ModuleInfoExtractor;
 
+#[path = "nesting_jsx.rs"]
+mod nesting_jsx;
+
 /// Nesting depth of possible type-argument lists past which a file is not
 /// parsed.
 ///
@@ -77,7 +80,7 @@ const TYPE_ARGUMENT_REREADS_PER_BYTE: u64 = 16;
 /// list that holds the rest of the chain, fails at the `;`, and reads the
 /// rest again from the next `<`. The nodes of each failed attempt stay
 /// allocated until the parse ends, so the memory grows with the square of the
-/// chain: 16 KB of such a chain take about 4 GB. The scan adds each byte once
+/// chain: 16 KB of such a chain take about 2 GB. The scan adds each byte once
 /// for each list that is open there, and drops the bytes of a list that the
 /// parser keeps, see [`Scanner::close_type_arguments`]. The budget allows a
 /// fixed amount plus a small multiple of the source, so the extra work stays
@@ -204,7 +207,7 @@ enum Dialect {
 /// parse of a fragment inside `parse` runs on the same stack and needs no
 /// second call.
 pub fn parse_bounded<R: Send>(source: &str, parse: impl FnOnce() -> R + Send) -> Option<R> {
-    parse_bounded_as(source, Dialect::Script, parse)
+    parse_bounded_as(source, Dialect::Script, false, parse)
 }
 
 /// [`parse_bounded`] for a lightningcss parse of stylesheet source. The
@@ -223,7 +226,8 @@ pub fn parse_style_bounded<R: Send>(source: &str, parse: impl FnOnce() -> R + Se
 }
 
 /// [`parse_bounded`] for the file at `path`. A CSS, Sass or Less file is
-/// scanned with stylesheet rules.
+/// scanned with stylesheet rules. A markup host gets no reread budget, see
+/// [`parse_bounded_for_file`].
 pub fn parse_file_bounded<R: Send>(
     path: &Path,
     source: &str,
@@ -234,15 +238,49 @@ pub fn parse_file_bounded<R: Send>(
     } else {
         Dialect::Script
     };
-    parse_bounded_as(source, dialect, parse)
+    parse_bounded_as(source, dialect, is_markup_host(path), parse)
+}
+
+/// [`parse_bounded`] for a parse of the file at `path` that splits a markup
+/// host into its fragments.
+///
+/// The text of an HTML, MDX, Vue, Svelte or Astro file is markup, and its
+/// prose can hold many bare `<`, such as `the width is < 3 px`. The scan of
+/// the whole file reads them as type-argument lists that stay open, so the
+/// [`reread_budget`] does not apply to such a file. Each fragment of it that
+/// is parsed gets its own scan with the budget: through [`parse_bounded`],
+/// or through [`fragment_within_limits`].
+pub fn parse_bounded_for_file<R: Send>(
+    path: &Path,
+    source: &str,
+    parse: impl FnOnce() -> R + Send,
+) -> Option<R> {
+    parse_bounded_as(source, Dialect::Script, is_markup_host(path), parse)
+}
+
+/// Whether `path` is a markup file whose scripts and expressions are
+/// fragments, see [`parse_bounded_for_file`].
+fn is_markup_host(path: &Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| {
+            matches!(
+                extension.to_ascii_lowercase().as_str(),
+                "html" | "htm" | "mdx" | "vue" | "svelte" | "astro"
+            )
+        })
 }
 
 fn parse_bounded_as<R: Send>(
     source: &str,
     dialect: Dialect,
+    markup_host: bool,
     parse: impl FnOnce() -> R + Send,
 ) -> Option<R> {
-    let nesting = scan_nesting(source, dialect);
+    let mut nesting = scan_nesting(source, dialect);
+    if markup_host {
+        nesting.rereads_exceeded = false;
+    }
     if nesting.exceeds_limits() {
         return None;
     }
@@ -282,6 +320,8 @@ struct Nesting {
     /// Whether the bytes that the parser can read again after failed
     /// type-argument lists pass [`reread_budget`].
     rereads_exceeded: bool,
+    /// Whether the scan saw a `<` where a JSX element can start.
+    jsx_tag: bool,
 }
 
 impl Nesting {
@@ -295,9 +335,12 @@ impl Nesting {
 /// Measures the nesting of `source`. The scan stops as soon as a value passes
 /// its limit, so each value is at most its limit + 1. A script source is
 /// scanned as code and with JSX elements, and each value is the higher one.
+/// The two views read the same bytes in the same way up to the first `<`
+/// where a JSX element can start, so the JSX view runs only when the code
+/// view saw such a `<`.
 fn scan_nesting(source: &str, dialect: Dialect) -> Nesting {
     let code = scan_view(source, dialect, false);
-    if dialect != Dialect::Script || code.exceeds_limits() || !source.contains('<') {
+    if dialect != Dialect::Script || code.exceeds_limits() || !code.jsx_tag {
         return code;
     }
     let jsx = scan_view(source, dialect, true);
@@ -305,6 +348,7 @@ fn scan_nesting(source: &str, dialect: Dialect) -> Nesting {
         brackets: code.brackets.max(jsx.brackets),
         type_arguments: code.type_arguments.max(jsx.type_arguments),
         rereads_exceeded: jsx.rereads_exceeded,
+        jsx_tag: true,
     }
 }
 
@@ -317,6 +361,7 @@ fn scan_view(source: &str, dialect: Dialect, jsx: bool) -> Nesting {
         brackets: scanner.max_depth,
         type_arguments: scanner.max_type_arguments,
         rereads_exceeded: scanner.rereads > scanner.reread_budget,
+        jsx_tag: scanner.jsx_tag,
     }
 }
 
@@ -365,6 +410,8 @@ struct Scanner<'a> {
     regex_body: bool,
     /// Whether this scan reads JSX elements, see [`Scanner::scan_jsx`].
     jsx: bool,
+    /// Whether the scan saw a `<` where a JSX element can start.
+    jsx_tag: bool,
     /// The elements of the innermost JSX expression that are open.
     jsx_elements: u32,
     /// Each open `{` container of a JSX element, innermost last. The `}` that
@@ -466,6 +513,7 @@ impl<'a> Scanner<'a> {
             control_headers: Vec::new(),
             regex_body: false,
             jsx: false,
+            jsx_tag: false,
             jsx_elements: 0,
             jsx_containers: Vec::new(),
             rereads: 0,
@@ -645,7 +693,15 @@ impl Scanner<'_> {
                 self.regex_allowed = false;
                 self.note_extends();
             }
-            b'<' if self.jsx && self.at_jsx_tag() => self.open_jsx_element(),
+            b'<' if (self.jsx || !self.jsx_tag) && self.at_jsx_tag() => {
+                self.jsx_tag = true;
+                if self.jsx {
+                    self.open_jsx_element();
+                } else {
+                    self.open_type_arguments();
+                    self.regex_allowed = true;
+                }
+            }
             b'<' => {
                 self.open_type_arguments();
                 self.regex_allowed = true;
@@ -1230,6 +1286,7 @@ impl Scanner<'_> {
         scanner.reread_budget = u64::MAX;
         scanner.scan();
         self.rereads = self.rereads.saturating_add(scanner.rereads);
+        self.jsx_tag |= scanner.jsx_tag;
         for list in &scanner.type_arguments {
             self.carry_type_arguments(base + list.depth, open.saturating_add(list.level));
         }
@@ -1404,133 +1461,6 @@ impl Scanner<'_> {
     }
 }
 
-/// The JSX view of the scan.
-impl Scanner<'_> {
-    /// Whether the `<` at `pos - 1` opens a JSX element: it stands where an
-    /// expression starts, and a tag name or the `>` of a fragment follows.
-    /// In a TSX file, `<T,>` and `<T extends U>` open the type parameters of
-    /// an arrow function instead.
-    fn at_jsx_tag(&self) -> bool {
-        if !(self.regex_allowed || self.after_keyword()) {
-            return false;
-        }
-        match self.bytes.get(self.pos) {
-            Some(b'>') => true,
-            Some(&byte) if is_identifier_start(byte) => !self.opens_type_parameters(),
-            _ => false,
-        }
-    }
-
-    /// Whether the name after the `<` at `pos - 1` is followed by `,` or by
-    /// `extends` and a type.
-    fn opens_type_parameters(&self) -> bool {
-        let name_end = self.jsx_name_end(self.pos);
-        let rest = self.bytes[name_end..].trim_ascii_start();
-        if rest.first() == Some(&b',') {
-            return true;
-        }
-        rest.strip_prefix(b"extends").is_some_and(|after| {
-            after.first().is_some_and(u8::is_ascii_whitespace)
-                && !matches!(after.trim_ascii_start().first(), Some(b'=' | b'>' | b'/'))
-        })
-    }
-
-    /// The end of the JSX tag name that starts at `start`.
-    fn jsx_name_end(&self, start: usize) -> usize {
-        self.bytes[start..]
-            .iter()
-            .position(|&byte| !is_jsx_name_byte(byte))
-            .map_or(self.bytes.len(), |len| start + len)
-    }
-
-    /// Reads the JSX element whose `<` is at `pos - 1`, up to its end or to
-    /// the first `{` container in it.
-    fn open_jsx_element(&mut self) {
-        self.jsx_elements = 1;
-        self.pos = self.jsx_name_end(self.pos);
-        self.scan_jsx(JsxPart::Attributes);
-    }
-
-    /// Reads JSX from `pos` in `part` of the innermost open element. Returns
-    /// at a `{` container, whose code the main scan reads, or after the last
-    /// open element of the JSX expression closes. Element nesting is a count,
-    /// so deep markup needs no deep call stack.
-    fn scan_jsx(&mut self, mut part: JsxPart) {
-        while let Some(&byte) = self.bytes.get(self.pos) {
-            self.pos += 1;
-            match (part, byte) {
-                (_, b'{') => {
-                    self.open_bracket(b'{');
-                    self.jsx_containers.push(JsxContainer {
-                        depth: self.depth,
-                        part,
-                        elements: self.jsx_elements,
-                    });
-                    self.jsx_elements = 0;
-                    return;
-                }
-                (JsxPart::Attributes, b'"' | b'\'') => self.skip_jsx_string(byte),
-                (JsxPart::Attributes, b'/') if self.bytes.get(self.pos) == Some(&b'>') => {
-                    self.pos += 1;
-                    if self.close_jsx_element() {
-                        return;
-                    }
-                    part = JsxPart::Children;
-                }
-                (JsxPart::Attributes, b'>') => part = JsxPart::Children,
-                (JsxPart::Children, b'<') if self.bytes.get(self.pos) == Some(&b'/') => {
-                    while let Some(&byte) = self.bytes.get(self.pos) {
-                        self.pos += 1;
-                        if byte == b'>' {
-                            break;
-                        }
-                    }
-                    if self.close_jsx_element() {
-                        return;
-                    }
-                }
-                (JsxPart::Children, b'<') => {
-                    self.jsx_elements += 1;
-                    self.pos = self.jsx_name_end(self.pos);
-                    part = JsxPart::Attributes;
-                }
-                _ => {}
-            }
-        }
-    }
-
-    /// Skips a JSX attribute string. It has no escapes and can span lines.
-    fn skip_jsx_string(&mut self, quote: u8) {
-        self.pos = self.bytes[self.pos..]
-            .iter()
-            .position(|&byte| byte == quote)
-            .map_or(self.bytes.len(), |len| self.pos + len + 1);
-    }
-
-    /// Closes the innermost open element. Returns true when that ends the
-    /// JSX expression, so the main scan reads code again after an operand.
-    fn close_jsx_element(&mut self) -> bool {
-        self.jsx_elements = self.jsx_elements.saturating_sub(1);
-        if self.jsx_elements > 0 {
-            return false;
-        }
-        self.regex_allowed = false;
-        true
-    }
-
-    /// Ends the `{` container at the current depth and reads on in its
-    /// element.
-    fn close_jsx_container(&mut self) {
-        let Some(container) = self.jsx_containers.pop() else {
-            return;
-        };
-        self.depth -= 1;
-        self.close_type_arguments_above_depth();
-        self.jsx_elements = container.elements;
-        self.scan_jsx(container.part);
-    }
-}
-
 /// Whether `byte` can be part of a JavaScript identifier. A byte of a
 /// non-ASCII character counts, so a word is never cut inside one.
 const fn is_identifier_byte(byte: u8) -> bool {
@@ -1540,12 +1470,6 @@ const fn is_identifier_byte(byte: u8) -> bool {
 /// Whether `byte` can start a JavaScript identifier or a JSX tag name.
 const fn is_identifier_start(byte: u8) -> bool {
     byte.is_ascii_alphabetic() || matches!(byte, b'_' | b'$') || byte >= 0x80
-}
-
-/// Whether `byte` can be part of a JSX tag name, such as `a.b`, `a:b` or
-/// `my-tag`.
-const fn is_jsx_name_byte(byte: u8) -> bool {
-    is_identifier_byte(byte) || matches!(byte, b'.' | b':' | b'-')
 }
 
 /// Whether a `/` after `byte` starts a regex literal. After an identifier,

@@ -78,8 +78,14 @@ Shared extraction result types live in `crates/types/src/extract.rs` and its
     line at the start is a comment. A failed string or regex guess records
     the bytes that it read, so the scan stays linear on long lines.
   - A fragment that extraction parses on its own (a template expression, a
-    component script block, an MDX body) gets its own scan through
-    `fragment_within_limits`. A refused fragment refuses the whole file.
+    component or Astro script block, Astro frontmatter, an MDX body) gets
+    its own scan through `fragment_within_limits`. A refused fragment
+    refuses the whole file. The prose of an HTML, MDX, Vue, Svelte or Astro
+    file can hold many bare `<`, so the whole-file scan of such a host
+    (`parse_bounded_for_file`) skips the reread budget, and each parsed
+    fragment applies it.
+  - The JSX view runs only when the code view saw a `<` where a JSX element
+    can start. Up to that byte both views read the same.
   - It then runs the parse on a stack of
     `256 KiB + 1024 * source length + 4096 * bracket depth`
     (`crates/extract/src/stack.rs`). A need over 64 GiB (a source over 64 MB in

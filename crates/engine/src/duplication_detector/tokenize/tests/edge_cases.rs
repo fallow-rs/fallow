@@ -518,3 +518,36 @@ fn deeply_nested_source_yields_no_tokens_instead_of_overflowing() {
     let code = format!("const x = {}1{};", "(".repeat(depth), ")".repeat(depth));
     assert!(tokenize(&code).is_empty());
 }
+
+/// Prose in a markup host can hold many bare `<`. The whole-file scan of a
+/// host must not refuse its tokens.
+#[test]
+fn escaped_less_than_in_mdx_prose_keeps_the_tokens() {
+    let page = format!(
+        "import {{ Note }} from './Note';\nexport const meta = {{ title: 'Page' }};\n\n<Note />\n\n{}",
+        "The value \\< limit stays open in this line of prose text.\n".repeat(400)
+    );
+    let path = PathBuf::from("docs/page.mdx");
+    assert!(
+        !tokenize_file_cross_language(&path, &page, false, false)
+            .tokens
+            .is_empty()
+    );
+}
+
+/// A script block that the whole-file scan cannot see gets its own scan, so
+/// nested type-argument lists in it are not parsed.
+#[test]
+fn a_hidden_nested_script_block_is_not_tokenized() {
+    let nested = format!("{}b{}", "t<(".repeat(12), ")".repeat(12));
+    let source = format!(
+        "<template><!-- ` --><p>x</p></template>\n<script setup lang=\"ts\">\n\
+         export const x = {nested};\n</script>\n<!-- ` -->\n"
+    );
+    let path = PathBuf::from("src/App.vue");
+    let script_start = source
+        .find("<script")
+        .expect("the source has a script block") as u32;
+    let tokens = tokenize_file_cross_language(&path, &source, false, false).tokens;
+    assert!(tokens.iter().all(|token| token.span.start < script_start));
+}
