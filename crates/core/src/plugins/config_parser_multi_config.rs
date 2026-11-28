@@ -13,10 +13,10 @@ use rustc_hash::FxHashSet;
 
 use super::merge_config::{MAX_MULTI_CONFIGS, find_merged_config_objects};
 use super::{
-    PathScope, collect_require_sources, collect_shallow_string_values, expression_to_path,
-    extract_from_source, find_property, get_nested_expression, get_nested_string_or_array,
-    is_module_exports_target, object_expression, path_from_config_string,
-    resolve_alias_pairs_kinded,
+    AliasResolveState, PathScope, collect_require_sources, collect_shallow_string_values,
+    expression_to_path, extract_from_source, find_property, get_nested_expression,
+    get_nested_string_or_array, is_module_exports_target, object_expression,
+    path_from_config_string, resolve_alias_pairs_kinded,
 };
 
 /// The config objects of a program: the objects that `find_merged_config_objects`
@@ -90,8 +90,8 @@ pub fn extract_each_config_path_aliases(
         let Some(expr) = get_nested_expression(object, prop_path) else {
             return Vec::new();
         };
-        let mut visited = FxHashSet::default();
-        resolve_alias_pairs_kinded(program, path, expr, &mut visited, 0)
+        let mut state = AliasResolveState::default();
+        resolve_alias_pairs_kinded(program, path, expr, &mut state, 0)
     });
     let mut seen = FxHashSet::default();
     pairs
