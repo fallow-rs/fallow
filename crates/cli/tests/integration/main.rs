@@ -256,5 +256,6 @@ mod workspace_config_patterns_tests;
 mod workspace_exclusion_tests;
 mod workspace_missing_entry_tests;
 mod workspace_settings_tests;
+mod yaml_alias_budget_tests;
 
 mod plugin_config_shapes_tests;

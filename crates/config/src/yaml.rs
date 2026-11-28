@@ -9,6 +9,9 @@ use std::fmt;
 use deser_core::{Context, TrackLocations};
 use deser_value::{Kind, Map, Value};
 
+#[path = "yaml_alias_budget.rs"]
+mod alias_budget;
+
 /// A YAML parse error.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct YamlError(String);
@@ -40,11 +43,17 @@ impl YamlDocument {
 /// # Errors
 ///
 /// Returns an error when `source` is not valid YAML, holds more than one
-/// document, or has a duplicate mapping key.
+/// document, has a duplicate mapping key, or has aliases that expand above
+/// the memory budget for alias expansion.
 pub fn parse(source: &str) -> Result<YamlDocument, YamlError> {
-    deser_yaml::from_str::<Value>(source)
-        .map(YamlDocument)
-        .map_err(|error| YamlError(error.to_string()))
+    alias_budget::within_alias_budget(source, |alias_limit| {
+        deser_yaml::DeserializerConfig::builder()
+            .alias_limit(alias_limit)
+            .build()
+            .from_str::<Value>(source)
+    })
+    .map(YamlDocument)
+    .map_err(YamlError)
 }
 
 /// Parse `source` as a single YAML document and keep the source position
@@ -58,13 +67,15 @@ pub fn parse(source: &str) -> Result<YamlDocument, YamlError> {
 ///
 /// Returns an error in the same cases as [`parse`].
 pub fn parse_with_locations(source: &str) -> Result<YamlDocument, YamlError> {
-    let config = deser_yaml::DeserializerConfig::builder()
-        .context(Context::with(TrackLocations(true)))
-        .build();
-    config
-        .from_str::<Value>(source)
-        .map(YamlDocument)
-        .map_err(|error| YamlError(error.to_string()))
+    alias_budget::within_alias_budget(source, |alias_limit| {
+        deser_yaml::DeserializerConfig::builder()
+            .context(Context::with(TrackLocations(true)))
+            .alias_limit(alias_limit)
+            .build()
+            .from_str::<Value>(source)
+    })
+    .map(YamlDocument)
+    .map_err(YamlError)
 }
 
 /// Parse every document of the YAML stream in `source`.
@@ -73,18 +84,20 @@ pub fn parse_with_locations(source: &str) -> Result<YamlDocument, YamlError> {
 ///
 /// # Errors
 ///
-/// Returns an error when a document is not valid YAML or has a duplicate
-/// mapping key.
+/// Returns an error when a document is not valid YAML, has a duplicate
+/// mapping key, or has aliases that expand above the memory budget for
+/// alias expansion. The budget is for the whole stream.
 pub fn parse_documents(source: &str) -> Result<Vec<YamlDocument>, YamlError> {
-    let mut deserializer = deser_yaml::Deserializer::from_str(source);
-    deserializer
-        .iter::<Value>()
-        .map(|document| {
-            document
-                .map(YamlDocument)
-                .map_err(|error| YamlError(error.to_string()))
-        })
-        .collect()
+    alias_budget::within_alias_budget(source, |alias_limit| {
+        let config = deser_yaml::DeserializerConfig::builder()
+            .alias_limit(alias_limit)
+            .build();
+        deser_yaml::Deserializer::from_str_with_config(source, config)
+            .iter::<Value>()
+            .map(|document| document.map(YamlDocument))
+            .collect::<Result<Vec<_>, _>>()
+    })
+    .map_err(YamlError)
 }
 
 /// A borrowed node of a parsed YAML document.
@@ -405,6 +418,118 @@ mod tests {
         let document = parse_with_locations(&source).unwrap();
         assert!(document.root().get("a").unwrap().as_sequence().is_some());
         assert!(document.root().get("a").unwrap().byte_range().is_some());
+    }
+
+    /// A document whose anchored string of `length` bytes is replayed
+    /// `10^levels` times through nested lists of aliases.
+    fn nested_aliases(length: usize, levels: usize) -> String {
+        use std::fmt::Write as _;
+        let mut yaml = format!("s0: &s0 \"{}\"\n", "x".repeat(length));
+        for level in 1..=levels {
+            let items = vec![format!("*s{}", level - 1); 10].join(", ");
+            writeln!(yaml, "s{level}: &s{level} [{items}]")
+                .expect("writing to a String cannot fail");
+        }
+        yaml
+    }
+
+    #[test]
+    fn aliases_that_expand_far_beyond_the_source_are_refused() {
+        // 100,000 copies of a 4,000-byte string: about 400 MB from 4 KB.
+        let source = nested_aliases(4_000, 5);
+        let error = parse(&source).expect_err("expansion is above the budget");
+        assert!(error.to_string().contains("alias"), "{error}");
+        assert!(parse_with_locations(&source).is_err());
+    }
+
+    #[test]
+    fn the_alias_budget_covers_the_whole_stream() {
+        // 50 documents that each replay a 1,000-byte string 10,000 times:
+        // about 10 MB for each document and 500 MB for the stream.
+        let document = nested_aliases(1_000, 4);
+        let source = format!("---\n{document}").repeat(50);
+        assert!(parse_documents(&source).is_err());
+    }
+
+    /// A Serverless config whose functions each merge one shared mapping of
+    /// 15 entries, as large configs do.
+    fn merged_defaults(functions: usize) -> String {
+        use std::fmt::Write as _;
+        let mut yaml = String::from("custom:\n  defaults: &defaults\n");
+        for key in 0..15 {
+            writeln!(yaml, "    setting{key}: value-of-the-shared-setting-{key}")
+                .expect("writing to a String cannot fail");
+        }
+        yaml.push_str("functions:\n");
+        for function in 0..functions {
+            write!(
+                yaml,
+                "  function{function}:\n    <<: *defaults\n    handler: src/handlers/function{function}.main\n    events:\n      - http: {{ path: /function{function}, method: get }}\n"
+            )
+            .expect("writing to a String cannot fail");
+        }
+        yaml
+    }
+
+    #[test]
+    fn merge_keys_of_a_large_config_stay_within_the_budget() {
+        let source = merged_defaults(250);
+        assert!(source.len() > 25_000, "{} bytes", source.len());
+        let document = parse(&source).unwrap();
+        let functions = document.root().get("functions").unwrap();
+        assert_eq!(functions.as_mapping().unwrap().len(), 250);
+        let last = functions.get("function249").unwrap();
+        assert_eq!(
+            last.get("setting14").and_then(|node| node.as_str()),
+            Some("value-of-the-shared-setting-14")
+        );
+        assert_eq!(
+            last.get("handler").and_then(|node| node.as_str()),
+            Some("src/handlers/function249.main")
+        );
+    }
+
+    #[test]
+    fn expansion_above_the_budget_fails_fast() {
+        let started = std::time::Instant::now();
+        assert!(parse(&nested_aliases(4_000, 5)).is_err());
+        assert!(parse(&nested_aliases(20_000, 5)).is_err());
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(5),
+            "took {:?}",
+            started.elapsed()
+        );
+    }
+
+    #[test]
+    fn aliases_of_real_configs_still_expand() {
+        let source = "\
+defaults: &defaults
+  runs-on: ubuntu-latest
+  steps: [checkout, setup, install]
+jobs:
+  lint: *defaults
+  test: *defaults
+  build: *defaults
+";
+        let document = parse(source).unwrap();
+        let test = document
+            .root()
+            .get("jobs")
+            .and_then(|jobs| jobs.get("test"));
+        assert_eq!(
+            test.and_then(|job| job.get("runs-on"))
+                .and_then(|node| node.as_str()),
+            Some("ubuntu-latest")
+        );
+        let small = nested_aliases(20, 4);
+        assert!(parse(&small).is_ok());
+        assert_eq!(
+            parse_documents(&format!("---\n{small}").repeat(3))
+                .unwrap()
+                .len(),
+            3
+        );
     }
 
     #[test]

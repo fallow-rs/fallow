@@ -8,7 +8,6 @@ use crate::discover::project_read::{carry_project_root, config_project_root, rea
 use fallow_extract::{JsText, visitor::extract_import_from_callable};
 use oxc_ast::ast::*;
 use oxc_span::SourceType;
-use rustc_hash::FxHashSet;
 
 #[path = "config_parser_const_inline.rs"]
 mod const_inline;
@@ -32,6 +31,9 @@ use string_values::string_or_array_in;
 mod alias_constant;
 #[path = "config_parser_alias_entry.rs"]
 pub(super) mod alias_entry;
+#[path = "config_parser_alias_resolve.rs"]
+mod alias_resolve;
+use alias_resolve::{AliasResolveState, resolve_alias_pairs_kinded};
 #[path = "config_parser_vite_plugin_call.rs"]
 pub(crate) mod vite_plugin_call;
 pub(crate) use vite_plugin_call::extract_vite_plugin_call_option_path;
@@ -552,8 +554,8 @@ pub(crate) fn extract_config_aliases_kinded(
     extract_from_source(source, path, |program| {
         read_each_config(program, |obj| {
             let expr = get_nested_expression(obj, prop_path)?;
-            let mut visited = FxHashSet::default();
-            let aliases = resolve_alias_pairs_kinded(program, path, expr, &mut visited, 0);
+            let mut state = AliasResolveState::default();
+            let aliases = resolve_alias_pairs_kinded(program, path, expr, &mut state, 0);
             (!aliases.is_empty()).then_some(aliases)
         })
     })
@@ -2293,7 +2295,7 @@ fn alias_replacement_kinded(expr: &Expression, scope: PathScope<'_>) -> Option<(
 
 /// Maximum identifier-indirection hops the alias resolver follows before giving
 /// up. Each local-variable or imported-binding resolution counts one hop. The
-/// per-file `visited` set is the real cycle guard; this bound additionally
+/// `visited` set of [`AliasResolveState`] is the real cycle guard; this bound additionally
 /// terminates pathological local self-references (`const a = a`). Real configs
 /// rarely exceed one or two hops (`alias: importedAliases`).
 const MAX_ALIAS_RESOLVE_DEPTH: usize = 8;
@@ -2305,175 +2307,6 @@ const MAX_ALIAS_RESOLVE_DEPTH: usize = 8;
 /// is intentionally excluded: it parses as a bare expression with no `export`,
 /// so `find_exported_init` could never recover an alias literal from it.
 const ALIAS_SIBLING_EXTS: [&str; 6] = ["js", "mjs", "cjs", "ts", "mts", "cts"];
-
-/// Resolve an alias expression into `(find, replacement, is_bare)` tuples,
-/// following identifiers and expanding spreads.
-///
-/// Beyond the inline object (`{ '@': './src' }`) and array
-/// (`[{ find, replacement }]`) forms, this handles the indirection shapes from
-/// issue #811:
-/// - an identifier bound to a local `const NAME = [...] | {...}`,
-/// - an identifier imported from a relative sibling file
-///   (`import { sharedAliases } from "./vite.shared.js"`), read one hop and
-///   parsed for `export const NAME` / `export default` / `export { NAME }`,
-/// - array spread elements (`[...a, ...b]`) and object spread properties
-///   (`{ ...a, '@': './src' }`), each resolved recursively.
-///
-/// `config_path` is the file `expr` lives in (used to resolve relative sibling
-/// imports). `visited` holds already-read sibling paths to break import cycles;
-/// `depth` bounds identifier indirection via [`MAX_ALIAS_RESOLVE_DEPTH`].
-fn resolve_alias_pairs_kinded(
-    program: &Program,
-    config_path: &Path,
-    expr: &Expression,
-    visited: &mut FxHashSet<PathBuf>,
-    depth: usize,
-) -> Vec<(String, String, bool)> {
-    match expr {
-        Expression::ParenthesizedExpression(paren) => {
-            resolve_alias_pairs_kinded(program, config_path, &paren.expression, visited, depth)
-        }
-        Expression::TSAsExpression(ts_as) => {
-            resolve_alias_pairs_kinded(program, config_path, &ts_as.expression, visited, depth)
-        }
-        Expression::TSSatisfiesExpression(ts_sat) => {
-            resolve_alias_pairs_kinded(program, config_path, &ts_sat.expression, visited, depth)
-        }
-        Expression::ObjectExpression(obj) => {
-            resolve_object_alias_pairs_kinded(program, config_path, obj, visited, depth)
-        }
-        Expression::ArrayExpression(arr) => {
-            resolve_array_alias_pairs_kinded(program, config_path, arr, visited, depth)
-        }
-        Expression::Identifier(id) => {
-            resolve_identifier_alias_pairs(program, config_path, id.name.as_str(), visited, depth)
-        }
-        _ => Vec::new(),
-    }
-}
-
-/// Resolve object-form alias pairs (`{ '@': './src', ...spread }`), expanding
-/// spread properties recursively.
-fn resolve_object_alias_pairs_kinded(
-    program: &Program,
-    config_path: &Path,
-    obj: &ObjectExpression,
-    visited: &mut FxHashSet<PathBuf>,
-    depth: usize,
-) -> Vec<(String, String, bool)> {
-    let mut pairs = Vec::new();
-    for prop in &obj.properties {
-        match prop {
-            ObjectPropertyKind::ObjectProperty(prop) => {
-                if let Some(find) = property_key_to_string(&prop.key)
-                    && let Some((replacement, is_bare)) =
-                        alias_replacement_kinded(&prop.value, PathScope::Program(program))
-                {
-                    pairs.push((find, replacement, is_bare));
-                }
-            }
-            // `{ ...sharedAliases, '@': './src' }`
-            ObjectPropertyKind::SpreadProperty(spread) => {
-                pairs.extend(resolve_alias_pairs_kinded(
-                    program,
-                    config_path,
-                    &spread.argument,
-                    visited,
-                    depth,
-                ));
-            }
-        }
-    }
-    pairs
-}
-
-/// Resolve array-form alias pairs (`[{ find, replacement }, ...spread]`),
-/// expanding spread elements recursively.
-fn resolve_array_alias_pairs_kinded(
-    program: &Program,
-    config_path: &Path,
-    arr: &ArrayExpression,
-    visited: &mut FxHashSet<PathBuf>,
-    depth: usize,
-) -> Vec<(String, String, bool)> {
-    let mut pairs = Vec::new();
-    for element in &arr.elements {
-        match element {
-            // `[...sharedAliases, { find, replacement }]`
-            ArrayExpressionElement::SpreadElement(spread) => {
-                pairs.extend(resolve_alias_pairs_kinded(
-                    program,
-                    config_path,
-                    &spread.argument,
-                    visited,
-                    depth,
-                ));
-            }
-            _ => {
-                if let Some(Expression::ObjectExpression(obj)) = element.as_expression()
-                    && let Some(pair) =
-                        alias_entry::object_alias_pair(obj, PathScope::Program(program))
-                {
-                    pairs.push(pair);
-                }
-            }
-        }
-    }
-    pairs
-}
-
-/// Resolve an identifier used as an alias value to its literal pairs, first by
-/// local `const`/`let`/`var` binding, then by a one-hop relative import.
-fn resolve_identifier_alias_pairs(
-    program: &Program,
-    config_path: &Path,
-    name: &str,
-    visited: &mut FxHashSet<PathBuf>,
-    depth: usize,
-) -> Vec<(String, String, bool)> {
-    if depth >= MAX_ALIAS_RESOLVE_DEPTH {
-        return Vec::new();
-    }
-    // Local `const NAME = [...] | {...}` (or `const NAME = otherIdentifier`).
-    if let Some(init) = find_variable_init_expression(program, name) {
-        return resolve_alias_pairs_kinded(program, config_path, init, visited, depth + 1);
-    }
-    // `import { NAME } from "./sibling"` / `import NAME from "./sibling"`.
-    let Some((specifier, imported_name)) = find_relative_import_binding(program, name) else {
-        return Vec::new();
-    };
-    resolve_imported_alias_pairs(
-        config_path,
-        &specifier,
-        imported_name.as_deref(),
-        visited,
-        depth + 1,
-    )
-}
-
-/// Read a relative sibling file and resolve the alias literal it exports under
-/// `imported_name` (`None` = default export).
-fn resolve_imported_alias_pairs(
-    config_path: &Path,
-    specifier: &str,
-    imported_name: Option<&str>,
-    visited: &mut FxHashSet<PathBuf>,
-    depth: usize,
-) -> Vec<(String, String, bool)> {
-    let Some((sibling_path, sibling_source)) = resolve_sibling_module(config_path, specifier)
-    else {
-        return Vec::new();
-    };
-    if !visited.insert(sibling_path.clone()) {
-        return Vec::new();
-    }
-    extract_from_source(&sibling_source, &sibling_path, |program| {
-        let init = find_exported_init(program, imported_name)?;
-        let pairs = resolve_alias_pairs_kinded(program, &sibling_path, init, visited, depth);
-        (!pairs.is_empty()).then_some(pairs)
-    })
-    .unwrap_or_default()
-}
 
 /// Find a top-level variable declaration by name and return its init expression
 /// (array, object, or another identifier). Covers bare `const NAME = ...` and
