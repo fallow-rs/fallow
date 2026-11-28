@@ -18,8 +18,9 @@ pub(super) enum HookTarget {
 /// A Husky or Lefthook path that links out of the project is refused before
 /// the probe, so the answer does not depend on the link target.
 pub(super) fn detect_hook_target(root: &Path, removing: bool) -> Result<HookTarget, ExitCode> {
-    for name in [".husky", ".lefthook", "lefthook.yml", "lefthook.json"] {
-        super::project_files::refuse_outside_link(root, &root.join(name))?;
+    super::project_files::refuse_outside_link(root, &root.join(".husky"))?;
+    for name in [".lefthook", "lefthook.yml", "lefthook.json"] {
+        super::project_files::refuse_outside_link_to_check(root, &root.join(name))?;
     }
     if root.join(".husky").is_dir() {
         Ok(HookTarget::Husky(root.join(".husky/pre-commit")))

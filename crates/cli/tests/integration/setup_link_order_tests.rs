@@ -41,8 +41,8 @@ fn run(root: &Path, args: &[&str]) -> CommandOutput {
 /// Run `args` in a project where `name` links out of the project, once
 /// with an existing target and once with a missing one. Both runs must be
 /// refused with the same exit code and the same message, and must not
-/// create `created`.
-fn assert_same_refusal(name: &str, target_is_dir: bool, args: &[&str], created: &str) {
+/// create `created`. Returns the message.
+fn assert_same_refusal(name: &str, target_is_dir: bool, args: &[&str], created: &str) -> String {
     let mut outputs = Vec::new();
     for target_exists in [true, false] {
         let dir = project();
@@ -65,11 +65,46 @@ fn assert_same_refusal(name: &str, target_is_dir: bool, args: &[&str], created: 
         outputs.push((output.code, output.stderr));
     }
     assert_eq!(outputs[0], outputs[1], "{name}: {args:?}");
+    outputs.swap_remove(0).1
 }
 
 #[test]
 fn init_refuses_a_config_link_out_of_the_project_before_the_exists_check() {
     assert_same_refusal(".fallowrc.jsonc", false, &["init"], ".fallowrc.json");
+}
+
+/// The refusal names the action on the path: `init` changes the config
+/// name it writes, and only checks the other names.
+#[test]
+fn init_refusal_names_the_action_on_each_config_name() {
+    for (name, args, verb) in [
+        (".fallowrc.json", &["init"][..], "change"),
+        (".fallow.toml", &["init"], "check"),
+        ("fallow.toml", &["init"], "check"),
+        ("fallow.toml", &["init", "--toml"], "change"),
+        (".fallowrc.json", &["init", "--toml"], "check"),
+    ] {
+        let stderr = assert_same_refusal(name, false, args, "x");
+        assert!(
+            stderr.contains(&format!("Refusing to {verb} {name}:")),
+            "{name} {args:?}: {stderr}"
+        );
+    }
+    let stderr = assert_same_refusal(".fallowrc.jsonc", false, &["migrate"], "x");
+    assert!(
+        stderr.contains("Refusing to check .fallowrc.jsonc:"),
+        "{stderr}"
+    );
+    let stderr = assert_same_refusal(
+        "lefthook.yml",
+        false,
+        &["hooks", "install", "--target", "git"],
+        "x",
+    );
+    assert!(
+        stderr.contains("Refusing to check lefthook.yml:"),
+        "{stderr}"
+    );
 }
 
 #[test]

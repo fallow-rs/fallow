@@ -13,7 +13,7 @@ use git_hook_location::{HookTarget, detect_hook_target, write_hook};
 mod hook_script_tests;
 #[path = "init_project_files.rs"]
 mod project_files;
-use project_files::{display_hook_path, ensure_gitignore, refuse_outside_link};
+use project_files::{display_hook_path, ensure_gitignore, refuse_config_link, refuse_outside_link};
 
 const AGENTS_GUIDE_FILENAME: &str = "AGENTS.md";
 /// Static template used as the ground truth for the empty-project case and
@@ -667,7 +667,7 @@ fn run_init_config(root: &Path, use_toml: bool, quiet: bool) -> ExitCode {
     // project gets the same answer whether its target exists or not.
     for name in &existing_names {
         let path = root.join(name);
-        if let Err(code) = refuse_outside_link(root, &path) {
+        if let Err(code) = refuse_config_link(root, &path, use_toml) {
             return code;
         }
         if path.exists() {

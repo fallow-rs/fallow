@@ -19,7 +19,7 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use crate::exit_codes::exit_invalid_input;
-use crate::setup_hooks::symlink_guard::refusal_message;
+use crate::setup_hooks::symlink_guard::{check_refusal_message, refusal_message};
 use jscpd::migrate_jscpd;
 use jsonc::generate_jsonc;
 use knip::migrate_knip;
@@ -184,7 +184,7 @@ fn reject_existing_fallow_config(root: &Path) -> Option<ExitCode> {
             let link = link.strip_prefix(root).unwrap_or(&link);
             eprintln!(
                 "Error: {}",
-                refusal_message(name, &link.display().to_string())
+                check_refusal_message(name, &link.display().to_string())
             );
             return Some(exit_invalid_input());
         }

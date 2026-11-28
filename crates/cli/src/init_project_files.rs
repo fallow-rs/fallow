@@ -6,7 +6,9 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use crate::exit_codes::exit_invalid_input;
-use crate::setup_hooks::symlink_guard::{OUTSIDE_LINK, OUTSIDE_LINK_REMEDY, refusal_message};
+use crate::setup_hooks::symlink_guard::{
+    OUTSIDE_LINK, OUTSIDE_LINK_REMEDY, check_refusal_message, refusal_message,
+};
 use crate::state_file::read_optional_bytes;
 
 /// `path` relative to `root` when it is below the root, else in full.
@@ -29,12 +31,42 @@ pub(super) fn refuse_tracked_hook_link(root: &Path, path: &Path) -> Result<(), E
 /// Print an error and fail when `path` goes through a symlink that resolves
 /// outside `root`.
 pub(super) fn refuse_outside_link(root: &Path, path: &Path) -> Result<(), ExitCode> {
+    refuse_with(root, path, refusal_message)
+}
+
+/// [`refuse_outside_link`] for a path that the command only checks and does
+/// not write.
+pub(super) fn refuse_outside_link_to_check(root: &Path, path: &Path) -> Result<(), ExitCode> {
+    refuse_with(root, path, check_refusal_message)
+}
+
+/// [`refuse_outside_link`] for a config name of `init`. The name that `init`
+/// writes (`fallow.toml` with `use_toml`, else `.fallowrc.json`) gets the
+/// change message, and each other name the check message.
+pub(super) fn refuse_config_link(root: &Path, path: &Path, use_toml: bool) -> Result<(), ExitCode> {
+    let written = if use_toml {
+        "fallow.toml"
+    } else {
+        ".fallowrc.json"
+    };
+    if path.file_name().is_some_and(|name| name == written) {
+        refuse_outside_link(root, path)
+    } else {
+        refuse_outside_link_to_check(root, path)
+    }
+}
+
+fn refuse_with(
+    root: &Path,
+    path: &Path,
+    message: fn(&str, &str) -> String,
+) -> Result<(), ExitCode> {
     let Some(link) = fallow_types::path_guard::outside_link(root, path) else {
         return Ok(());
     };
     eprintln!(
         "Error: {}",
-        refusal_message(
+        message(
             &display_hook_path(root, path),
             &display_hook_path(root, &link)
         )
