@@ -8,8 +8,8 @@ const CONFIG_REGEX_SIZE_LIMIT: usize = 1024 * 1024;
 /// The largest lazy DFA cache of one config regex, in bytes.
 const CONFIG_REGEX_DFA_SIZE_LIMIT: usize = 1024 * 1024;
 
-/// Compile a regex from project or plugin config with
-/// [`CONFIG_REGEX_SIZE_LIMIT`] on its compiled program.
+/// Compile a regex from project or plugin config with a 1 MiB limit on its
+/// compiled program.
 ///
 /// # Errors
 ///
