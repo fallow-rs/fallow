@@ -416,12 +416,43 @@ pub(crate) fn compile_config_matcher(pattern: &str, field: &str) -> Option<PathM
     }
 }
 
+/// The brace nesting depth from which a validated glob gets a compile check.
+/// The regex parser refuses a glob at about 125 nested brace groups; real
+/// globs nest one or two levels.
+const BRACE_DEPTH_CHECK: usize = 32;
+
+/// The deepest nesting of `{` groups in `text`. An escaped or class brace
+/// also counts, so the value is never lower than the real depth.
+fn max_brace_depth(text: &str) -> usize {
+    let mut depth = 0usize;
+    let mut max = 0usize;
+    for byte in text.bytes() {
+        match byte {
+            b'{' => {
+                depth += 1;
+                max = max.max(depth);
+            }
+            b'}' => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+    }
+    max
+}
+
 /// Check that the matcher of a validated glob compiles.
+///
+/// Only deep brace nesting or a glob longer than [`MAX_GLOB_BYTES`] can
+/// fail to compile, so every other glob skips the check. The code that
+/// uses the glob builds its matcher later, and that build is the only one.
 fn check_compiles(
     glob: Glob,
     pattern: &str,
     field: &'static str,
 ) -> Result<Glob, GlobValidationError> {
+    let text = glob.glob();
+    if text.len() <= MAX_GLOB_BYTES && max_brace_depth(text) < BRACE_DEPTH_CHECK {
+        return Ok(glob);
+    }
     match try_compile_matcher(&glob) {
         Ok(_) => Ok(glob),
         Err(source) => Err(GlobValidationError::Uncompilable {
@@ -1454,6 +1485,29 @@ mod tests {
         assert!(try_compile_matcher(&braces).unwrap().is_match("src/a/x.ts"));
         let long = compile_path_glob(&"a".repeat(MAX_GLOB_BYTES + 1)).unwrap();
         assert!(try_compile_matcher(&long).is_ok());
+    }
+
+    /// A glob below the check depth skips the compile check of validation,
+    /// so its regex must always compile, also at the full length.
+    #[test]
+    fn a_glob_below_the_check_depth_always_compiles() {
+        let depth = BRACE_DEPTH_CHECK - 1;
+        let open = "{*,**/x,".repeat(depth);
+        let close = "}".repeat(depth);
+        let body_len = MAX_GLOB_BYTES - open.len() - close.len();
+        let pattern = format!("{open}{}{close}", "?".repeat(body_len));
+        assert_eq!(pattern.len(), MAX_GLOB_BYTES);
+        assert_eq!(max_brace_depth(&pattern), depth);
+        let glob = compile_path_glob(&pattern).unwrap();
+        assert!(try_compile_matcher(&glob).is_ok());
+    }
+
+    #[test]
+    fn max_brace_depth_counts_nested_groups() {
+        assert_eq!(max_brace_depth("src/**/*.ts"), 0);
+        assert_eq!(max_brace_depth("app/**/page.{ts,tsx}"), 1);
+        assert_eq!(max_brace_depth("{a,{b,c}}/{d,e}"), 2);
+        assert_eq!(max_brace_depth(&deeply_nested_glob()), 130);
     }
 
     #[test]
