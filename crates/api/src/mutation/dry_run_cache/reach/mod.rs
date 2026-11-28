@@ -50,7 +50,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-use fallow_engine::mutation::{MutationPlan, Outline, OutlineBody, SourceKind, probe_key};
+use fallow_engine::mutation::{MutationPlan, Outline, OutlineBody, probe_key};
 use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
 use xxhash_rust::xxh3::{Xxh3, xxh3_64};
@@ -322,9 +322,8 @@ impl ReachFacts {
     /// The outline of `path` for a file that the run did not probe but that
     /// a record names. Only a script file has one.
     fn outline_on_disk(&self, path: &str) -> Option<Outline> {
-        let kind = SourceKind::from_path(path)?;
         let source = std::fs::read_to_string(self.root.join(path)).ok()?;
-        fallow_engine::mutation::outline(&source, kind).ok()
+        fallow_engine::mutation::outline_source(&source, path)
     }
 }
 

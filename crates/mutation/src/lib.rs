@@ -375,15 +375,16 @@ pub fn instrument_with_probes(
 
 /// The [`Outline`] of `source`.
 pub fn outline(source: &str, source_type: SourceKind) -> Result<Outline, MutationError> {
-    if u32::try_from(source.len()).is_err() {
-        return Err(MutationError::TooLarge);
-    }
+    let input = TextInput {
+        source,
+        path: "",
+        kind: source_type,
+        role: None,
+        prelude: false,
+        probe: None,
+    };
     let allocator = oxc_allocator::Allocator::default();
-    let parsed = oxc_parser::Parser::new(&allocator, source, source_type.source_type()).parse();
-    if parsed.fatal_error || parsed.diagnostics.has_errors() {
-        let messages = parsed.diagnostics.iter().map(ToString::to_string).collect();
-        return Err(MutationError::Parse { messages });
-    }
+    let parsed = parse_input(&allocator, &input)?;
     Ok(reach::outline_of(&parsed.program, source))
 }
 

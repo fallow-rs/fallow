@@ -58,6 +58,13 @@ pub(super) fn probe_source(
     })
 }
 
+/// The outline of the script file `path` with the text `source`, or `None`
+/// for a file that gets no probes or that does not parse.
+pub fn outline_source(source: &str, path: &str) -> Option<Outline> {
+    let kind = script_kind(path)?;
+    fallow_extract::parse_bounded(source, || fallow_mutation::outline(source, kind))?.ok()
+}
+
 /// Probes each script file of `reach_files` that is not in `planned`.
 pub(super) fn probe_reach_files(
     root: &Path,

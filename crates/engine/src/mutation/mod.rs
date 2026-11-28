@@ -42,7 +42,7 @@ pub use fallow_mutation::{
 };
 pub use fallow_output::DiffIndex;
 pub use layout::{export_containing, instrument_source, is_component_file};
-pub use probes::{PlanProbes, ProbedFile};
+pub use probes::{PlanProbes, ProbedFile, outline_source};
 pub use skipped_tests::{SkipKind, SkippedTest};
 
 use crate::EngineError;

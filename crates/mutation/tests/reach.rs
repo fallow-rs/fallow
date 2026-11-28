@@ -232,60 +232,58 @@ fn each_corpus_file_gets_valid_probes() {
     let Ok(root) = std::env::var("FALLOW_PROBE_CORPUS") else {
         return;
     };
-    let mut stack = vec![std::path::PathBuf::from(root)];
-    let (mut files, mut skipped) = (0, 0);
+    let checked: Vec<bool> = corpus_files(std::path::PathBuf::from(root))
+        .into_iter()
+        .filter_map(|(path, kind)| check_corpus_file(&path, kind))
+        .collect();
+    let probed = checked.iter().filter(|&&ok| ok).count();
+    eprintln!("probed {probed} files, {} skipped", checked.len() - probed);
+    assert!(probed > 0);
+}
+
+/// Each script file below `root`, without dot folders and `node_modules`.
+fn corpus_files(root: std::path::PathBuf) -> Vec<(std::path::PathBuf, SourceKind)> {
+    let mut stack = vec![root];
+    let mut files = Vec::new();
     while let Some(dir) = stack.pop() {
-        let Ok(entries) = std::fs::read_dir(&dir) else {
-            continue;
-        };
-        for entry in entries.flatten() {
+        for entry in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
             let path = entry.path();
             let name = entry.file_name().to_string_lossy().into_owned();
             if path.is_dir() {
                 if !name.starts_with('.') && name != "node_modules" {
                     stack.push(path);
                 }
-                continue;
-            }
-            let Some(kind) = SourceKind::from_path(&name) else {
-                continue;
-            };
-            let Ok(source) = std::fs::read_to_string(&path) else {
-                continue;
-            };
-            match instrument_with_probes(&source, PATH, kind, &MutationOptions::default()) {
-                Ok((result, outline)) => {
-                    files += 1;
-                    if !parses(&result.code, kind) {
-                        // Compare with the output without probes: a text
-                        // that fails there is not a probe defect.
-                        let plain = fallow_mutation::instrument(
-                            &source,
-                            PATH,
-                            kind,
-                            &MutationOptions::default(),
-                        )
-                        .map(|plain| parses(&plain.code, kind));
-                        assert_eq!(plain, Ok(false), "{}", path.display());
-                        skipped += 1;
-                        continue;
-                    }
-                    assert_eq!(
-                        result.code.matches("__fallow_m_r(\"r").count(),
-                        outline.bodies.len() + 1,
-                        "{}",
-                        path.display()
-                    );
-                }
-                Err(fallow_mutation::MutationError::ProbePlacement) => {
-                    panic!("no probe place in {}", path.display())
-                }
-                Err(_) => skipped += 1,
+            } else if let Some(kind) = SourceKind::from_path(&name) {
+                files.push((path, kind));
             }
         }
     }
-    eprintln!("probed {files} files, {skipped} skipped");
-    assert!(files > 0);
+    files
+}
+
+/// Probes one corpus file. `Some(true)` when the output parses and holds
+/// each probe, `Some(false)` for a file that the instrumentation skips, and
+/// `None` for a file that cannot be read.
+fn check_corpus_file(path: &std::path::Path, kind: SourceKind) -> Option<bool> {
+    let source = std::fs::read_to_string(path).ok()?;
+    let (result, outline) =
+        match instrument_with_probes(&source, PATH, kind, &MutationOptions::default()) {
+            Ok(value) => value,
+            Err(fallow_mutation::MutationError::ProbePlacement) => {
+                panic!("no probe place in {}", path.display())
+            }
+            Err(_) => return Some(false),
+        };
+    if !parses(&result.code, kind) {
+        // A text that fails also without probes is not a probe defect.
+        let plain = fallow_mutation::instrument(&source, PATH, kind, &MutationOptions::default())
+            .map(|plain| parses(&plain.code, kind));
+        assert_eq!(plain, Ok(false), "{}", path.display());
+        return Some(false);
+    }
+    let probes = result.code.matches("__fallow_m_r(\"r").count();
+    assert_eq!(probes, outline.bodies.len() + 1, "{}", path.display());
+    Some(true)
 }
 
 fn ts_outline(source: &str) -> Outline {
