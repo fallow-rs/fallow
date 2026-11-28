@@ -935,8 +935,11 @@ pub(crate) struct CompiledPathRule {
 
 impl CompiledPathRule {
     pub(crate) fn for_entry_rule(rule: &PathRule, rule_kind: &str) -> Option<Self> {
-        let include = match entry_rule_glob(&rule.pattern) {
-            Ok(glob) => glob.compile_matcher(),
+        let compiled = entry_rule_glob(&rule.pattern).map_err(|err| err.to_string());
+        let include = match compiled.and_then(|glob| {
+            fallow_config::try_compile_matcher(&glob).map_err(|err| err.to_string())
+        }) {
+            Ok(matcher) => matcher,
             Err(err) => {
                 tracing::warn!("invalid {rule_kind} '{}': {err}", rule.pattern);
                 return None;
@@ -1031,8 +1034,11 @@ fn compile_excluded_globs(
                 .literal_separator(true)
                 .empty_alternates(true)
                 .build()
-            {
-                Ok(glob) => Some(glob.compile_matcher()),
+                .map_err(|err| err.to_string())
+                .and_then(|glob| {
+                    fallow_config::try_compile_matcher(&glob).map_err(|err| err.to_string())
+                }) {
+                Ok(matcher) => Some(matcher),
                 Err(err) => {
                     tracing::warn!(
                         "skipping invalid excluded glob '{}' for {} '{}': {err}",

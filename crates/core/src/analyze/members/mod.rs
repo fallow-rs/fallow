@@ -321,7 +321,7 @@ fn compile_member_pattern(member: &str) -> Option<GlobMatcher> {
 
     globset::Glob::new(member)
         .ok()
-        .map(|glob| glob.compile_matcher())
+        .and_then(|glob| fallow_config::try_compile_matcher(&glob).ok())
 }
 
 /// User-supplied decorator names that should not count as reflective use.

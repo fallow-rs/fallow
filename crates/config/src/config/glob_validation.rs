@@ -552,18 +552,31 @@ pub fn validate_user_specifier_globs(
 
 /// Validate the glob entries of `ignoreDependencies`, accumulating syntax
 /// errors. Entries without glob metacharacters are exact package names and
-/// are not validated as globs.
+/// are not validated as globs. When each glob is valid, the glob set of all
+/// of them must also compile.
 pub fn validate_user_dependency_globs(
     entries: &[String],
     field: &'static str,
     errors: &mut Vec<GlobValidationError>,
 ) {
-    for entry in entries {
-        if super::is_dependency_glob(entry)
-            && let Err(e) = compile_user_specifier_glob(entry, field)
-        {
-            errors.push(e);
+    let mut set = globset::GlobSetBuilder::new();
+    let mut valid = true;
+    for entry in entries
+        .iter()
+        .filter(|entry| super::is_dependency_glob(entry))
+    {
+        match compile_user_specifier_glob(entry, field) {
+            Ok(glob) => {
+                set.add(glob);
+            }
+            Err(error) => {
+                errors.push(error);
+                valid = false;
+            }
         }
+    }
+    if valid && let Err(source) = set.build() {
+        errors.push(GlobValidationError::PatternSetCompilation { field, source });
     }
 }
 

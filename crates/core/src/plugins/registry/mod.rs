@@ -132,7 +132,7 @@ fn compile_plugin_config_matchers(plugin: &dyn Plugin) -> Vec<globset::GlobMatch
             let prepared = prepare_config_pattern(pattern);
             globset::Glob::new(&prepared)
                 .ok()
-                .map(|glob| glob.compile_matcher())
+                .and_then(|glob| fallow_config::try_compile_matcher(&glob).ok())
         })
         .collect()
 }

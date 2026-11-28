@@ -146,9 +146,10 @@ struct KeyPattern {
 
 impl KeyPattern {
     fn compile(raw: &str) -> Result<Self, String> {
-        let glob = globset::Glob::new(raw)
-            .map_err(|err| format!("invalid --group pattern '{raw}': {err}"))?
-            .compile_matcher();
+        let invalid =
+            |err: &dyn std::fmt::Display| format!("invalid --group pattern '{raw}': {err}");
+        let parsed = globset::Glob::new(raw).map_err(|err| invalid(&err))?;
+        let glob = fallow_config::try_compile_matcher(&parsed).map_err(|err| invalid(&err))?;
         Ok(Self {
             raw: raw.to_owned(),
             glob,
@@ -685,6 +686,13 @@ mod tests {
     use fallow_types::duplicates::{CloneGroup, CloneInstance};
 
     use super::*;
+
+    #[test]
+    fn a_group_pattern_that_does_not_compile_is_an_error() {
+        let nested = format!("{}b{}", "a{".repeat(130), "}".repeat(130));
+        let error = KeyPattern::compile(&nested).err().unwrap_or_default();
+        assert!(error.contains("invalid --group pattern"), "{error}");
+    }
 
     fn selector(patterns: &[&str]) -> GroupSelector {
         let patterns: Vec<String> = patterns.iter().map(|p| (*p).to_owned()).collect();

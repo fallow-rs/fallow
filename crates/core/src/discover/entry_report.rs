@@ -70,10 +70,6 @@ pub fn record_entry_pattern_effect(
 /// A pattern that matches no file gets `true`: it adds nothing either, but
 /// the hint is about entries that duplicate what fallow already detects, so a
 /// pattern that matches nothing is out of scope here.
-#[expect(
-    clippy::expect_used,
-    reason = "entry glob patterns are validated before entry point discovery"
-)]
 fn manual_entry_pattern_effect(
     config: &ResolvedConfig,
     files: &[DiscoveredFile],
@@ -84,9 +80,12 @@ fn manual_entry_pattern_effect(
         .entry_patterns
         .iter()
         .map(|pattern| {
-            let matcher = fallow_config::compile_path_glob(pattern)
-                .expect("entry pattern was validated at config load time")
-                .compile_matcher();
+            let compiled = fallow_config::compile_path_glob(pattern).ok();
+            let Some(matcher) =
+                compiled.and_then(|glob| fallow_config::try_compile_matcher(&glob).ok())
+            else {
+                return true;
+            };
             let mut matched = relative_paths
                 .iter()
                 .zip(files)

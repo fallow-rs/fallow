@@ -385,8 +385,9 @@ fn compile_group(group: &LegacyGlobGroup) -> Option<CompiledGroup<'_>> {
         }
         if has_single_segment_wildcard(normalized)
             && let Ok(glob) = Glob::new(normalized)
+            && let Ok(matcher) = super::glob_validation::try_compile_matcher(&glob)
         {
-            legacy.push((idx, glob.compile_matcher()));
+            legacy.push((idx, matcher));
         }
     }
     if legacy.is_empty() {

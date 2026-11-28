@@ -248,7 +248,9 @@ fn build_rule_report(rule: &ManifestEntryRule, root: &Path) -> RuleReport {
         return report;
     }
 
-    let Ok(glob) = fallow_config::compile_path_glob(&rule.manifests) else {
+    let compiled = fallow_config::compile_path_glob(&rule.manifests).ok();
+    let Some(matcher) = compiled.and_then(|glob| fallow_config::try_compile_matcher(&glob).ok())
+    else {
         // Glob validity is enforced at config load; a compile failure here is
         // defensive and, like a non-matching glob, seeds nothing.
         report.warnings.push(CheckWarning::glob(
@@ -257,7 +259,6 @@ fn build_rule_report(rule: &ManifestEntryRule, root: &Path) -> RuleReport {
         ));
         return report;
     };
-    let matcher = glob.compile_matcher();
 
     let referenced = referenced_field_paths(rule);
     let mut resolved: BTreeMap<&str, bool> =

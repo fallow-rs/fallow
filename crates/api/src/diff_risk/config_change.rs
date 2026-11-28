@@ -651,7 +651,7 @@ fn matchers(globs: &[&str], defaults: &[&str]) -> Vec<GlobMatcher> {
         .iter()
         .chain(defaults)
         .filter_map(|glob| fallow_config::compile_path_glob(glob).ok())
-        .map(|glob| glob.compile_matcher())
+        .filter_map(|glob| fallow_config::try_compile_matcher(&glob).ok())
         .collect()
 }
 
@@ -706,6 +706,12 @@ mod tests {
     use std::path::Path;
 
     use super::test_support::single_file_hits;
+
+    #[test]
+    fn a_config_glob_that_does_not_compile_gives_no_matcher() {
+        let nested = format!("{}b{}", "a{".repeat(130), "}".repeat(130));
+        assert_eq!(super::matchers(&[nested.as_str(), "src/**"], &[]).len(), 1);
+    }
 
     #[test]
     fn a_file_above_the_root_gets_a_parent_path() {

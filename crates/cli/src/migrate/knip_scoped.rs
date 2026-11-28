@@ -574,7 +574,9 @@ fn glob_key_selects(glob: &str, key: &str) -> bool {
     if !is_glob(glob) || is_glob(key) {
         return false;
     }
-    fallow_config::compile_path_glob(glob).is_ok_and(|glob| glob.compile_matcher().is_match(key))
+    fallow_config::compile_path_glob(glob).is_ok_and(|glob| {
+        fallow_config::try_compile_matcher(&glob).is_ok_and(|matcher| matcher.is_match(key))
+    })
 }
 
 /// Migrate a knip `project` setting.
@@ -709,7 +711,7 @@ fn config_name_is_read(config: &str, patterns: &[&str]) -> bool {
         .iter()
         .flat_map(|pattern| [(*pattern).to_string(), format!("**/{pattern}")])
         .filter_map(|pattern| fallow_config::compile_path_glob(&pattern).ok())
-        .map(|glob| glob.compile_matcher())
+        .filter_map(|glob| fallow_config::try_compile_matcher(&glob).ok())
         .collect();
     // Fallow reads every package.json, including the inline tool config that
     // knip lists as `package.json` in the default config of many plugins.
@@ -759,4 +761,14 @@ fn warn_unmapped_workspace_field(
         message,
         suggestion,
     });
+}
+
+#[cfg(test)]
+mod tests {
+    /// A knip `workspaces` key whose regex nests too deep selects no key.
+    #[test]
+    fn a_glob_key_that_does_not_compile_selects_nothing() {
+        let nested = format!("{}b{}", "a{".repeat(130), "}".repeat(130));
+        assert!(!super::glob_key_selects(&nested, "ab"));
+    }
 }
