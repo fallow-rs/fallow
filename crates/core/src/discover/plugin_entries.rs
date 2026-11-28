@@ -609,7 +609,7 @@ mod tests {
 
     #[test]
     fn entry_rules_with_shared_excludes_compile_the_excludes_once() {
-        const RULES: usize = 300;
+        const RULES: usize = 800;
         let mut plugin_result = AggregatedPluginResult::default();
         let excludes: Vec<String> = (0..RULES)
             .map(|index| format!("spec/x{index}.js"))
