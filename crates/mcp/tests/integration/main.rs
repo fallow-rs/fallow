@@ -6,6 +6,7 @@
 
 mod cloud_runtime_context;
 mod code_mode_stop;
+mod code_mode_worker;
 mod consent_form;
 mod in_process_telemetry;
 mod inspect_target_cloud;

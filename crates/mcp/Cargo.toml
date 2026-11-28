@@ -39,6 +39,9 @@ tracing-subscriber.workspace = true
 xxhash-rust.workspace = true
 mimalloc = { workspace = true }
 
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = { workspace = true }
+
 [dev-dependencies]
 fallow-api = { workspace = true, features = ["testing"] }
 regex.workspace = true

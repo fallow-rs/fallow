@@ -675,8 +675,29 @@ a parameter, so a new tool gets the same behavior without a signature change.
   from outside, but a process can. The server kills the snippet process tree
   when `timeout_ms` plus a grace time of 2 seconds passes, or on a cancel, and
   answers with `code mode execution timed out` or the cancel error. A killed
-  snippet has an empty `calls[]`. The snippet process also ends itself 4
-  seconds after `timeout_ms`, for the case that the server is gone.
+  snippet has an empty `calls[]`.
+- The server keeps one idle snippet process, started on a background thread
+  when the server starts (`code_mode_worker_process.rs`). A snippet takes it
+  and gives it back when it ends normally, also with a thrown error, so a
+  normal snippet pays no process start and no process cleanup. Each snippet
+  gets a new JS runtime, so no global survives into the next snippet. A
+  killed process is replaced on a background thread.
+- The snippet process first writes a `ready` line with its protocol version
+  and build version, and each start line carries the same two values. Each
+  side refuses a peer that does not match. Before a spawn, the server also
+  compares the size, change time and inode of its binary file with the values
+  from its own start. A removed or replaced binary gives an error that says to
+  restart the MCP server. On Linux the server spawns `/proc/self/exe`, which
+  stays the running binary.
+- A watchdog thread ends the snippet process when its parent process changes
+  (Unix), or when one snippet runs 4 seconds past its `timeout_ms`. On Linux
+  the process also sets `PR_SET_PDEATHSIG`. That signal follows the thread
+  that started the process, so the server starts every snippet process on
+  one long-lived thread. On Windows the job object of the process tree ends
+  the process with the server.
+- The server writes to the snippet process on a writer thread and waits for
+  each write until the deadline plus the grace time, or a cancel. A process
+  that stops reading cannot hold the server.
 - The snippet process starts no process and runs no analysis. It sends each
   host call and each `fallow.all` batch to the server as one line of JSON on
   its stdout and reads the result on its stdin. The host calls therefore run

@@ -1,14 +1,16 @@
-//! Run a Code Mode snippet in its own process, so that the server can always
+//! Run a Code Mode snippet in a snippet process, so that the server can always
 //! stop it.
 //!
 //! The JS engine calls its interrupt handler between bytecode steps, not
 //! inside a native builtin. One builtin call, for example `reverse` on an
 //! array-like object with a `length` of `2 ** 53 - 1`, can therefore run for
 //! years and never see the deadline or a client cancel. A thread cannot be
-//! stopped from outside, so the server starts each snippet in a child process:
+//! stopped from outside, so the server runs each snippet in a child process:
 //! the server binary with [`CODE_MODE_WORKER_FLAG`]. The server kills that
 //! process tree when the deadline plus [`WORKER_GRACE`] passes, or when the
-//! client cancels the request.
+//! client cancels the request. The process runs one snippet at a time, each
+//! in a new JS runtime, and the server keeps it for the next snippet when the
+//! snippet ends normally.
 //!
 //! The host calls of the snippet still run in the server process. The snippet
 //! process sends each host call and each batch to the server on its stdout and
@@ -16,22 +18,20 @@
 //! count and the kill of a subprocess host call therefore stay in the server,
 //! and the snippet process starts no process of its own.
 //!
-//! Each message is one line of JSON. The server writes one [`WorkerStart`],
-//! then one reply for each [`WorkerMessage::Call`] or [`WorkerMessage::Batch`].
-//! The last message of the snippet process is [`WorkerMessage::Done`].
+//! Each message is one line of JSON. The snippet process first writes
+//! [`WorkerMessage::Ready`]. For each snippet, the server writes one
+//! [`WorkerStart`], then one reply for each [`WorkerMessage::Call`] or
+//! [`WorkerMessage::Batch`]. The snippet ends with [`WorkerMessage::Done`].
+//! Both sides refuse a peer of another protocol version or build version.
 
-use std::ffi::OsString;
-use std::io::{BufRead, BufReader, Read, Write};
+use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Child, ChildStdin, ChildStdout, Command, ExitCode, Stdio};
-use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
+use std::process::ExitCode;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use fallow_process::{
-    ChildCleanup, ProcessTree, cleanup_std_child, configure_std_command,
-    spawn_retrying_busy_executable,
-};
 use rustc_hash::FxHashMap;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -41,18 +41,30 @@ use crate::params::CodeExecuteParams;
 
 use super::code_mode_tools::CodeModeTool;
 use super::{
-    BatchOutcome, CANCEL_POLL_INTERVAL, CANCELLED_BY_CLIENT, HostDispatch, MAX_HOST_CALLS,
-    PendingHostCall, SnippetLimits, dispatch_host_call, execute_code_mode_with, is_cancelled,
-    refuse_before_run, run_batch_dispatches,
+    BatchOutcome, CANCELLED_BY_CLIENT, HostDispatch, MAX_HOST_CALLS, PendingHostCall,
+    SnippetLimits, dispatch_host_call, execute_code_mode_with, refuse_before_run,
+    run_batch_dispatches,
 };
+
+#[path = "code_mode_worker_process.rs"]
+mod process;
+
+pub use process::CodeModeWorker;
+use process::WorkerProcess;
 
 /// The argument that starts the server binary as a snippet process. It is
 /// internal: only the server passes it.
 pub const CODE_MODE_WORKER_FLAG: &str = "--code-mode-worker";
 
-/// The token that routes the multicall `fallow` binary to the MCP server
-/// entry. The standalone `fallow-mcp` binary ignores it.
-const MCP_SERVER_SUBCOMMAND: &str = "mcp-server";
+/// The version of the line protocol between the server and a snippet process.
+const PROTOCOL_VERSION: u32 = 1;
+
+/// The build of this binary. A server and a snippet process of another build
+/// refuse each other.
+const BUILD_VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// The end of each error that a restart of the server fixes.
+const RESTART_HINT: &str = "restart the MCP server";
 
 /// Time after `timeout_ms` before the server kills the snippet process. The
 /// interrupt handler of the snippet process stops a snippet that runs
@@ -60,54 +72,26 @@ const MCP_SERVER_SUBCOMMAND: &str = "mcp-server";
 /// `calls[]` trace. The kill is for a snippet inside a long builtin call.
 const WORKER_GRACE: Duration = Duration::from_secs(2);
 
-/// Longest message line that the server reads from a snippet process. The
-/// final envelope is bounded by `max_output_bytes` and the trace limits; this
-/// cap only keeps a defect in the snippet process from growing the server
-/// memory without limit.
-const MAX_WORKER_LINE_BYTES: u64 = 64 * 1024 * 1024;
-
 const TIMED_OUT: &str = "code mode execution timed out";
+
+/// How often the watchdog of a snippet process checks its parent and its time
+/// limit.
+const WATCH_INTERVAL: Duration = Duration::from_millis(100);
 
 /// Exit code of a snippet process that ended itself at its own time limit.
 const WORKER_TIMED_OUT_EXIT: i32 = 124;
 
-/// How to start a snippet process.
-#[derive(Clone, Debug)]
-pub struct CodeModeWorker {
-    program: PathBuf,
-    args: Vec<OsString>,
-}
+/// Exit code of a snippet process whose server is gone.
+#[cfg(unix)]
+const WORKER_ORPHANED_EXIT: i32 = 125;
 
-impl CodeModeWorker {
-    /// The running server binary as the snippet process, or `None` when the
-    /// path of the running binary is not available.
-    pub fn current() -> Option<Self> {
-        std::env::current_exe().ok().map(Self::server_binary)
-    }
-
-    /// `program` as a server binary: `fallow-mcp`, or the multicall `fallow`.
-    pub fn server_binary(program: PathBuf) -> Self {
-        Self {
-            program,
-            args: vec![
-                OsString::from(MCP_SERVER_SUBCOMMAND),
-                OsString::from(CODE_MODE_WORKER_FLAG),
-            ],
-        }
-    }
-
-    #[cfg(all(test, unix))]
-    fn with_args(program: PathBuf, args: &[&str]) -> Self {
-        Self {
-            program,
-            args: args.iter().map(OsString::from).collect(),
-        }
-    }
-}
-
-/// The first message to a snippet process: the snippet and its limits.
+/// The start of one snippet: the protocol and build of the server, the server
+/// folder, and the snippet with its limits.
 #[derive(Serialize, Deserialize)]
 struct WorkerStart {
+    protocol: u32,
+    version: String,
+    cwd: PathBuf,
     code: String,
     root: Option<String>,
     timeout_ms: Option<u64>,
@@ -118,6 +102,8 @@ struct WorkerStart {
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum WorkerMessage {
+    /// The first message of a snippet process: its protocol and build.
+    Ready { protocol: u32, version: String },
     /// Run one host call. The reply is a `Result<String, String>`.
     Call {
         tool: String,
@@ -132,6 +118,32 @@ enum WorkerMessage {
     },
     /// The snippet ended. `output` is the response text.
     Done { ok: bool, output: String },
+}
+
+/// Why the server stopped a snippet process.
+#[derive(Debug, PartialEq, Eq)]
+enum Stop {
+    TimedOut,
+    Cancelled,
+    Failed(String),
+}
+
+impl Stop {
+    fn message(&self) -> &str {
+        match self {
+            Self::TimedOut => TIMED_OUT,
+            Self::Cancelled => CANCELLED_BY_CLIENT,
+            Self::Failed(error) => error,
+        }
+    }
+}
+
+/// The error for a peer of another protocol or build.
+fn mismatch_message(protocol: u32, version: &str) -> String {
+    format!(
+        "code mode snippet process and server do not match (protocol {protocol}, version \
+         {version}; expected protocol {PROTOCOL_VERSION}, version {BUILD_VERSION}); {RESTART_HINT}"
+    )
 }
 
 #[derive(Serialize, Deserialize)]
@@ -204,23 +216,24 @@ fn execute_isolated_in(
     let limits = SnippetLimits::new(&params);
     refuse_before_run(&params, &limits, cwd)?;
     let Some(worker) = worker else {
-        return Err(limits.error(
-            "code mode could not start the snippet process: the path of the server binary is unknown",
-        ));
+        return Err(limits.error(&format!(
+            "code mode could not start the snippet process: the path of the server binary is \
+             unknown; {RESTART_HINT}"
+        )));
     };
     let host_deadline = started + Duration::from_millis(limits.timeout_ms);
     let stop_at = host_deadline + WORKER_GRACE;
 
-    let mut run = WorkerRun::spawn(worker, cwd).map_err(|error| limits.error(&error))?;
+    let mut process = worker.take().map_err(|error| limits.error(&error))?;
     let start = WorkerStart {
+        protocol: PROTOCOL_VERSION,
+        version: BUILD_VERSION.to_string(),
+        cwd: cwd.to_path_buf(),
         code: params.code,
         root: params.root,
         timeout_ms: params.timeout_ms,
         max_output_bytes: params.max_output_bytes,
     };
-    if let Err(error) = run.send(&start) {
-        return Err(run.stop(&limits, &error));
-    }
     let mut host = ServerHost {
         binary,
         deadline: host_deadline,
@@ -228,40 +241,55 @@ fn execute_isolated_in(
         max_output_bytes: limits.max_output_bytes,
         dispatched: 0,
     };
+    match run_snippet(&mut process, &start, &mut host, stop_at) {
+        Ok((ok, output)) => {
+            worker.give_back(process);
+            if ok { Ok(output) } else { Err(output) }
+        }
+        Err(stop) => {
+            drop(process);
+            worker.refill_in_background();
+            Err(limits.error(stop.message()))
+        }
+    }
+}
 
+/// Drive one snippet on `process` until its `Done` message.
+fn run_snippet(
+    process: &mut WorkerProcess,
+    start: &WorkerStart,
+    host: &mut ServerHost<'_>,
+    stop_at: Instant,
+) -> Result<(bool, String), Stop> {
+    let request = host.request;
+    process.send(start, stop_at, request)?;
     loop {
-        if is_cancelled(request) {
-            return Err(run.stop(&limits, CANCELLED_BY_CLIENT));
+        let message = process.receive(stop_at, request)?;
+        if !process.is_ready() && !matches!(message, WorkerMessage::Ready { .. }) {
+            return Err(Stop::Failed(
+                "code mode snippet process did not announce its protocol".to_string(),
+            ));
         }
-        let left = stop_at.saturating_duration_since(Instant::now());
-        if left.is_zero() {
-            return Err(run.stop(&limits, TIMED_OUT));
-        }
-        let message = match run.messages.recv_timeout(left.min(CANCEL_POLL_INTERVAL)) {
-            Err(RecvTimeoutError::Timeout) => continue,
-            Err(RecvTimeoutError::Disconnected) => {
-                return Err(run.stop(&limits, "code mode snippet process ended without a result"));
+        match message {
+            WorkerMessage::Ready { protocol, version } => {
+                process.accept_ready(protocol, &version)?;
             }
-            Ok(Err(error)) => return Err(run.stop(&limits, &error)),
-            Ok(Ok(message)) => message,
-        };
-        let sent = match message {
-            WorkerMessage::Done { ok, output } => {
-                run.finish();
-                return if ok { Ok(output) } else { Err(output) };
-            }
+            WorkerMessage::Done { ok, output } => return Ok((ok, output)),
             WorkerMessage::Call {
                 tool,
                 params,
                 max_output_bytes,
-            } => run.send(&host.call(&tool, params, max_output_bytes)),
+            } => {
+                let reply = host.call(&tool, params, max_output_bytes);
+                process.send(&reply, stop_at, request)?;
+            }
             WorkerMessage::Batch {
                 calls,
                 element_output_bytes,
-            } => run.send(&host.batch(calls, element_output_bytes)),
-        };
-        if let Err(error) = sent {
-            return Err(run.stop(&limits, &error));
+            } => {
+                let reply = host.batch(calls, element_output_bytes);
+                process.send(&reply, stop_at, request)?;
+            }
         }
     }
 }
@@ -349,143 +377,15 @@ impl ServerHost<'_> {
     }
 }
 
-/// One running snippet process. Drop kills its process tree.
-struct WorkerRun {
-    child: Child,
-    tree: ProcessTree,
-    stdin: Option<ChildStdin>,
-    messages: Receiver<Result<WorkerMessage, String>>,
-    cleaned: bool,
-}
-
-impl WorkerRun {
-    fn spawn(worker: &CodeModeWorker, cwd: &Path) -> Result<Self, String> {
-        let mut command = Command::new(&worker.program);
-        // The snippet process speaks only the line protocol on stdin and
-        // stdout. Its stderr would reach the MCP client log, so it is closed.
-        command
-            .args(&worker.args)
-            .current_dir(cwd)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null());
-        configure_std_command(&mut command);
-        let mut child = spawn_retrying_busy_executable(&mut command).map_err(|err| {
-            format!(
-                "code mode could not start the snippet process '{}': {err}",
-                worker.program.display()
-            )
-        })?;
-        let tree = match ProcessTree::for_std_child(&child) {
-            Ok(tree) => tree,
-            Err(error) => {
-                let cleanup = cleanup_std_child(None, &mut child);
-                log_cleanup_errors(&cleanup);
-                return Err(format!(
-                    "code mode could not track the snippet process: {error}"
-                ));
-            }
-        };
-        let stdin = child.stdin.take();
-        let Some(stdout) = child.stdout.take() else {
-            let cleanup = cleanup_std_child(Some(&tree), &mut child);
-            log_cleanup_errors(&cleanup);
-            return Err("code mode snippet process has no stdout".to_string());
-        };
-        let (sender, messages) = mpsc::channel();
-        thread::spawn(move || read_messages(stdout, &sender));
-        Ok(Self {
-            child,
-            tree,
-            stdin,
-            messages,
-            cleaned: false,
-        })
-    }
-
-    fn send<T: Serialize>(&mut self, message: &T) -> Result<(), String> {
-        let stdin = self
-            .stdin
-            .as_mut()
-            .ok_or("code mode snippet process input is closed")?;
-        let mut line = serde_json::to_vec(message)
-            .map_err(|err| format!("failed to encode a code mode message: {err}"))?;
-        line.push(b'\n');
-        stdin
-            .write_all(&line)
-            .and_then(|()| stdin.flush())
-            .map_err(|err| format!("failed to write to the code mode snippet process: {err}"))
-    }
-
-    /// Kill the process tree and build the error envelope. Cleanup errors go
-    /// to the log, so the error keeps its exact wording.
-    fn stop(mut self, limits: &SnippetLimits, error: &str) -> String {
-        self.finish();
-        limits.error(error)
-    }
-
-    fn finish(&mut self) {
-        if self.cleaned {
-            return;
-        }
-        self.cleaned = true;
-        self.stdin = None;
-        let cleanup = cleanup_std_child(Some(&self.tree), &mut self.child);
-        log_cleanup_errors(&cleanup);
-    }
-}
-
-impl Drop for WorkerRun {
-    fn drop(&mut self) {
-        self.finish();
-    }
-}
-
-fn log_cleanup_errors(cleanup: &ChildCleanup) {
-    if cleanup.errors.is_empty() {
-        return;
-    }
-    tracing::warn!(
-        errors = cleanup.errors.join("; "),
-        "code mode snippet process cleanup reported errors"
-    );
-}
-
-/// Read message lines from a snippet process until its stdout closes.
-fn read_messages(stdout: ChildStdout, sender: &Sender<Result<WorkerMessage, String>>) {
-    let mut reader = BufReader::new(stdout);
-    loop {
-        let mut line = Vec::new();
-        let read = (&mut reader)
-            .take(MAX_WORKER_LINE_BYTES + 1)
-            .read_until(b'\n', &mut line);
-        let message = match read {
-            Ok(0) => return,
-            Ok(_) if line.len() as u64 > MAX_WORKER_LINE_BYTES => Err(format!(
-                "code mode snippet process sent a message over {MAX_WORKER_LINE_BYTES} bytes"
-            )),
-            Ok(_) => serde_json::from_slice(&line)
-                .map_err(|err| format!("code mode snippet process sent an invalid message: {err}")),
-            Err(err) => Err(format!(
-                "failed to read from the code mode snippet process: {err}"
-            )),
-        };
-        let stop = message.is_err();
-        if sender.send(message).is_err() || stop {
-            return;
-        }
-    }
-}
-
 /// The snippet-process side of the host calls: requests go out on stdout, and
 /// replies come in on stdin.
 pub(super) struct ServerLink {
-    input: Box<dyn BufRead>,
+    input: std::io::Stdin,
 }
 
 impl ServerLink {
     pub(super) fn call(
-        &mut self,
+        &self,
         tool: CodeModeTool,
         params: serde_json::Value,
         max_output_bytes: usize,
@@ -499,7 +399,7 @@ impl ServerLink {
     }
 
     pub(super) fn batch(
-        &mut self,
+        &self,
         element_output_bytes: usize,
         pending: Vec<PendingHostCall>,
     ) -> FxHashMap<String, BatchOutcome> {
@@ -536,9 +436,10 @@ impl ServerLink {
             .collect()
     }
 
-    fn receive<T: DeserializeOwned>(&mut self) -> Result<T, String> {
+    fn receive<T: DeserializeOwned>(&self) -> Result<T, String> {
         let mut line = String::new();
-        match self.input.read_line(&mut line) {
+        let read = read_line(&self.input, &mut line);
+        match read {
             Ok(0) => Err("code mode server closed the snippet process input".to_string()),
             Ok(_) => serde_json::from_str(&line)
                 .map_err(|err| format!("code mode server sent an invalid reply: {err}")),
@@ -560,63 +461,159 @@ fn send_to_server(message: &WorkerMessage) -> Result<(), String> {
         .map_err(|err| format!("failed to write to the code mode server: {err}"))
 }
 
-/// The entry of a snippet process: read one [`WorkerStart`] on stdin, run the
-/// snippet, and write [`WorkerMessage::Done`] on stdout.
+/// The entry of a snippet process: announce the protocol and build, then run
+/// one snippet for each [`WorkerStart`] on stdin, each in a new JS runtime,
+/// until stdin closes.
 pub fn run_code_mode_worker() -> ExitCode {
-    let mut input: Box<dyn BufRead> = Box::new(std::io::stdin().lock());
-    let mut line = String::new();
-    let start = match input.read_line(&mut line) {
-        Ok(_) => serde_json::from_str::<WorkerStart>(&line)
-            .map_err(|err| format!("code mode snippet process got an invalid start: {err}")),
-        Err(err) => Err(format!(
-            "code mode snippet process could not read its start: {err}"
-        )),
+    let watchdog = Watchdog::start();
+    let input = std::io::stdin();
+    let ready = WorkerMessage::Ready {
+        protocol: PROTOCOL_VERSION,
+        version: BUILD_VERSION.to_string(),
     };
-    let start = match start {
-        Ok(start) => start,
-        Err(error) => {
-            let _ = send_to_server(&WorkerMessage::Done {
-                ok: false,
-                output: error,
-            });
-            return ExitCode::from(2);
+    if send_to_server(&ready).is_err() {
+        return ExitCode::FAILURE;
+    }
+    loop {
+        let mut line = String::new();
+        let read = read_line(&input, &mut line);
+        match read {
+            Ok(0) => return ExitCode::SUCCESS,
+            Ok(_) => {}
+            Err(_) => return ExitCode::FAILURE,
         }
-    };
-    let params = CodeExecuteParams {
-        code: start.code,
-        root: start.root,
-        timeout_ms: start.timeout_ms,
-        max_output_bytes: start.max_output_bytes,
-    };
-    start_exit_timer(SnippetLimits::new(&params).timeout_ms);
-    let (ok, output) = match execute_code_mode_with(
-        HostDispatch::Server(ServerLink { input }),
-        params,
-        None,
-        Path::new("."),
-    ) {
-        Ok(output) => (true, output),
-        Err(output) => (false, output),
-    };
-    match send_to_server(&WorkerMessage::Done { ok, output }) {
-        Ok(()) => ExitCode::SUCCESS,
-        Err(_) => ExitCode::FAILURE,
+        let start = match serde_json::from_str::<WorkerStart>(&line) {
+            Ok(start) if start.protocol == PROTOCOL_VERSION && start.version == BUILD_VERSION => {
+                start
+            }
+            Ok(start) => return refuse_start(mismatch_message(start.protocol, &start.version)),
+            Err(err) => {
+                return refuse_start(format!(
+                    "code mode snippet process got an invalid start ({err}); {RESTART_HINT}"
+                ));
+            }
+        };
+        let params = CodeExecuteParams {
+            code: start.code,
+            root: start.root,
+            timeout_ms: start.timeout_ms,
+            max_output_bytes: start.max_output_bytes,
+        };
+        watchdog.busy_for(SnippetLimits::new(&params).timeout_ms);
+        let result = execute_code_mode_with(
+            HostDispatch::Server(ServerLink {
+                input: std::io::stdin(),
+            }),
+            params,
+            None,
+            &start.cwd,
+        );
+        watchdog.idle();
+        let (ok, output) = match result {
+            Ok(output) => (true, output),
+            Err(output) => (false, output),
+        };
+        if send_to_server(&WorkerMessage::Done { ok, output }).is_err() {
+            return ExitCode::FAILURE;
+        }
     }
 }
 
-/// End the snippet process after its time limit when no server kills it, for
-/// example after the server itself was killed.
-fn start_exit_timer(timeout_ms: u64) {
-    let limit = Duration::from_millis(timeout_ms) + 2 * WORKER_GRACE;
-    thread::spawn(move || {
-        thread::sleep(limit);
-        #[expect(
-            clippy::exit,
-            reason = "the snippet process must end even while its main thread is inside a builtin call"
-        )]
-        std::process::exit(WORKER_TIMED_OUT_EXIT);
-    });
+/// Read one line of `input`. The lock of the shared stdin buffer ends with
+/// the call.
+fn read_line(input: &std::io::Stdin, line: &mut String) -> std::io::Result<usize> {
+    input.lock().read_line(line)
 }
+
+fn refuse_start(error: String) -> ExitCode {
+    let _ = send_to_server(&WorkerMessage::Done {
+        ok: false,
+        output: error,
+    });
+    ExitCode::from(2)
+}
+
+/// Ends the snippet process when its server is gone, or when one snippet runs
+/// past its time limit plus twice [`WORKER_GRACE`] and no server kills it.
+struct Watchdog {
+    started: Instant,
+    /// The end of the time limit of the running snippet, in milliseconds
+    /// after `started`. Zero while no snippet runs.
+    busy_until_ms: Arc<AtomicU64>,
+}
+
+impl Watchdog {
+    fn start() -> Self {
+        exit_with_parent();
+        let started = Instant::now();
+        let busy_until_ms = Arc::new(AtomicU64::new(0));
+        let watched = Arc::clone(&busy_until_ms);
+        #[cfg(unix)]
+        let parent = std::os::unix::process::parent_id();
+        let watch = move || {
+            loop {
+                thread::sleep(WATCH_INTERVAL);
+                // A process whose parent ended gets a new parent. A job object
+                // stops the process on Windows instead.
+                #[cfg(unix)]
+                if std::os::unix::process::parent_id() != parent {
+                    exit_now(WORKER_ORPHANED_EXIT);
+                }
+                let until = watched.load(Ordering::Relaxed);
+                if until != 0 && elapsed_ms(started) > until {
+                    exit_now(WORKER_TIMED_OUT_EXIT);
+                }
+            }
+        };
+        if let Err(error) = thread::Builder::new()
+            .name("code-mode-watchdog".to_string())
+            .spawn(watch)
+        {
+            tracing::warn!(%error, "code mode snippet process has no watchdog");
+        }
+        Self {
+            started,
+            busy_until_ms,
+        }
+    }
+
+    fn busy_for(&self, timeout_ms: u64) {
+        let limit = Duration::from_millis(timeout_ms) + 2 * WORKER_GRACE;
+        let limit_ms = u64::try_from(limit.as_millis()).unwrap_or(u64::MAX);
+        let until = elapsed_ms(self.started).saturating_add(limit_ms).max(1);
+        self.busy_until_ms.store(until, Ordering::Relaxed);
+    }
+
+    fn idle(&self) {
+        self.busy_until_ms.store(0, Ordering::Relaxed);
+    }
+}
+
+fn elapsed_ms(started: Instant) -> u64 {
+    u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX)
+}
+
+#[expect(
+    clippy::exit,
+    reason = "the snippet process must end even while its main thread is inside a builtin call"
+)]
+fn exit_now(code: i32) -> ! {
+    std::process::exit(code)
+}
+
+/// Ask Linux to kill this snippet process when the thread that started it
+/// ends. The server starts each snippet process on one thread that lives as
+/// long as the server.
+#[cfg(target_os = "linux")]
+fn exit_with_parent() {
+    let signal = libc::c_ulong::from(libc::SIGKILL.unsigned_abs());
+    #[expect(unsafe_code, reason = "prctl has no safe wrapper in std")]
+    // SAFETY: PR_SET_PDEATHSIG reads one signal number and no memory.
+    let _ = unsafe { libc::prctl(libc::PR_SET_PDEATHSIG, signal) };
+}
+
+#[cfg(not(target_os = "linux"))]
+fn exit_with_parent() {}
 
 #[cfg(test)]
 mod tests {
@@ -634,6 +631,42 @@ mod tests {
     fn error_of(output: &str) -> String {
         let envelope: serde_json::Value = serde_json::from_str(output).expect("envelope json");
         envelope["error"].as_str().expect("error text").to_string()
+    }
+
+    fn run(
+        worker: &CodeModeWorker,
+        code: &str,
+        timeout_ms: u64,
+        cwd: &Path,
+    ) -> Result<String, String> {
+        execute_isolated_in(
+            Some(worker),
+            "fallow".to_string(),
+            params(code, timeout_ms),
+            None,
+            cwd,
+        )
+    }
+
+    /// The built `fallow-mcp` binary. `cargo test -p fallow-mcp` builds it for
+    /// the integration tests.
+    fn server_binary() -> PathBuf {
+        let exe = std::env::current_exe().expect("test binary path");
+        let dir = exe.parent().expect("test binary directory");
+        let mut path = dir
+            .ancestors()
+            .find(|ancestor| ancestor.ends_with("deps") || ancestor.ends_with("build"))
+            .and_then(Path::parent)
+            .unwrap_or(dir)
+            .join("fallow-mcp");
+        if cfg!(windows) {
+            path.set_extension("exe");
+        }
+        assert!(
+            path.is_file(),
+            "fallow-mcp binary not found at {path:?}. Build it first: cargo build -p fallow-mcp"
+        );
+        path
     }
 
     fn host_with_spent_budget() -> ServerHost<'static> {
@@ -689,6 +722,127 @@ mod tests {
         )
         .expect_err("no snippet process means no run");
         assert!(error_of(&output).contains("could not start the snippet process"));
+        assert!(error_of(&output).contains(RESTART_HINT));
+    }
+
+    /// A normal snippet must not pay a process start or a process cleanup.
+    #[test]
+    fn a_finished_snippet_keeps_its_process_for_the_next_snippet() {
+        let cwd = tempfile::tempdir().expect("tempdir");
+        let worker = CodeModeWorker::server_binary(server_binary());
+        let first = run(&worker, "return 1 + 1;", 5_000, cwd.path()).expect("first snippet");
+        assert!(first.contains(r#""result":2"#), "{first}");
+        let pid = worker
+            .idle_pid()
+            .expect("the process stays idle in the pool");
+
+        let error = run(&worker, "throw new Error('boom');", 5_000, cwd.path())
+            .expect_err("a thrown error is a failed snippet");
+        assert!(error_of(&error).contains("boom"), "{error}");
+        assert_eq!(
+            worker.idle_pid(),
+            Some(pid),
+            "a failed snippet keeps the process"
+        );
+
+        let second = run(
+            &worker,
+            "return typeof globalThis.leftover;",
+            5_000,
+            cwd.path(),
+        )
+        .expect("second snippet");
+        assert!(second.contains(r#""result":"undefined""#), "{second}");
+        assert_eq!(
+            worker.idle_pid(),
+            Some(pid),
+            "the next snippet reuses the process"
+        );
+    }
+
+    /// A new JS runtime per snippet: a global of one snippet is gone in the
+    /// next one.
+    #[test]
+    fn a_snippet_does_not_see_the_globals_of_the_previous_snippet() {
+        let cwd = tempfile::tempdir().expect("tempdir");
+        let worker = CodeModeWorker::server_binary(server_binary());
+        run(
+            &worker,
+            "globalThis.leftover = 1; return 0;",
+            5_000,
+            cwd.path(),
+        )
+        .expect("first snippet");
+        let second = run(
+            &worker,
+            "return typeof globalThis.leftover;",
+            5_000,
+            cwd.path(),
+        )
+        .expect("second snippet");
+        assert!(second.contains(r#""result":"undefined""#), "{second}");
+    }
+
+    #[test]
+    fn a_removed_server_binary_is_refused_with_a_restart_hint() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let program = dir.path().join("server");
+        std::fs::write(&program, "a").expect("write the binary");
+        let worker = CodeModeWorker::with_args(program.clone(), &[]);
+        std::fs::remove_file(&program).expect("remove the binary");
+
+        let error = run(&worker, "return 1;", 5_000, dir.path()).expect_err("no binary");
+        assert!(error_of(&error).contains(RESTART_HINT), "{error}");
+    }
+
+    #[test]
+    fn a_replaced_server_binary_is_refused_with_a_restart_hint() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let program = dir.path().join("server");
+        std::fs::write(&program, "a").expect("write the binary");
+        let worker = CodeModeWorker::with_args(program.clone(), &[]);
+        std::fs::write(&program, "another build").expect("replace the binary");
+
+        let error = run(&worker, "return 1;", 5_000, dir.path()).expect_err("other binary");
+        assert!(
+            error_of(&error).contains("changed after the server started"),
+            "{error}"
+        );
+        assert!(error_of(&error).contains(RESTART_HINT), "{error}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_snippet_process_of_another_build_is_refused_with_a_restart_hint() {
+        let cwd = tempfile::tempdir().expect("tempdir");
+        let worker = CodeModeWorker::with_args(
+            PathBuf::from("/bin/sh"),
+            &[
+                "-c",
+                r#"printf '%s\n' '{"kind":"ready","protocol":1,"version":"0.0.0-other"}'; sleep 10"#,
+            ],
+        );
+        let error = run(&worker, "return 1;", 5_000, cwd.path()).expect_err("other build");
+        assert!(error_of(&error).contains("do not match"), "{error}");
+        assert!(error_of(&error).contains(RESTART_HINT), "{error}");
+    }
+
+    /// A process that does not read its stdin must not hold the server past
+    /// the deadline on a large reply.
+    #[cfg(unix)]
+    #[test]
+    fn a_write_to_a_process_that_does_not_read_ends_at_the_deadline() {
+        let worker = CodeModeWorker::with_args(PathBuf::from("/bin/sh"), &["-c", "sleep 10"]);
+        let process = worker.take().expect("spawn");
+        let reply: Result<String, String> = Ok("x".repeat(4_000_000));
+        let started = Instant::now();
+        let sent = process.send(&reply, started + Duration::from_millis(300), None);
+        assert_eq!(sent, Err(Stop::TimedOut));
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "the write ended after {:?}",
+            started.elapsed()
+        );
     }
 
     /// A snippet process that never answers stands for a snippet inside a
@@ -697,16 +851,10 @@ mod tests {
     #[test]
     fn a_silent_snippet_process_is_killed_at_the_deadline() {
         let cwd = tempfile::tempdir().expect("tempdir");
-        let worker = CodeModeWorker::with_args(PathBuf::from("/bin/sh"), &["-c", "sleep 60"]);
+        let worker = CodeModeWorker::with_args(PathBuf::from("/bin/sh"), &["-c", "sleep 10"]);
         let started = Instant::now();
-        let output = execute_isolated_in(
-            Some(&worker),
-            "fallow".to_string(),
-            params("return 1;", 200),
-            None,
-            cwd.path(),
-        )
-        .expect_err("the silent snippet must time out");
+        let output = run(&worker, "return 1;", 200, cwd.path())
+            .expect_err("the silent snippet must time out");
         assert_eq!(error_of(&output), TIMED_OUT);
         assert!(
             started.elapsed() < Duration::from_millis(200) + WORKER_GRACE + Duration::from_secs(3),
@@ -719,7 +867,7 @@ mod tests {
     #[test]
     fn a_client_cancel_kills_the_snippet_process() {
         let cwd = tempfile::tempdir().expect("tempdir");
-        let worker = CodeModeWorker::with_args(PathBuf::from("/bin/sh"), &["-c", "sleep 60"]);
+        let worker = CodeModeWorker::with_args(PathBuf::from("/bin/sh"), &["-c", "sleep 10"]);
         let request = CancellationToken::new();
         let cancel = request.clone();
         let canceller = thread::spawn(move || {
@@ -749,17 +897,7 @@ mod tests {
     fn a_snippet_process_that_exits_without_a_result_is_an_error() {
         let cwd = tempfile::tempdir().expect("tempdir");
         let worker = CodeModeWorker::with_args(PathBuf::from("/bin/sh"), &["-c", "exit 3"]);
-        let output = execute_isolated_in(
-            Some(&worker),
-            "fallow".to_string(),
-            params("return 1;", 5_000),
-            None,
-            cwd.path(),
-        )
-        .expect_err("no result is an error");
-        assert_eq!(
-            error_of(&output),
-            "code mode snippet process ended without a result"
-        );
+        let output = run(&worker, "return 1;", 5_000, cwd.path()).expect_err("no result");
+        assert_eq!(error_of(&output), process::ENDED_WITHOUT_RESULT);
     }
 }

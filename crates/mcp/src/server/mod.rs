@@ -98,6 +98,13 @@ impl FallowMcp {
         }
     }
 
+    /// Start the idle Code Mode snippet process on a background thread.
+    pub fn prewarm_code_mode(&self) {
+        if let Some(worker) = &self.code_mode_worker {
+            worker.prewarm();
+        }
+    }
+
     /// The task store, which the stdio loop shuts down when the client leaves.
     pub fn task_store(&self) -> crate::tasks::TaskStore {
         self.tasks.clone()
