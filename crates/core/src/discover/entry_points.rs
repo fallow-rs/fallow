@@ -18,6 +18,8 @@ use crate::scripts::{IgnoredCommandEntries, ScriptCatalog, WorkspacePackages};
 
 #[path = "entry_dedup.rs"]
 mod entry_dedup;
+#[path = "entry_output_dir.rs"]
+mod entry_output_dir;
 #[path = "manual_entries.rs"]
 mod manual_entries;
 #[cfg(test)]
@@ -35,6 +37,8 @@ mod script_package;
 mod source_index_fallback_tests;
 #[path = "wildcard_entries.rs"]
 mod wildcard_entries;
+
+pub(super) use entry_output_dir::{OutputDirEntry, resolve_entry_via_output_dir};
 use manual_entries::{push_manual_entry_matches, push_support_entry_matches};
 #[cfg(test)]
 use plugin_entries::discover_plugin_entry_point_sets;
@@ -307,6 +311,12 @@ impl EntryProbe {
     }
 }
 
+/// Whether `path` holds only normal names and `.`: no root, prefix or `..`.
+fn is_plain_relative(path: &Path) -> bool {
+    path.components()
+        .all(|component| matches!(component, Component::Normal(_) | Component::CurDir))
+}
+
 fn resolve_entry_path_with_output_map(
     base: &Path,
     entry: &str,
@@ -335,7 +345,15 @@ fn resolve_entry_path_with_output_map(
     // An absolute entry, or one behind a link out of the project, is refused
     // before any probe. The probe result would show whether a file outside
     // the project exists.
-    if !fallow_config::may_probe_project_path(base, Path::new(entry)) {
+    //
+    // A plain relative entry walks only when no candidate resolved, to name
+    // the reason. Each probe goes through `is_probed_project_file` or
+    // `validated_entry_point`, and both refuse a candidate that resolves out
+    // of the scope, whether its target exists or not, so the walk before the
+    // probes would only repeat that check for each entry.
+    let entry_path = Path::new(entry);
+    let plain = is_plain_relative(entry_path);
+    if !plain && !fallow_config::may_probe_project_path(base, entry_path) {
         record_or_warn_skipped_entry(
             skipped_entries.as_deref_mut(),
             entry,
@@ -344,6 +362,43 @@ fn resolve_entry_path_with_output_map(
         return None;
     }
 
+    let recorded_before = skipped_count(skipped_entries.as_deref(), entry);
+    let resolved = resolve_probed_entry(
+        base,
+        entry,
+        canonical_root,
+        source,
+        skipped_entries.as_deref_mut(),
+        targets,
+    );
+    if resolved.is_none()
+        && plain
+        && skipped_count(skipped_entries.as_deref(), entry) == recorded_before
+        && !fallow_config::may_probe_project_path(base, entry_path)
+    {
+        record_or_warn_skipped_entry(
+            skipped_entries,
+            entry,
+            "Skipping entry point outside project root",
+        );
+    }
+    resolved
+}
+
+fn skipped_count(skipped_entries: Option<&FxHashMap<String, usize>>, entry: &str) -> usize {
+    skipped_entries
+        .and_then(|skipped| skipped.get(entry).copied())
+        .unwrap_or(0)
+}
+
+fn resolve_probed_entry(
+    base: &Path,
+    entry: &str,
+    canonical_root: &Path,
+    source: EntryPointSource,
+    mut skipped_entries: Option<&mut FxHashMap<String, usize>>,
+    targets: EntryTargets<'_>,
+) -> Option<EntryPoint> {
     if let OutputDirEntry::ShortCircuit(result) = resolve_entry_via_output_dir(
         base,
         entry,
@@ -376,102 +431,6 @@ fn record_or_warn_skipped_entry(
     } else {
         tracing::warn!(path = %entry, "{warning}");
     }
-}
-
-/// Outcome of the output-directory mapping step.
-///
-/// `ShortCircuit` means an output-dir branch applied and carries the resolved
-/// entry (which may itself be `None` when validation rejected the candidate);
-/// `Continue` signals that filesystem probing should proceed.
-pub(super) enum OutputDirEntry {
-    ShortCircuit(Option<EntryPoint>),
-    Continue,
-}
-
-/// Map an output-directory entry back to a source file, short-circuiting resolution.
-pub(super) fn resolve_entry_via_output_dir(
-    base: &Path,
-    entry: &str,
-    canonical_root: &Path,
-    source: EntryPointSource,
-    mut skipped_entries: Option<&mut FxHashMap<String, usize>>,
-    targets: EntryTargets<'_>,
-) -> OutputDirEntry {
-    if !targets.probe.may_map_to_source(entry) {
-        return OutputDirEntry::Continue;
-    }
-    let resolution = targets
-        .output_map
-        .resolve_source_for_entry(entry, SOURCE_EXTENSIONS);
-    match &resolution {
-        TsconfigOutputResolution::Resolved(source_path) => {
-            return OutputDirEntry::ShortCircuit(validated_entry_point(
-                source_path,
-                canonical_root,
-                entry,
-                source,
-                skipped_entries.as_deref_mut(),
-            ));
-        }
-        TsconfigOutputResolution::ConfiguredButUnresolved => return OutputDirEntry::Continue,
-        TsconfigOutputResolution::ConfiguredWithoutSource
-        | TsconfigOutputResolution::Unconfigured => {}
-    }
-
-    let is_discovered = |path: &Path| {
-        targets
-            .discovered
-            .is_none_or(|is_discovered| is_discovered(path))
-    };
-    // A source candidate that resolves out of the project counts as missing.
-    let is_file = |path: &Path| project_read::is_probed_project_file(canonical_root, path);
-    let mapped =
-        output_entry_to_source_path_where(base, entry, SOURCE_EXTENSIONS, is_file, is_discovered);
-    if matches!(
-        resolution,
-        TsconfigOutputResolution::ConfiguredWithoutSource
-    ) {
-        // The tsconfig claims the output but names no file, so a bundler can
-        // own it. Only an analyzed source file under `src/` counts.
-        return match mapped.filter(|source_path| is_discovered(source_path)) {
-            Some(source_path) => OutputDirEntry::ShortCircuit(validated_entry_point(
-                &source_path,
-                canonical_root,
-                entry,
-                source,
-                skipped_entries,
-            )),
-            None => OutputDirEntry::Continue,
-        };
-    }
-    if let Some(source_path) = mapped {
-        return OutputDirEntry::ShortCircuit(validated_entry_point(
-            &source_path,
-            canonical_root,
-            entry,
-            source,
-            skipped_entries.as_deref_mut(),
-        ));
-    }
-
-    if is_entry_in_output_dir(entry)
-        && let Some(source_path) = try_source_index_fallback(base, canonical_root)
-    {
-        tracing::info!(
-            entry = %entry,
-            fallback = %source_path.display(),
-            "package.json entry resolves to an ignored output directory; falling back to source index"
-        );
-        return OutputDirEntry::ShortCircuit(validated_entry_point(
-            &source_path,
-            canonical_root,
-            entry,
-            source,
-            skipped_entries,
-        ));
-    }
-
-    OutputDirEntry::Continue
 }
 
 /// Probe the filesystem for the entry: exact file, extension fallback, directory
