@@ -16,6 +16,8 @@ Common global flags for this command: [`--format`](global-flags.md), [`--quiet`]
 
 `--force` is an alias for `--yes`.
 
+`fix` plans only the findings that `dead-code` reports with the same scope: the positional path, `--workspace`, `--changed-workspaces`, `--changed-since`, the package baselines of `workspaces.changedSince`, and a diff from `--diff-file`, `--diff-stdin` or `FALLOW_DIFF_FILE`. An unknown workspace or a `--changed-workspaces` ref that does not resolve exits with code 2.
+
 ## What gets fixed
 
 - Unused exports (removes the `export` keyword; whole-enum block when every member is unused). In an `export { ... }` list, on one line or over several lines, it removes the unused names and keeps the layout and comments of the names that stay. It deletes the full statement when no name is left.
@@ -76,7 +78,7 @@ Before `fallow fix` writes a file, it applies the planned edits to the text and 
 
 - **UTF-8 BOM round-trip.** Files with a leading UTF-8 byte-order mark (`EF BB BF`, common on Windows-authored TypeScript) are read with the BOM stripped before line-offset computation and parsing, so reported line numbers do not shift by the BOM codepoint, and the BOM is re-prepended on write so the file's encoding is preserved on round-trip. fallow neither adds nor removes a BOM; if your input has one, the output has one.
 
-- **Mixed CRLF / LF rejection.** Files containing both `\r\n` and bare-LF line endings (common after cross-platform edits without `core.autocrlf`) are skipped instead of silently rewritten to the wrong offsets. The stderr message names the remediation: `Skipping <path>: file has mixed CRLF/LF line endings. Normalize with dos2unix or set git config core.autocrlf input, then re-run fallow fix.`. JSON output carries `{"type": "skipped", "path": "...", "skipped": true, "skip_reason": "mixed_line_endings"}` plus a top-level counter `skipped_mixed_line_endings: number` (always present) disjoint from `skipped_content_changed`. Any non-zero mixed-EOL count exits the run with code 2.
+- **Mixed CRLF / LF rejection.** Files containing both `\r\n` and bare-LF line endings (common after cross-platform edits without `core.autocrlf`), or a bare `\r` line ending, are skipped instead of silently rewritten to the wrong offsets. The stderr message names the remediation: `Skipping <path>: file has mixed CRLF/LF line endings or a bare CR line ending. Normalize it, then re-run fallow fix.`. JSON output carries `{"type": "skipped", "path": "...", "skipped": true, "skip_reason": "mixed_line_endings"}` plus a top-level counter `skipped_mixed_line_endings: number` (always present) disjoint from `skipped_content_changed`. Any non-zero mixed-EOL count exits the run with code 2.
 
   **The skip is NOT self-healing**. Re-running `fallow fix` produces the same skip; the AI agent or user must run `dos2unix <path>` (or set `git config core.autocrlf input` and re-checkout) before fallow can act on the file. When the same file carries findings for multiple fixers (e.g. an unused export AND an unused enum member), the skip is reported once per file, not once per fixer.
 

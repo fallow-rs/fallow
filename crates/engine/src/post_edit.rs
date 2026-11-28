@@ -624,9 +624,14 @@ impl FactCollector<'_, '_> {
                 &accessor.key,
             ),
             ClassElement::StaticBlock(_) => "static block".to_owned(),
-            ClassElement::TSIndexSignature(signature) => {
-                format!("index {}", self.slice(signature.span))
-            }
+            // The span of an index signature takes in the optional `;` or
+            // `,` after it, also across a line break, so a separator that an
+            // edit adds after the signature would change the key.
+            ClassElement::TSIndexSignature(signature) => format!(
+                "index {}",
+                self.slice(signature.span)
+                    .trim_end_matches(|c: char| c == ';' || c == ',' || c.is_whitespace())
+            ),
         }
     }
 

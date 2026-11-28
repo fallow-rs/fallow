@@ -7,6 +7,7 @@ use fallow_config::{CatalogPrecedingCommentPolicy, OutputFormat};
 use fallow_types::output_dead_code::{MutationEvidence, ReachabilityCaveat};
 
 mod catalog;
+mod class_member_boundary;
 mod class_members;
 mod config;
 mod deps;
@@ -18,9 +19,11 @@ mod incomplete_analysis;
 mod io;
 mod list_imports;
 mod plan;
+mod scope;
 mod source_edits;
 
 pub use fallow_config::is_config_fixable;
+pub use scope::FixScope;
 
 use crate::exit_codes::exit_invalid_input;
 use plan::{CapturedHashes, CommitOutcome, FixPlan, SkippedFile};
@@ -131,6 +134,7 @@ fn run_analyze(
         file_hashes: output_struct.file_hashes,
         re_exports,
         diagnostics,
+        workspaces: session.workspaces().to_vec(),
     })
 }
 
@@ -144,6 +148,8 @@ struct AnalyzedProject {
     /// The workspace and source-discovery diagnostics of the analysis, read
     /// after the parse so that read and parse failures are in the list.
     diagnostics: Vec<fallow_config::WorkspaceDiagnostic>,
+    /// The workspace packages, for the package baselines of the change scope.
+    workspaces: Vec<fallow_config::WorkspaceInfo>,
 }
 
 pub struct FixOptions<'a> {
@@ -169,11 +175,10 @@ pub struct FixOptions<'a> {
     pub type_aware: Option<bool>,
     pub type_aware_projects: &'a [PathBuf],
     pub type_aware_require: Option<fallow_config::TypeAwareRequire>,
-    /// Positional `[PATH]` scope: root-joined absolute file or directory inside
-    /// the root. Only fixes touching scoped files are planned and applied;
-    /// the analysis itself still runs whole-project so fixability stays sound.
-    /// `None` means whole-project scope.
-    pub scope: Option<PathBuf>,
+    /// The positional path and the global scope flags. `fix` plans only the
+    /// findings that `dead-code` reports with the same scope; the analysis
+    /// itself still runs whole-project so fixability stays sound.
+    pub scope: FixScope<'a>,
     /// `--show-cascade`: also fix the export and member findings of unused
     /// files. By default `fix` skips them, as the report hides them.
     pub show_cascade: bool,
@@ -249,17 +254,14 @@ fn run_fix_impl(opts: &FixOptions<'_>, fix_count: &mut usize) -> ExitCode {
         file_hashes,
         re_exports,
         diagnostics,
+        workspaces,
     } = match run_analyze(run, &config, opts.output, opts.quiet) {
         Ok(r) => r,
         Err(code) => return code,
     };
 
-    // `fix` changes only what the report shows: the rule pass removes each
-    // finding whose rule an `overrides` entry turns `off` for its file, and
-    // hides the findings of unused files.
-    fallow_engine::dead_code::apply_rule_severities(&mut results, &config);
-    if let Some(scope) = opts.scope.as_ref() {
-        fallow_engine::dead_code::filter_to_workspaces(&mut results, &vec![scope.clone()].into());
+    if let Err(code) = scope::narrow_to_report(opts, &config, &workspaces, &mut results) {
+        return code;
     }
 
     if results.total_issues() == 0 {
@@ -1181,7 +1183,7 @@ fn residual_skip_warnings(input: &HumanSummaryInput<'_>) -> [SkipWarning; 9] {
             prefix: "Skipped ",
             singular: "file",
             plural: "files",
-            suffix: " with mixed CRLF/LF line endings. Normalize each file (`dos2unix <path>` or `git config core.autocrlf input` + re-checkout) before re-running.",
+            suffix: " with mixed CRLF/LF line endings or a bare CR line ending. Normalize each file (`dos2unix <path>` or `git config core.autocrlf input` + re-checkout) before re-running.",
         },
         SkipWarning {
             count: input.low_confidence_count,

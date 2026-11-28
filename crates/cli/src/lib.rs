@@ -523,7 +523,7 @@ pub fn benchmark_fix_dry_run(root: &Path, threads: usize) -> (ExitCode, usize) {
         type_aware: None,
         type_aware_projects: &[],
         type_aware_require: None,
-        scope: None,
+        scope: fix::FixScope::default(),
         show_cascade: false,
     })
 }

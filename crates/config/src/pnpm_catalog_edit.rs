@@ -725,6 +725,68 @@ mod tests {
         assert_eq!(result, Err(CatalogEditRefusal::DeltaMismatch));
     }
 
+    /// A catalog map with an anchor can be the value of another key through
+    /// an alias or a merge key. A removal from the map then also removes the
+    /// key from that other value, and the edited file still parses. The
+    /// delta check sees the changed alias target and refuses the edit.
+    #[test]
+    fn removal_from_a_catalog_map_that_another_key_aliases_is_refused() {
+        let cases: [(&str, CatalogRemoval<'_>); 3] = [
+            (
+                "catalogs:\n  pins: &pins\n    minimist: 1.2.8\n    tar: 6.2.1\n\noverrides: *pins\n",
+                entry("pins", "tar"),
+            ),
+            (
+                "catalogs:\n  pins: &pins\n    minimist: 1.2.8\n    tar: 6.2.1\noverrides:\n  <<: *pins\n  lodash: 4.17.21\n",
+                entry("pins", "tar"),
+            ),
+            (
+                "catalog: &c\n  react: ^18\n  tar: 6.2.1\noverrides: *c\n",
+                entry("default", "tar"),
+            ),
+        ];
+        for (source, removal) in cases {
+            let result = plan_catalog_edits(source, &[removal], Never);
+            let refused = match &result {
+                Err(_) => true,
+                Ok(plan) => {
+                    plan.edits.is_empty()
+                        && matches!(plan.outcomes[0], CatalogRemovalOutcome::Refused(_))
+                }
+            };
+            assert!(refused, "{source:?} gave {result:?}");
+        }
+    }
+
+    /// The delta check refuses a removal that changes a merged map, and it
+    /// keeps a removal that changes only the removed entry. With a merge key,
+    /// the removal of `tar` from `app` would give `app` the `tar` version of
+    /// `base`, so that removal is refused.
+    #[test]
+    fn removal_from_a_catalog_map_with_an_anchor_or_merge_key_follows_the_delta_check() {
+        let shadowing =
+            "catalogs:\n  base: &base\n    tar: 6.0.0\n  app:\n    <<: *base\n    tar: 6.2.1\n";
+        assert_eq!(
+            plan_catalog_edits(shadowing, &[entry("app", "tar")], Never),
+            Err(CatalogEditRefusal::DeltaMismatch)
+        );
+        for (source, removal, expected) in [
+            (
+                "catalog: &c\n  react: ^18\n  tar: 6.2.1\n",
+                entry("default", "tar"),
+                "catalog: &c\n  react: ^18\n",
+            ),
+            (
+                "catalogs:\n  base: &base\n    react: ^18\n  app:\n    <<: *base\n    react: ^18\n    tar: 6.2.1\n",
+                entry("app", "tar"),
+                "catalogs:\n  base: &base\n    react: ^18\n  app:\n    <<: *base\n    react: ^18\n",
+            ),
+        ] {
+            let plan = plan_catalog_edits(source, &[removal], Never).unwrap();
+            assert_eq!(apply(source, &plan), expected, "{source:?}");
+        }
+    }
+
     #[test]
     fn delta_check_rejects_a_changed_tree() {
         let check = |before: &str, after: &str, removed: (&str, &str)| {

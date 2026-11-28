@@ -11,6 +11,7 @@ use fallow_types::semantic::{
 use rustc_hash::FxHashMap;
 use sha2::{Digest, Sha256};
 
+use super::class_member_boundary::boundary_edits;
 use super::plan::{CapturedHashes, FixPlan, SkipReason, skip_generated_source};
 use super::source_edits::{QueueOutcome, SourceEdit, read_source_snapshot};
 
@@ -155,14 +156,16 @@ fn apply_file(input: ClassMemberFileInput<'_>) {
         plan.skip(path.to_path_buf(), SkipReason::ContentChanged);
         return;
     };
-    planned.sort_by_key(|member| std::cmp::Reverse(member.range.start));
+    planned.sort_by_key(|member| member.range.start);
+    let ranges: Vec<Range<usize>> = planned.iter().map(|member| member.range.clone()).collect();
+    let boundary_edits = boundary_edits(&content, &ranges);
 
     let relative = path.strip_prefix(root).unwrap_or(path);
-    for member in &planned {
+    for (member, boundary) in planned.iter().zip(boundary_edits).rev() {
         let edit = SourceEdit {
-            start: member.range.start,
-            end: member.range.end,
-            replacement: String::new(),
+            start: boundary.range.start,
+            end: boundary.range.end,
+            replacement: boundary.replacement,
         };
         if plan.sources_mut().queue(path, vec![edit]) != QueueOutcome::Queued {
             continue;
@@ -429,6 +432,86 @@ mod tests {
             "confirmed-no-static-references"
         );
         assert_eq!(fixes[0]["applied"], true);
+    }
+
+    fn apply_one_member_fix(source: &str) -> String {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("src/worker.ts");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, source).unwrap();
+        let finding = eligible_finding(path.clone(), source);
+        let mut hashes = CapturedHashes::default();
+        hashes.insert(path.clone(), xxhash_rust::xxh3::xxh3_64(source.as_bytes()));
+        let mut plan = FixPlan::for_root(directory.path()).unwrap();
+        let mut fixes = Vec::new();
+        apply_class_member_fixes(ClassMemberFixInput {
+            root: directory.path(),
+            findings: &[finding],
+            hashes: &hashes,
+            plan: &mut plan,
+            output: OutputFormat::Json,
+            dry_run: false,
+            fixes: &mut fixes,
+        });
+        assert!(plan.commit().failed.is_empty());
+        std::fs::read_to_string(path).unwrap()
+    }
+
+    fn parses_as_typescript(text: &str) -> bool {
+        let allocator = oxc_allocator::Allocator::default();
+        let parsed = oxc_parser::Parser::new(&allocator, text, oxc_span::SourceType::ts()).parse();
+        !parsed.fatal_error && !parsed.diagnostics.has_errors()
+    }
+
+    /// A field with no `;` ends at the next line only because the next token
+    /// cannot continue its expression. When the removed method was that next
+    /// token, a following member that starts with `[`, `*` or `(` joins the
+    /// field and changes or breaks the class.
+    #[test]
+    fn keeps_a_statement_boundary_after_a_field_without_a_semicolon() {
+        for (source, expected) in [
+            (
+                "class Worker {\n  value = 1\n  execute(): void {}\n  [Symbol.iterator](): void {}\n}\n",
+                "class Worker {\n  value = 1\n  ;[Symbol.iterator](): void {}\n}\n",
+            ),
+            (
+                "class Worker {\n  value = 1\n  execute(): void {}\n\n  *items(): Generator<number> {}\n}\n",
+                "class Worker {\n  value = 1\n  ;*items(): Generator<number> {}\n}\n",
+            ),
+            (
+                "class Worker {\n  value: number\n  execute(): void {}\n  ['key']: string\n}\n",
+                "class Worker {\n  value: number\n  ;['key']: string\n}\n",
+            ),
+            (
+                "class Worker { value = 1\n  execute(): void {} ['key'] = 2 }\n",
+                "class Worker { value = 1\n  ; ['key'] = 2 }\n",
+            ),
+        ] {
+            assert!(parses_as_typescript(source), "{source:?}");
+            let fixed = apply_one_member_fix(source);
+            assert_eq!(fixed, expected);
+            assert!(parses_as_typescript(&fixed), "{fixed:?}");
+        }
+    }
+
+    #[test]
+    fn adds_no_semicolon_when_the_boundary_is_already_explicit() {
+        for (source, expected) in [
+            (
+                "class Worker {\n  value = 1;\n  execute(): void {}\n  [Symbol.iterator](): void {}\n}\n",
+                "class Worker {\n  value = 1;\n  [Symbol.iterator](): void {}\n}\n",
+            ),
+            (
+                "class Worker {\n  execute(): void {}\n  [Symbol.iterator](): void {}\n}\n",
+                "class Worker {\n  [Symbol.iterator](): void {}\n}\n",
+            ),
+            (
+                "class Worker {\n  value = 1\n  execute(): void {}\n  keep(): void {}\n}\n",
+                "class Worker {\n  value = 1\n  keep(): void {}\n}\n",
+            ),
+        ] {
+            assert_eq!(apply_one_member_fix(source), expected);
+        }
     }
 
     #[test]

@@ -18,16 +18,19 @@ pub(super) struct EncodingMetadata {
 
 /// Errors that block a file from being fixed safely. Today there is one
 /// variant; we keep the enum shape so future encoding checks (e.g. invalid
-/// UTF-8 bytes, lone-CR Mac-classic files) can land additively.
+/// UTF-8 bytes) can land additively.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum EncodingError {
-    /// The file contains both CRLF and bare-LF line endings. The fix
-    /// pipeline detects line endings by presence check then splits / joins
-    /// on the detected style; on a mixed file that would silently rewrite
-    /// to the wrong offsets. Skipping is safer than a destructive guess.
+    /// The file contains both CRLF and bare-LF line endings, or a bare CR
+    /// line ending. The fix pipeline detects line endings by presence check
+    /// then splits / joins on the detected style; on a mixed file that would
+    /// silently rewrite to the wrong offsets. A bare CR ends a line for the
+    /// parser but not for the `\n` line split of the fixers, so its file has
+    /// the same offset problem. Skipping is safer than a destructive guess.
     MixedLineEndings {
         crlf_count: usize,
         lf_only_count: usize,
+        lone_cr_count: usize,
     },
 }
 
@@ -41,7 +44,7 @@ pub(super) enum EncodingError {
 ///   `.git` or `node_modules` directory below it, or is unreadable
 ///   (existing skip-with-warn semantics preserved).
 /// - `Err(EncodingError::MixedLineEndings { .. })` when the file mixes CRLF
-///   and bare-LF line endings; the caller translates this into a per-file
+///   and bare-LF line endings or has a bare CR line ending; the caller translates this into a per-file
 ///   skip with a clear remediation message.
 pub(super) fn read_source(
     root: &Path,
@@ -71,7 +74,8 @@ pub(super) fn read_source(
     classify_source(&raw).map(|(content, metadata)| Some((content, metadata)))
 }
 
-/// Pure shape-classification helper: strip BOM, detect mixed CRLF/LF, and
+/// Pure shape-classification helper: strip BOM, detect mixed CRLF/LF and
+/// bare CR line endings, and
 /// pick the line-ending style. Factored out of `read_source` so the staged
 /// fast path in `plan.rs` (cross-fixer composition) can reuse the same
 /// classifier on in-memory bytes without a disk round-trip.
@@ -82,10 +86,12 @@ pub(super) fn classify_source(raw: &str) -> Result<(String, EncodingMetadata), E
     let crlf_count = content.matches("\r\n").count();
     let lf_total = content.matches('\n').count();
     let lf_only_count = lf_total.saturating_sub(crlf_count);
-    if crlf_count > 0 && lf_only_count > 0 {
+    let lone_cr_count = content.matches('\r').count().saturating_sub(crlf_count);
+    if (crlf_count > 0 && lf_only_count > 0) || lone_cr_count > 0 {
         return Err(EncodingError::MixedLineEndings {
             crlf_count,
             lf_only_count,
+            lone_cr_count,
         });
     }
 
@@ -341,9 +347,11 @@ mod tests {
             EncodingError::MixedLineEndings {
                 crlf_count,
                 lf_only_count,
+                lone_cr_count,
             } => {
                 assert_eq!(crlf_count, 2, "two CRLF lines");
                 assert_eq!(lf_only_count, 1, "one bare-LF line");
+                assert_eq!(lone_cr_count, 0, "no bare CR");
             }
         }
     }
@@ -357,6 +365,30 @@ mod tests {
 
         let err = read_source(root, &file).unwrap_err();
         assert!(matches!(err, EncodingError::MixedLineEndings { .. }));
+    }
+
+    /// The fixers split lines on `\n` only. A bare CR does not end a line for
+    /// them, but it ends a line for the parser, so the edit offsets would be
+    /// wrong. The file is refused like a mixed CRLF and LF file.
+    #[test]
+    fn classify_source_refuses_a_bare_carriage_return_line_ending() {
+        for raw in [
+            "export const a = 1;\rexport const b = 2;\r",
+            "export const a = 1;\nexport const b = 2;\rexport const c = 3;\n",
+            "export const a = 1;\r\nexport const b = 2;\rexport const c = 3;\r\n",
+        ] {
+            let err = classify_source(raw).unwrap_err();
+            assert!(
+                matches!(
+                    err,
+                    EncodingError::MixedLineEndings {
+                        lone_cr_count: 1..,
+                        ..
+                    }
+                ),
+                "{raw:?} must be refused, got {err:?}",
+            );
+        }
     }
 
     #[test]
