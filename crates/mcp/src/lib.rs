@@ -145,7 +145,6 @@ async fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
 
     warm_session::install_from_env();
     let server = server::FallowMcp::new();
-    server.prewarm_code_mode();
     let tasks = server.task_store();
     let service = server.serve(stdio()).await?;
     let waited = service.waiting().await;

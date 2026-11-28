@@ -676,28 +676,43 @@ a parameter, so a new tool gets the same behavior without a signature change.
   when `timeout_ms` plus a grace time of 2 seconds passes, or on a cancel, and
   answers with `code mode execution timed out` or the cancel error. A killed
   snippet has an empty `calls[]`.
-- The server keeps one idle snippet process, started on a background thread
-  when the server starts (`code_mode_worker_process.rs`). A snippet takes it
+- The first `code_execute` call starts the snippet process, so a server that
+  never runs a snippet holds no extra process. After that, the server keeps
+  one idle snippet process (`code_mode_worker_process.rs`). A snippet takes it
   and gives it back when it ends normally, also with a thrown error, so a
   normal snippet pays no process start and no process cleanup. Each snippet
   gets a new JS runtime, so no global survives into the next snippet. A
   killed process is replaced on a background thread.
+- The allocator keeps the memory pages of a large snippet. A snippet process
+  therefore asks for its own replacement after a snippet that ends with
+  `out of memory`, or when its peak resident memory passes 32 MiB, the engine
+  memory limit. The peak check uses `getrusage` and runs on Unix only; on
+  Windows only the `out of memory` check applies.
 - The snippet process first writes a `ready` line with its protocol version
-  and build version, and each start line carries the same two values. Each
-  side refuses a peer that does not match. Before a spawn, the server also
-  compares the size, change time and inode of its binary file with the values
-  from its own start. A removed or replaced binary gives an error that says to
-  restart the MCP server. On Linux the server spawns `/proc/self/exe`, which
-  stays the running binary.
+  and the package version of its build, and each start line carries the same
+  two values. Each side refuses a peer that does not match, with an error that
+  says to restart the MCP server. A spawn that fails, for example because the
+  binary file was removed, gives the same hint, and so does a new process that
+  ends before its `ready` line. On macOS, for example, the kernel kills each
+  new process of a signed binary that was written in place while it ran. The server does not compare
+  the binary file itself: a reinstall of the same version touches or replaces
+  the file, and its snippet process still matches. On Linux the server spawns
+  `/proc/self/exe`, which stays the running binary.
+- On a new snippet process, the server starts its deadline again when the
+  `ready` line arrives, because the snippet process starts its own deadline
+  when it reads the start line. A slow process start then does not take the
+  time of the snippet, and the snippet can report its own timeout with its
+  `calls[]` trace. The shift is at most one grace time of 2 seconds.
 - A watchdog thread ends the snippet process when its parent process changes
   (Unix), or when one snippet runs 4 seconds past its `timeout_ms`. On Linux
   the process also sets `PR_SET_PDEATHSIG`. That signal follows the thread
   that started the process, so the server starts every snippet process on
   one long-lived thread. On Windows the job object of the process tree ends
   the process with the server.
-- The server writes to the snippet process on a writer thread and waits for
-  each write until the deadline plus the grace time, or a cancel. A process
-  that stops reading cannot hold the server.
+- The server queues each line for a writer thread and does not wait for the
+  write. Only the read of the next message ends at the deadline plus the
+  grace time, or at a cancel. A process that stops reading holds only the
+  writer thread, and the read reports a failed write.
 - The snippet process starts no process and runs no analysis. It sends each
   host call and each `fallow.all` batch to the server as one line of JSON on
   its stdout and reads the result on its stdin. The host calls therefore run

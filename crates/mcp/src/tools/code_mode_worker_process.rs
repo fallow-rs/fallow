@@ -14,7 +14,7 @@ use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, TryRecvError};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
-use std::time::{Instant, SystemTime};
+use std::time::Instant;
 
 use fallow_process::{
     ChildCleanup, ProcessTree, cleanup_std_child, configure_std_command,
@@ -50,10 +50,6 @@ pub struct CodeModeWorker {
 struct Pool {
     program: PathBuf,
     args: Vec<OsString>,
-    /// The identity of `program` when the server started. A later spawn
-    /// refuses a binary that changed, because its snippet process would not
-    /// match this server.
-    identity: Option<FileIdentity>,
     idle: Mutex<Option<WorkerProcess>>,
 }
 
@@ -87,21 +83,13 @@ impl CodeModeWorker {
     }
 
     fn new(program: PathBuf, args: Vec<OsString>) -> Self {
-        let identity = FileIdentity::of(&program).ok();
         Self {
             pool: Arc::new(Pool {
                 program,
                 args,
-                identity,
                 idle: Mutex::new(None),
             }),
         }
-    }
-
-    /// Start the idle snippet process on a background thread, so the first
-    /// snippet does not wait for a process start.
-    pub fn prewarm(&self) {
-        self.refill_in_background();
     }
 
     /// The idle snippet process, or a new one when there is none.
@@ -129,7 +117,7 @@ impl CodeModeWorker {
     pub(super) fn refill_in_background(&self) {
         let worker = self.clone();
         let _ = thread::Builder::new()
-            .name("code-mode-prewarm".to_string())
+            .name("code-mode-refill".to_string())
             .spawn(move || worker.refill());
     }
 
@@ -143,6 +131,12 @@ impl CodeModeWorker {
     }
 
     #[cfg(test)]
+    pub(super) fn discard_idle(&self) {
+        let idle = self.pool.idle.lock().ok().and_then(|mut slot| slot.take());
+        drop(idle);
+    }
+
+    #[cfg(test)]
     pub(super) fn idle_pid(&self) -> Option<u32> {
         self.pool
             .idle
@@ -153,7 +147,6 @@ impl CodeModeWorker {
 
     fn spawn(&self) -> Result<WorkerProcess, String> {
         let program = &self.pool.program;
-        self.check_binary()?;
         let mut command = Command::new(program);
         // The snippet process speaks only the line protocol on stdin and
         // stdout. Its stderr would reach the MCP client log, so it is closed.
@@ -194,50 +187,6 @@ impl CodeModeWorker {
             write_errors,
             messages,
             ready: false,
-        })
-    }
-
-    /// Refuse a server binary that was removed or replaced after the server
-    /// started: a snippet process of another build would not match.
-    fn check_binary(&self) -> Result<(), String> {
-        let program = &self.pool.program;
-        match (&self.pool.identity, FileIdentity::of(program)) {
-            (Some(recorded), Ok(current)) if *recorded == current => Ok(()),
-            (_, Err(err)) => Err(format!(
-                "code mode could not start the snippet process: the server binary '{}' is \
-                 not readable ({err}); {RESTART_HINT}",
-                program.display()
-            )),
-            _ => Err(format!(
-                "code mode could not start the snippet process: the server binary '{}' \
-                 changed after the server started; {RESTART_HINT}",
-                program.display()
-            )),
-        }
-    }
-}
-
-/// The size, the change time and, on Unix, the device and inode of a file.
-#[derive(Debug, PartialEq, Eq)]
-struct FileIdentity {
-    len: u64,
-    modified: Option<SystemTime>,
-    #[cfg(unix)]
-    device: u64,
-    #[cfg(unix)]
-    inode: u64,
-}
-
-impl FileIdentity {
-    fn of(path: &std::path::Path) -> io::Result<Self> {
-        let metadata = std::fs::metadata(path)?;
-        Ok(Self {
-            len: metadata.len(),
-            modified: metadata.modified().ok(),
-            #[cfg(unix)]
-            device: std::os::unix::fs::MetadataExt::dev(&metadata),
-            #[cfg(unix)]
-            inode: std::os::unix::fs::MetadataExt::ino(&metadata),
         })
     }
 }

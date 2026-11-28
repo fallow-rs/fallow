@@ -74,6 +74,14 @@ const WORKER_GRACE: Duration = Duration::from_secs(2);
 
 const TIMED_OUT: &str = "code mode execution timed out";
 
+/// The error of a snippet that hit the engine memory limit.
+const OUT_OF_MEMORY: &str = "out of memory";
+
+/// Peak resident memory of a snippet process above which it ends after its
+/// snippet. It is the engine memory limit, so only a snippet near that limit
+/// passes it.
+const REPLACE_PEAK_RSS_BYTES: u64 = 32 * 1024 * 1024;
+
 /// How often the watchdog of a snippet process checks its parent and its time
 /// limit.
 const WATCH_INTERVAL: Duration = Duration::from_millis(100);
@@ -116,8 +124,15 @@ enum WorkerMessage {
         calls: Vec<WireCall>,
         element_output_bytes: usize,
     },
-    /// The snippet ended. `output` is the response text.
-    Done { ok: bool, output: String },
+    /// The snippet ended. `output` is the response text. `replace` asks the
+    /// server for a new snippet process, because this one holds too much
+    /// memory.
+    Done {
+        ok: bool,
+        output: String,
+        #[serde(default)]
+        replace: bool,
+    },
 }
 
 /// Why the server stopped a snippet process.
@@ -221,8 +236,7 @@ fn execute_isolated_in(
              unknown; {RESTART_HINT}"
         )));
     };
-    let host_deadline = started + Duration::from_millis(limits.timeout_ms);
-    let stop_at = host_deadline + WORKER_GRACE;
+    let deadlines = Deadlines::new(started, Duration::from_millis(limits.timeout_ms));
 
     let mut process = worker.take().map_err(|error| limits.error(&error))?;
     let start = WorkerStart {
@@ -236,15 +250,24 @@ fn execute_isolated_in(
     };
     let mut host = ServerHost {
         binary,
-        deadline: host_deadline,
+        deadline: deadlines.host,
         request,
         max_output_bytes: limits.max_output_bytes,
         dispatched: 0,
     };
-    match run_snippet(&mut process, &start, &mut host, stop_at) {
-        Ok((ok, output)) => {
-            worker.give_back(process);
-            if ok { Ok(output) } else { Err(output) }
+    match run_snippet(&mut process, &start, &mut host, deadlines) {
+        Ok(done) => {
+            if done.replace {
+                drop(process);
+                worker.refill_in_background();
+            } else {
+                worker.give_back(process);
+            }
+            if done.ok {
+                Ok(done.output)
+            } else {
+                Err(done.output)
+            }
         }
         Err(stop) => {
             drop(process);
@@ -254,17 +277,63 @@ fn execute_isolated_in(
     }
 }
 
+/// The deadlines of one snippet on the server side.
+#[derive(Clone, Copy)]
+struct Deadlines {
+    timeout: Duration,
+    /// The deadline of the host calls.
+    host: Instant,
+    /// When the server kills the snippet process.
+    stop_at: Instant,
+    /// The latest host deadline after a slow process start.
+    latest_host: Instant,
+}
+
+impl Deadlines {
+    fn new(started: Instant, timeout: Duration) -> Self {
+        let host = started + timeout;
+        Self {
+            timeout,
+            host,
+            stop_at: host + WORKER_GRACE,
+            latest_host: host + WORKER_GRACE,
+        }
+    }
+
+    /// Start the deadlines again when a new snippet process is ready. The
+    /// snippet process starts its own deadline when it reads the start, so a
+    /// slow process start does not take the time of the snippet. The shift is
+    /// at most one [`WORKER_GRACE`].
+    fn restart_at_ready(&mut self, host: &mut ServerHost<'_>) {
+        self.host = (Instant::now() + self.timeout).min(self.latest_host);
+        self.stop_at = self.host + WORKER_GRACE;
+        host.deadline = self.host;
+    }
+}
+
+/// The `Done` message of a snippet.
+struct Done {
+    ok: bool,
+    output: String,
+    /// The snippet process asked for a replacement.
+    replace: bool,
+}
+
 /// Drive one snippet on `process` until its `Done` message.
 fn run_snippet(
     process: &mut WorkerProcess,
     start: &WorkerStart,
     host: &mut ServerHost<'_>,
-    stop_at: Instant,
-) -> Result<(bool, String), Stop> {
+    mut deadlines: Deadlines,
+) -> Result<Done, Stop> {
     let request = host.request;
-    process.send(start)?;
+    process
+        .send(start)
+        .map_err(|stop| before_ready(process, stop))?;
     loop {
-        let message = process.receive(stop_at, request)?;
+        let message = process
+            .receive(deadlines.stop_at, request)
+            .map_err(|stop| before_ready(process, stop))?;
         if !process.is_ready() && !matches!(message, WorkerMessage::Ready { .. }) {
             return Err(Stop::Failed(
                 "code mode snippet process did not announce its protocol".to_string(),
@@ -273,8 +342,19 @@ fn run_snippet(
         match message {
             WorkerMessage::Ready { protocol, version } => {
                 process.accept_ready(protocol, &version)?;
+                deadlines.restart_at_ready(host);
             }
-            WorkerMessage::Done { ok, output } => return Ok((ok, output)),
+            WorkerMessage::Done {
+                ok,
+                output,
+                replace,
+            } => {
+                return Ok(Done {
+                    ok,
+                    output,
+                    replace,
+                });
+            }
             WorkerMessage::Call {
                 tool,
                 params,
@@ -291,6 +371,20 @@ fn run_snippet(
                 process.send(&reply)?;
             }
         }
+    }
+}
+
+/// A new snippet process that ends before its `ready` line did not start.
+/// On macOS, for example, the kernel kills each new process of a signed
+/// binary that was written in place while it ran. A restart fixes that.
+fn before_ready(process: &WorkerProcess, stop: Stop) -> Stop {
+    match stop {
+        Stop::Failed(error) if !process.is_ready() && error == process::ENDED_WITHOUT_RESULT => {
+            Stop::Failed(format!(
+                "code mode snippet process ended before it was ready; {RESTART_HINT}"
+            ))
+        }
+        stop => stop,
     }
 }
 
@@ -509,11 +603,18 @@ pub fn run_code_mode_worker() -> ExitCode {
             &start.cwd,
         );
         watchdog.idle();
+        let replace = needs_replacement(&result);
         let (ok, output) = match result {
             Ok(output) => (true, output),
             Err(output) => (false, output),
         };
-        if send_to_server(&WorkerMessage::Done { ok, output }).is_err() {
+        if send_to_server(&WorkerMessage::Done {
+            ok,
+            output,
+            replace,
+        })
+        .is_err()
+        {
             return ExitCode::FAILURE;
         }
     }
@@ -525,10 +626,55 @@ fn read_line(input: &std::io::Stdin, line: &mut String) -> std::io::Result<usize
     input.lock().read_line(line)
 }
 
+/// Whether this snippet process should end after the snippet: the snippet ran
+/// out of engine memory, or the peak memory of the process passed
+/// [`REPLACE_PEAK_RSS_BYTES`]. The allocator keeps the pages of a large
+/// snippet, so an idle process would hold them until the next restart.
+fn needs_replacement(result: &Result<String, String>) -> bool {
+    let out_of_memory = result.as_ref().err().is_some_and(|envelope| {
+        serde_json::from_str::<serde_json::Value>(envelope)
+            .is_ok_and(|envelope| envelope["error"] == OUT_OF_MEMORY)
+    });
+    out_of_memory || peak_rss_bytes().is_some_and(|peak| peak > REPLACE_PEAK_RSS_BYTES)
+}
+
+/// The peak resident memory of this process.
+#[cfg(unix)]
+fn peak_rss_bytes() -> Option<u64> {
+    let mut usage = std::mem::MaybeUninit::<libc::rusage>::zeroed();
+    #[expect(unsafe_code, reason = "getrusage has no safe wrapper in std")]
+    // SAFETY: getrusage writes one rusage struct to the pointer, which points
+    // to owned memory of that size.
+    let status = unsafe { libc::getrusage(libc::RUSAGE_SELF, usage.as_mut_ptr()) };
+    if status != 0 {
+        return None;
+    }
+    #[expect(unsafe_code, reason = "the struct came from getrusage")]
+    // SAFETY: getrusage returned 0, so it filled the struct. Every field is an
+    // integer, and the zeroed start is a valid value of each.
+    let usage = unsafe { usage.assume_init() };
+    u64::try_from(usage.ru_maxrss)
+        .ok()?
+        .checked_mul(MAXRSS_UNIT_BYTES)
+}
+
+/// No peak memory check: the out-of-memory check still applies.
+#[cfg(windows)]
+fn peak_rss_bytes() -> Option<u64> {
+    None
+}
+
+/// The unit of `ru_maxrss`: bytes on Apple systems, kilobytes elsewhere.
+#[cfg(target_vendor = "apple")]
+const MAXRSS_UNIT_BYTES: u64 = 1;
+#[cfg(all(unix, not(target_vendor = "apple")))]
+const MAXRSS_UNIT_BYTES: u64 = 1024;
+
 fn refuse_start(error: String) -> ExitCode {
     let _ = send_to_server(&WorkerMessage::Done {
         ok: false,
         output: error,
+        replace: true,
     });
     ExitCode::from(2)
 }
@@ -795,20 +941,89 @@ mod tests {
         assert!(error_of(&error).contains(RESTART_HINT), "{error}");
     }
 
+    /// A reinstall of the same build touches or replaces the binary file. A
+    /// snippet process of that file still matches the server.
+    #[cfg(unix)]
     #[test]
-    fn a_replaced_server_binary_is_refused_with_a_restart_hint() {
+    fn a_touched_or_replaced_identical_server_binary_still_runs_snippets() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let program = dir.path().join("server");
-        std::fs::write(&program, "a").expect("write the binary");
-        let worker = CodeModeWorker::with_args(program.clone(), &[]);
-        std::fs::write(&program, "another build").expect("replace the binary");
+        let program = dir.path().join("fallow-mcp");
+        std::fs::copy(server_binary(), &program).expect("copy the binary");
+        let worker = CodeModeWorker::server_binary(program.clone());
+        run(&worker, "return 1;", 5_000, dir.path()).expect("first snippet");
 
-        let error = run(&worker, "return 1;", 5_000, dir.path()).expect_err("other binary");
-        assert!(
-            error_of(&error).contains("changed after the server started"),
-            "{error}"
+        worker.discard_idle();
+        // `touch` changes the times without a write to the file.
+        std::fs::File::open(&program)
+            .and_then(|file| file.set_modified(std::time::SystemTime::now()))
+            .expect("touch the binary");
+        run(&worker, "return 2;", 5_000, dir.path()).expect("snippet after a touch");
+
+        worker.discard_idle();
+        let copy = dir.path().join("fallow-mcp.new");
+        std::fs::copy(server_binary(), &copy).expect("copy the binary again");
+        std::fs::rename(&copy, &program).expect("replace the binary");
+        run(&worker, "return 3;", 5_000, dir.path()).expect("snippet after a replace");
+    }
+
+    /// The idle process after a snippet that hit the engine memory limit
+    /// keeps that memory, so the server replaces it.
+    #[test]
+    fn a_snippet_out_of_memory_replaces_its_process() {
+        let cwd = tempfile::tempdir().expect("tempdir");
+        let worker = CodeModeWorker::server_binary(server_binary());
+        run(&worker, "return 1;", 5_000, cwd.path()).expect("first snippet");
+        let pid = worker.idle_pid().expect("an idle process");
+
+        let error = run(
+            &worker,
+            "return Array(2 ** 26).fill(0).length;",
+            5_000,
+            cwd.path(),
+        )
+        .expect_err("the snippet runs out of memory");
+        assert_eq!(error_of(&error), "out of memory");
+        assert_ne!(
+            worker.idle_pid(),
+            Some(pid),
+            "the process must not stay idle"
         );
-        assert!(error_of(&error).contains(RESTART_HINT), "{error}");
+        run(&worker, "return 1;", 5_000, cwd.path()).expect("a new process runs the next snippet");
+    }
+
+    #[test]
+    fn the_first_snippet_starts_the_process() {
+        let cwd = tempfile::tempdir().expect("tempdir");
+        let worker = CodeModeWorker::server_binary(server_binary());
+        assert_eq!(
+            worker.idle_pid(),
+            None,
+            "no process before the first snippet"
+        );
+        run(&worker, "return 1;", 5_000, cwd.path()).expect("first snippet");
+        assert!(
+            worker.idle_pid().is_some(),
+            "the process stays idle after the snippet"
+        );
+    }
+
+    /// The deadline of the server starts when a new snippet process is ready,
+    /// so a slow process start does not take the time of the snippet.
+    #[cfg(unix)]
+    #[test]
+    fn a_slow_process_start_does_not_take_the_time_of_the_snippet() {
+        let cwd = tempfile::tempdir().expect("tempdir");
+        let ready = format!(
+            r#"{{"kind":"ready","protocol":{PROTOCOL_VERSION},"version":"{BUILD_VERSION}"}}"#
+        );
+        let done = r#"{"kind":"done","ok":false,"output":"own envelope"}"#;
+        let script = format!(
+            "sleep 2.2; printf '%s\\n' '{ready}'; read start; sleep 0.4; \
+             printf '%s\\n' '{done}'; sleep 10"
+        );
+        let worker = CodeModeWorker::with_args(PathBuf::from("/bin/sh"), &["-c", &script]);
+        let error = run(&worker, "return 1;", 500, cwd.path()).expect_err("the snippet fails");
+        assert_eq!(error, "own envelope");
     }
 
     #[cfg(unix)]
@@ -823,6 +1038,16 @@ mod tests {
             ],
         );
         let error = run(&worker, "return 1;", 5_000, cwd.path()).expect_err("other build");
+        assert!(error_of(&error).contains("do not match"), "{error}");
+        assert!(error_of(&error).contains(RESTART_HINT), "{error}");
+
+        let ready = format!(
+            r#"{{"kind":"ready","protocol":{},"version":"{BUILD_VERSION}"}}"#,
+            PROTOCOL_VERSION + 1
+        );
+        let script = format!("printf '%s\\n' '{ready}'; sleep 10");
+        let worker = CodeModeWorker::with_args(PathBuf::from("/bin/sh"), &["-c", &script]);
+        let error = run(&worker, "return 1;", 5_000, cwd.path()).expect_err("other protocol");
         assert!(error_of(&error).contains("do not match"), "{error}");
         assert!(error_of(&error).contains(RESTART_HINT), "{error}");
     }
@@ -900,6 +1125,9 @@ mod tests {
         let cwd = tempfile::tempdir().expect("tempdir");
         let worker = CodeModeWorker::with_args(PathBuf::from("/bin/sh"), &["-c", "exit 3"]);
         let output = run(&worker, "return 1;", 5_000, cwd.path()).expect_err("no result");
-        assert_eq!(error_of(&output), process::ENDED_WITHOUT_RESULT);
+        assert_eq!(
+            error_of(&output),
+            format!("code mode snippet process ended before it was ready; {RESTART_HINT}")
+        );
     }
 }

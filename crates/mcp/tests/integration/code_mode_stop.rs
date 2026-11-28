@@ -109,6 +109,26 @@ fn host_calls_still_reach_the_server() {
     server.close_and_wait_for_exit();
 }
 
+/// A server that never runs a snippet starts no snippet process.
+#[cfg(unix)]
+#[test]
+fn the_first_snippet_starts_the_snippet_process() {
+    let mut server = McpServer::start();
+    thread::sleep(Duration::from_secs(1));
+    assert!(
+        server.snippet_processes().is_empty(),
+        "the server started a snippet process before any snippet"
+    );
+    let (envelope, _) = server.code_execute("return 1 + 1;", SNIPPET_TIMEOUT_MS);
+    assert_eq!(envelope["ok"], true, "{envelope}");
+    assert_eq!(
+        server.snippet_processes().len(),
+        1,
+        "one idle snippet process"
+    );
+    server.close_and_wait_for_exit();
+}
+
 fn write_project(root: &Path) {
     std::fs::create_dir_all(root.join("src")).expect("create src");
     std::fs::write(
@@ -212,6 +232,19 @@ impl McpServer {
             .unwrap_or_else(|| panic!("text content: {response}"));
         let envelope = serde_json::from_str(text).unwrap_or_else(|err| panic!("{err}: {text}"));
         (envelope, elapsed)
+    }
+
+    /// The PIDs of the snippet processes of the server.
+    #[cfg(unix)]
+    fn snippet_processes(&self) -> Vec<u32> {
+        let output = Command::new("pgrep")
+            .args(["-P", &self.child.id().to_string(), "-f", "code-mode-worker"])
+            .output()
+            .expect("run pgrep");
+        String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .filter_map(|line| line.trim().parse().ok())
+            .collect()
     }
 
     /// Close stdin, as a client that disconnects does. The server must exit.

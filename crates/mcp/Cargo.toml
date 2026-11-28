@@ -39,7 +39,7 @@ tracing-subscriber.workspace = true
 xxhash-rust.workspace = true
 mimalloc = { workspace = true }
 
-[target.'cfg(target_os = "linux")'.dependencies]
+[target.'cfg(unix)'.dependencies]
 libc = { workspace = true }
 
 [dev-dependencies]
