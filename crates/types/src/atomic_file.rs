@@ -16,19 +16,39 @@ use std::path::Path;
 #[cfg(unix)]
 const DEFAULT_FILE_MODE: u32 = 0o666;
 
-/// Replace `path` with `data` atomically.
+/// Replace `path` with `data` atomically, without `fsync`.
 ///
-/// The data goes to a uniquely named temp file beside `path`, gets a
-/// best-effort `fsync`, and is then renamed over `path`. Readers see the old
-/// file or the new file, never a mix. Concurrent writers each move their own
-/// complete payload into place, and the last rename wins. A failed write
-/// removes its temp file.
+/// The data goes to a uniquely named temp file beside `path` and is then
+/// renamed over `path`. Readers see the old file or the new file, never a
+/// mix. Concurrent writers each move their own complete payload into place,
+/// and the last rename wins. A failed write removes its temp file.
+///
+/// Use this function only for a cache that fallow can build again. After a
+/// crash or a power loss, the file can be empty or cut short. The cache
+/// loaders refuse such a file when its framing or its payload does not
+/// decode. On macOS, `File::sync_all` flushes the drive cache. That flush was
+/// 60% to 90% of the parse cache save after a one-file edit. For data that
+/// fallow cannot build again, use [`write_atomic_synced`].
 ///
 /// # Errors
 ///
 /// Returns the IO error when `path` has no parent directory or file name, or
 /// when the temp file cannot be created, written, or renamed into place.
 pub fn write_atomic(path: &Path, data: &[u8]) -> std::io::Result<()> {
+    write_through_temp(path, data, false)
+}
+
+/// [`write_atomic`] with a best-effort `fsync` of the temp file before the
+/// rename, for data that fallow cannot build again.
+///
+/// # Errors
+///
+/// Returns the errors of [`write_atomic`].
+pub fn write_atomic_synced(path: &Path, data: &[u8]) -> std::io::Result<()> {
+    write_through_temp(path, data, true)
+}
+
+fn write_through_temp(path: &Path, data: &[u8], sync: bool) -> std::io::Result<()> {
     let (Some(dir), Some(name)) = (path.parent(), path.file_name()) else {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
@@ -54,8 +74,10 @@ pub fn write_atomic(path: &Path, data: &[u8]) -> std::io::Result<()> {
     }
     let mut tmp = builder.tempfile_in(dir)?;
     tmp.write_all(data)?;
-    // Best effort: a filesystem without fsync support still gets the rename.
-    let _ = tmp.as_file().sync_all();
+    if sync {
+        // Best effort: a filesystem without fsync support still gets the rename.
+        let _ = tmp.as_file().sync_all();
+    }
     persist(tmp, path)
 }
 

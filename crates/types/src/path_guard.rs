@@ -577,17 +577,33 @@ impl<'a> CacheTarget<'a> {
 
     /// Create the cache directory and replace the file `name` in it with
     /// `data` through [`crate::atomic_file::write_atomic`], after the
-    /// symlink check.
+    /// symlink check. Use it only for a cache that fallow can build again.
     ///
     /// # Errors
     ///
     /// Returns the error of the check, of the directory creation, or of the
     /// write.
     pub fn write_file(&self, name: &str, data: &[u8]) -> std::io::Result<()> {
+        let path = self.prepare(name)?;
+        crate::atomic_file::write_atomic(&path, data)
+    }
+
+    /// [`Self::write_file`] through [`crate::atomic_file::write_atomic_synced`],
+    /// for data that fallow cannot build again.
+    ///
+    /// # Errors
+    ///
+    /// Returns the errors of [`Self::write_file`].
+    pub fn write_file_synced(&self, name: &str, data: &[u8]) -> std::io::Result<()> {
+        let path = self.prepare(name)?;
+        crate::atomic_file::write_atomic_synced(&path, data)
+    }
+
+    fn prepare(&self, name: &str) -> std::io::Result<PathBuf> {
         let path = self.dir.join(name);
         self.check(&path)?;
         std::fs::create_dir_all(self.dir)?;
-        crate::atomic_file::write_atomic(&path, data)
+        Ok(path)
     }
 
     /// Write `.gitignore` with `*`, so the cache directory is never
@@ -696,6 +712,30 @@ mod tests {
         target.write_file("cache.bin", b"data").expect("file");
         assert_eq!(std::fs::read(dir.join(".gitignore")).expect("read"), b"*\n");
         assert_eq!(std::fs::read(dir.join("cache.bin")).expect("read"), b"data");
+    }
+
+    #[test]
+    fn a_synced_write_replaces_the_file() {
+        let f = fixture();
+        let dir = f.root.join(".fallow/cache");
+        let target = CacheTarget::new(&f.root, &dir);
+        target
+            .write_file_synced("state.json", b"old")
+            .expect("first");
+        target
+            .write_file_synced("state.json", b"new")
+            .expect("second");
+        assert_eq!(std::fs::read(dir.join("state.json")).expect("read"), b"new");
+    }
+
+    #[test]
+    fn a_synced_write_refuses_a_linked_cache_dir() {
+        let f = fixture();
+        symlink(&f.outside, f.root.join(".fallow")).expect("link");
+        let dir = f.root.join(".fallow");
+        let target = CacheTarget::new(&f.root, &dir);
+        assert!(target.write_file_synced("state.json", b"data").is_err());
+        assert_eq!(std::fs::read_dir(&f.outside).expect("outside").count(), 0);
     }
 
     #[test]
