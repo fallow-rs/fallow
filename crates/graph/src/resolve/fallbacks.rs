@@ -595,7 +595,7 @@ pub(super) fn installed_workspace_package_target(
     if !resolved.starts_with(workspace_root) {
         return None;
     }
-    let installed = from_file.ancestors().skip(1).find_map(|dir| {
+    let installed = fallow_types::audit_snapshot::lookup_parents(from_file).find_map(|dir| {
         ctx.canonicalize_cache
             .get(&dir.join("node_modules").join(&name))
     })?;

@@ -1332,7 +1332,7 @@ fn base_worktree_path() -> EngineResult<PathBuf> {
         .duration_since(SystemTime::UNIX_EPOCH)
         .map_err(|err| EngineError::new(format!("system clock before unix epoch: {err}")))?
         .as_nanos();
-    Ok(std::env::temp_dir().join(base_worktree_name(nanos)))
+    crate::audit_snapshot_dir::snapshot_path(&base_worktree_name(nanos))
 }
 
 /// Compose the directory name for a base worktree taken at clock read `nanos`.

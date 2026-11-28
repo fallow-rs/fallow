@@ -161,8 +161,7 @@ fn follow_extends(
 /// config package. The shared config package declares them, and the inline
 /// `package.json` key of another workspace gives no project-wide credit.
 fn credit_shared_config_manifest(result: &mut PluginResult, shared: &Path, first_dep: usize) {
-    let Some(manifest) = shared
-        .ancestors()
+    let Some(manifest) = fallow_types::audit_snapshot::lookup_ancestors(shared)
         .skip(1)
         .map(|dir| dir.join("package.json"))
         .find(|manifest| manifest.is_file())

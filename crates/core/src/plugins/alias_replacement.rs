@@ -135,7 +135,7 @@ fn tsconfig_maps_elsewhere(find: &str, replacement: &Path, config_path: &Path) -
 
 /// The nearest `tsconfig.json` at or above `dir`.
 fn nearest_tsconfig(dir: &Path) -> Option<PathBuf> {
-    dir.ancestors()
+    fallow_types::audit_snapshot::lookup_ancestors(dir)
         .take(MAX_TSCONFIG_WALK_DEPTH)
         .map(|ancestor| ancestor.join("tsconfig.json"))
         .find(|candidate| candidate.is_file())

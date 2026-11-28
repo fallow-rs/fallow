@@ -68,8 +68,7 @@ pub(super) fn resolve_failed_bare_query_specifier(
 /// True when a `node_modules` directory in an ancestor of `from_file` holds
 /// the package, which is the lookup that Node and the resolver do.
 fn is_package_installed(from_file: &Path, package_name: &str) -> bool {
-    from_file
-        .ancestors()
+    fallow_types::audit_snapshot::lookup_ancestors(from_file)
         .skip(1)
         .any(|dir| dir.join("node_modules").join(package_name).traced_is_dir())
 }

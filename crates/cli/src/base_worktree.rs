@@ -108,6 +108,7 @@ impl BaseWorktree {
         base_sha: &str,
         workspace_patterns: &[String],
     ) -> Option<Self> {
+        ensure_snapshot_dir()?;
         let path = reusable_audit_worktree_path(repo_root);
         let reusable_lock =
             ReusableWorktreeLock::try_acquire(&path, "falling back to non-reusable worktree")?;
@@ -204,10 +205,19 @@ fn non_reusable_worktree_path() -> Option<PathBuf> {
         .duration_since(SystemTime::UNIX_EPOCH)
         .ok()?
         .as_nanos();
-    Some(std::env::temp_dir().join(format!(
+    Some(ensure_snapshot_dir()?.join(format!(
         "fallow-audit-base-{}-{nanos}-{seq}",
         std::process::id()
     )))
+}
+
+/// Create and check the snapshot directory of this user. A refusal gets a
+/// warning that names the directory, because the audit then cannot build its
+/// base snapshot.
+pub fn ensure_snapshot_dir() -> Option<PathBuf> {
+    fallow_engine::audit_snapshot_dir::ensure_audit_snapshot_dir()
+        .map_err(|error| tracing::warn!("{error}"))
+        .ok()
 }
 
 /// RAII cleanup guard for a freshly-created git worktree directory.
@@ -345,22 +355,32 @@ fn stamp_last_used(reusable_path: &Path, owner_root: Option<&Path>) {
 fn read_last_used_owner(reusable_path: &Path) -> Option<PathBuf> {
     const MAX_OWNER_SIDECAR_BYTES: u64 = 4096;
 
-    let sidecar = reusable_worktree_last_used_path(reusable_path);
-    let metadata = std::fs::symlink_metadata(&sidecar).ok()?;
-    if !metadata_is_regular_file(&metadata) || metadata.len() > MAX_OWNER_SIDECAR_BYTES {
-        return None;
-    }
-    let mut contents = String::new();
-    std::fs::File::open(sidecar)
-        .ok()?
-        .take(MAX_OWNER_SIDECAR_BYTES)
-        .read_to_string(&mut contents)
-        .ok()?;
+    let contents = read_trusted_sidecar(
+        &reusable_worktree_last_used_path(reusable_path),
+        MAX_OWNER_SIDECAR_BYTES,
+    )?;
     let owner = contents.trim();
     if owner.is_empty() {
         return None;
     }
     Some(PathBuf::from(owner))
+}
+
+/// Read a sidecar of at most `max_bytes`. A sidecar that is not a regular
+/// file of this user (see [`sidecar_metadata_is_trusted`]) reads as absent:
+/// in a shared temp dir another user can create a file at a sidecar path.
+fn read_trusted_sidecar(sidecar: &Path, max_bytes: u64) -> Option<String> {
+    let metadata = std::fs::symlink_metadata(sidecar).ok()?;
+    if !sidecar_metadata_is_trusted(&metadata) || metadata.len() > max_bytes {
+        return None;
+    }
+    let mut contents = String::new();
+    std::fs::File::open(sidecar)
+        .ok()?
+        .take(max_bytes)
+        .read_to_string(&mut contents)
+        .ok()?;
+    Some(contents)
 }
 
 fn open_or_create_owned_sidecar(path: &Path) -> std::io::Result<std::fs::File> {
@@ -390,7 +410,24 @@ fn open_or_create_owned_sidecar(path: &Path) -> std::io::Result<std::fs::File> {
 fn sidecar_metadata_is_trusted(metadata: &std::fs::Metadata) -> bool {
     use std::os::unix::fs::MetadataExt as _;
 
-    metadata_is_regular_file(metadata) && metadata.uid() == rustix::process::geteuid().as_raw()
+    metadata_is_regular_file(metadata) && metadata.uid() == sidecar_owner_uid()
+}
+
+/// The user that must own a sidecar before fallow trusts it: the effective
+/// user. A test can name another user, because a test cannot create a file
+/// that another user owns.
+#[cfg(unix)]
+fn sidecar_owner_uid() -> u32 {
+    #[cfg(test)]
+    if let Some(uid) = SIDECAR_OWNER_OVERRIDE.with(std::cell::Cell::get) {
+        return uid;
+    }
+    rustix::process::geteuid().as_raw()
+}
+
+#[cfg(all(test, unix))]
+thread_local! {
+    static SIDECAR_OWNER_OVERRIDE: std::cell::Cell<Option<u32>> = const { std::cell::Cell::new(None) };
 }
 
 #[cfg(not(unix))]
@@ -550,20 +587,29 @@ fn load_audit_config(
 /// On Unix the `.lock` sidecar goes with the entry, unlinked under the lock;
 /// see [`ReusableWorktreeLock`] for why that is race-safe. Windows keeps it.
 pub fn sweep_old_reusable_caches(repo_root: &Path, max_age: Option<Duration>, quiet: bool) {
-    sweep_old_reusable_caches_in(repo_root, max_age, quiet, &std::env::temp_dir());
+    let removed = fallow_engine::audit_snapshot_dir::audit_snapshot_scan_dirs()
+        .iter()
+        .map(|scan_root| sweep_scan_root(repo_root, max_age, scan_root))
+        .sum();
+    report_reclaimed_caches(removed, quiet);
 }
 
 /// Scan-root-injectable body of [`sweep_old_reusable_caches`]. Production
-/// always passes `std::env::temp_dir()`; tests pass a private per-test
-/// directory so one test's cross-repo pass never scans (and reclaims)
-/// another test's fixtures or a developer's real ownerless caches in the
-/// shared temp dir.
+/// passes each directory of `audit_snapshot_scan_dirs`; tests pass a private
+/// per-test directory so one test's cross-repo pass never scans (and
+/// reclaims) another test's fixtures or a developer's real ownerless caches
+/// in the shared temp dir.
+#[cfg(test)]
 pub fn sweep_old_reusable_caches_in(
     repo_root: &Path,
     max_age: Option<Duration>,
     quiet: bool,
     scan_root: &Path,
 ) {
+    report_reclaimed_caches(sweep_scan_root(repo_root, max_age, scan_root), quiet);
+}
+
+fn sweep_scan_root(repo_root: &Path, max_age: Option<Duration>, scan_root: &Path) -> u32 {
     let scope = claim_full_sweep(scan_root, SystemTime::now());
     let report = sweep_reusable_caches_with_report(
         repo_root,
@@ -574,7 +620,10 @@ pub fn sweep_old_reusable_caches_in(
         scope,
     );
     log_sweep_entries(&report, SweepMode::Apply, max_age);
-    let removed = report.removed;
+    report.removed
+}
+
+fn report_reclaimed_caches(removed: u32, quiet: bool) {
     if removed == 0 {
         return;
     }
@@ -850,7 +899,7 @@ pub fn log_sweep_entries(report: &SweepReport, mode: SweepMode, max_age: Option<
 }
 
 /// Report-producing body shared by the per-audit GC sweep
-/// ([`sweep_old_reusable_caches_in`], [`SweepMode::Apply`], sizes skipped)
+/// ([`sweep_old_reusable_caches`], [`SweepMode::Apply`], sizes skipped)
 /// and `fallow audit-cache prune` (both modes, sizes measured). Running the
 /// same code path is what guarantees prune "runs the same reclaim logic"
 /// (issue #2221) by construction.
@@ -864,17 +913,22 @@ pub fn sweep_reusable_caches_with_report(
 ) -> SweepReport {
     let now = SystemTime::now();
     let mut report = SweepReport::default();
+    let owned_path = reusable_audit_worktree_path(repo_root);
+    // Earlier versions kept this root's cache directly in the temp dir.
+    let scan_root_owned_path = owned_path.file_name().map(|name| scan_root.join(name));
+    let owned_paths: Vec<&Path> = std::iter::once(owned_path.as_path())
+        .chain(scan_root_owned_path.as_deref())
+        .collect();
 
     // Legacy pass: deregister reusable caches left REGISTERED by pre-#1815
     // fallow (the reporter's `git worktree list` backlog). Each entry is
     // deregistered individually so unavailable user worktrees stay registered.
-    legacy_registered_pass(repo_root, mode, sizes, now, &mut report);
+    legacy_registered_pass(repo_root, &owned_paths, mode, sizes, now, &mut report);
 
     // Primary pass: visit this requested root's cache plus legacy SHA-suffixed
     // entries from the old git-top-level identity. `git worktree list` no
     // longer sees the deregistered caches.
-    let owned_path = reusable_audit_worktree_path(repo_root);
-    let mut paths = vec![owned_path.clone()];
+    let mut paths: Vec<PathBuf> = owned_paths.iter().map(|path| path.to_path_buf()).collect();
     if scope == SweepScope::All {
         paths.extend(scan_legacy_reusable_cache_paths(repo_root, scan_root));
     }
@@ -910,7 +964,7 @@ pub fn sweep_reusable_caches_with_report(
         if !cache_entry_has_presence(path) {
             continue;
         }
-        let pass = if *path == owned_path {
+        let pass = if owned_paths.contains(&path.as_path()) {
             SweepPass::Owned
         } else {
             SweepPass::Legacy
@@ -966,6 +1020,7 @@ fn entry_probe_metadata(path: &Path, now: SystemTime) -> (Option<u64>, Option<Pa
 /// entries are reported without locks, deregistration, or removal.
 fn legacy_registered_pass(
     repo_root: &Path,
+    owned_paths: &[&Path],
     mode: SweepMode,
     sizes: SweepSizes,
     now: SystemTime,
@@ -979,9 +1034,8 @@ fn legacy_registered_pass(
         .filter(|path| is_reusable_audit_worktree_path(path))
         .collect();
     let mut size_map = measure_entry_sizes(sizes, candidates.iter());
-    let owned_path = reusable_audit_worktree_path(repo_root);
     for path in candidates {
-        let pass = if paths_equal(&path, &owned_path) {
+        let pass = if owned_paths.iter().any(|owned| paths_equal(&path, owned)) {
             SweepPass::Owned
         } else {
             SweepPass::Legacy
@@ -1084,11 +1138,11 @@ fn scan_legacy_reusable_cache_paths(repo_root: &Path, scan_root: &Path) -> Vec<P
     scan_cache_paths_with_hex_suffix(&prefix, scan_root)
 }
 
-fn scan_root_owned_cache_paths(repo_root: &Path) -> Vec<PathBuf> {
+fn scan_root_owned_cache_paths(repo_root: &Path, scan_root: &Path) -> Vec<PathBuf> {
     let Some(prefix) = root_owned_cache_repo_prefix(repo_root) else {
         return Vec::new();
     };
-    scan_cache_paths_with_hex_suffix(&prefix, &std::env::temp_dir())
+    scan_cache_paths_with_hex_suffix(&prefix, scan_root)
 }
 
 /// Reclaim a single reusable-cache entry, reporting the per-entry outcome.
@@ -1471,7 +1525,7 @@ pub fn reusable_audit_worktree_path(requested_root: &Path) -> PathBuf {
     let repo_hash = git_toplevel(requested_root)
         .as_deref()
         .map_or(root_hash, canonical_root_hash);
-    std::env::temp_dir().join(format!(
+    fallow_engine::audit_snapshot_dir::audit_snapshot_dir().join(format!(
         "fallow-audit-base-cache-{repo_hash:016x}-root-{root_hash:016x}"
     ))
 }
@@ -1578,13 +1632,16 @@ pub fn remove_reusable_audit_caches(
     requested_root: &Path,
     dry_run: bool,
 ) -> std::io::Result<AuditCacheRemovalReport> {
-    let mut paths = vec![reusable_audit_worktree_path(requested_root)];
-    paths.extend(scan_legacy_reusable_cache_paths(
-        requested_root,
-        &std::env::temp_dir(),
-    ));
-    if git_toplevel(requested_root).is_some_and(|root| paths_equal(&root, requested_root)) {
-        paths.extend(scan_root_owned_cache_paths(requested_root));
+    let owned_path = reusable_audit_worktree_path(requested_root);
+    let mut paths = vec![owned_path.clone()];
+    let at_toplevel =
+        git_toplevel(requested_root).is_some_and(|root| paths_equal(&root, requested_root));
+    for scan_root in fallow_engine::audit_snapshot_dir::audit_snapshot_scan_dirs() {
+        paths.extend(owned_path.file_name().map(|name| scan_root.join(name)));
+        paths.extend(scan_legacy_reusable_cache_paths(requested_root, &scan_root));
+        if at_toplevel {
+            paths.extend(scan_root_owned_cache_paths(requested_root, &scan_root));
+        }
     }
     paths.sort();
     paths.dedup();
@@ -1829,135 +1886,5 @@ impl Drop for BaseWorktree {
 mod cleanup_tests;
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// Git prints a top level that ends in a space as it is. Trimming the
-    /// space would name the sibling `web`, here a link to another project,
-    /// and canonicalizing would follow that link.
-    #[cfg(unix)]
-    #[test]
-    fn git_toplevel_keeps_trailing_blanks_of_the_path() {
-        let tmp = tempfile::tempdir().unwrap();
-        let base = dunce::canonicalize(tmp.path()).unwrap();
-        let repo = base.join("web ");
-        let other = base.join("other-project");
-        std::fs::create_dir_all(&repo).unwrap();
-        std::fs::create_dir_all(&other).unwrap();
-        std::os::unix::fs::symlink("other-project", base.join("web")).unwrap();
-        let init = std::process::Command::new("git")
-            .args(["init", "-q"])
-            .current_dir(&repo)
-            .env("GIT_CONFIG_NOSYSTEM", "1")
-            .env("GIT_CONFIG_GLOBAL", "/dev/null")
-            .env_remove("GIT_DIR")
-            .env_remove("GIT_WORK_TREE")
-            .status()
-            .unwrap();
-        assert!(init.success());
-
-        assert_eq!(git_toplevel(&repo), Some(repo.clone()));
-        assert_eq!(
-            crate::agent_install::resolve_root(&repo.join("."), false),
-            repo
-        );
-    }
-
-    /// Many threads minting a non-reusable worktree path at the same instant
-    /// must each get a distinct path. Before the monotonic counter, concurrent
-    /// callers read the same non-monotonic `nanos` and collided, so two parallel
-    /// `audit` runs in one process raced on `git worktree add` and one aborted
-    /// with a generic error (a flaky exit 2 under parallel unit tests).
-    #[test]
-    fn non_reusable_worktree_paths_are_unique_under_concurrency() {
-        const N: usize = 64;
-        let barrier = std::sync::Barrier::new(N);
-        let paths = std::sync::Mutex::new(Vec::with_capacity(N));
-        std::thread::scope(|s| {
-            for _ in 0..N {
-                let barrier = &barrier;
-                let paths = &paths;
-                s.spawn(move || {
-                    barrier.wait();
-                    let path = non_reusable_worktree_path().expect("path should build");
-                    paths.lock().unwrap().push(path);
-                });
-            }
-        });
-        let mut paths = paths.into_inner().unwrap();
-        assert_eq!(paths.len(), N);
-        paths.sort();
-        paths.dedup();
-        assert_eq!(paths.len(), N, "non-reusable worktree paths collided");
-    }
-
-    /// The pid stays the first segment so orphan-sweep parsing keeps working.
-    #[test]
-    fn non_reusable_worktree_path_pid_is_parseable() {
-        let path = non_reusable_worktree_path().expect("path should build");
-        let name = path.file_name().unwrap().to_str().unwrap();
-        assert!(is_fallow_audit_worktree_path(&path));
-        assert!(!is_reusable_audit_worktree_path(&path));
-        assert_eq!(audit_worktree_pid(name), Some(std::process::id()));
-    }
-
-    #[test]
-    fn directory_size_bytes_sums_regular_files_recursively() {
-        let temp = tempfile::TempDir::new().expect("temp dir should be created");
-        let root = temp.path().join("cache");
-        std::fs::create_dir_all(root.join("node_modules/dep")).expect("tree should be created");
-        std::fs::write(root.join("a.txt"), vec![0u8; 10]).expect("file should be written");
-        std::fs::write(root.join("node_modules/dep/b.js"), vec![0u8; 32])
-            .expect("nested file should be written");
-        // A gitignore inside the snapshot must NOT hide the mass being
-        // measured (the walk is deliberately ignore-crate-free).
-        std::fs::write(root.join(".gitignore"), "node_modules\n")
-            .expect("gitignore should be written");
-
-        let size = directory_size_bytes(&root).expect("size walk should succeed");
-        assert_eq!(size, 10 + 32 + "node_modules\n".len() as u64);
-        assert_eq!(
-            directory_size_bytes(&temp.path().join("missing")),
-            None,
-            "an absent directory reports no size",
-        );
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn directory_size_bytes_never_follows_symlinks() {
-        let temp = tempfile::TempDir::new().expect("temp dir should be created");
-        let root = temp.path().join("cache");
-        let outside = temp.path().join("outside");
-        std::fs::create_dir_all(&root).expect("root should be created");
-        std::fs::create_dir_all(&outside).expect("outside dir should be created");
-        std::fs::write(outside.join("big.bin"), vec![0u8; 4096])
-            .expect("outside file should be written");
-        std::os::unix::fs::symlink(&outside, root.join("link-dir"))
-            .expect("dir symlink should be created");
-        std::os::unix::fs::symlink(outside.join("big.bin"), root.join("link-file"))
-            .expect("file symlink should be created");
-
-        assert_eq!(
-            directory_size_bytes(&root),
-            Some(0),
-            "symlinked directories and files must not be traversed or counted",
-        );
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn cache_sidecar_open_does_not_follow_symlinks() {
-        let temp = tempfile::TempDir::new().expect("temp dir should be created");
-        let victim = temp.path().join("victim");
-        let sidecar = temp.path().join("cache.lock");
-        std::fs::write(&victim, "unchanged\n").expect("victim should be written");
-        std::os::unix::fs::symlink(&victim, &sidecar).expect("sidecar symlink should be created");
-
-        assert!(open_or_create_owned_sidecar(&sidecar).is_err());
-        assert_eq!(
-            std::fs::read_to_string(victim).expect("victim should remain readable"),
-            "unchanged\n",
-        );
-    }
-}
+#[path = "base_worktree_tests.rs"]
+mod tests;

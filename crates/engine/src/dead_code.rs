@@ -315,7 +315,7 @@ fn fingerprint_walk_builder(root: &Path) -> ignore::WalkBuilder {
         git_exclude: true,
         git_global: false,
     };
-    fallow_config::checked_walk_builder(root, sources, |entry| {
+    fallow_config::checked_walk_builder(root, sources, fallow_config::WalkKind::Serial, |entry| {
         let is_dir = entry.file_type().is_some_and(|kind| kind.is_dir());
         if !is_dir || entry.depth() == 0 {
             return true;

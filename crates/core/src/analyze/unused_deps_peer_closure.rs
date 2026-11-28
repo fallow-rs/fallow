@@ -203,7 +203,7 @@ pub fn peer_dependency_hosts(
 }
 
 fn find_installed_package_json(package_root: &Path, package_name: &str) -> Option<PathBuf> {
-    for base in package_root.ancestors() {
+    for base in fallow_types::audit_snapshot::lookup_ancestors(package_root) {
         let candidate = node_modules_package_json(base, package_name);
         if candidate.is_file() {
             return Some(candidate);

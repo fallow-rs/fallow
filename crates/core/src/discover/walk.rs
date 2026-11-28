@@ -1330,7 +1330,7 @@ fn build_source_walk_builder(
     let sink = Arc::clone(skipped_dotdirs);
     let root = config.root.clone();
     let ignore_patterns = config.ignore_patterns.clone();
-    let mut walk_builder = fallow_config::source_walk_builder(&config.root, move |entry| {
+    let mut walk_builder = fallow_config::parallel_walk_builder(&config.root, move |entry| {
         if is_allowed_hidden_with_scopes(entry, &scopes) {
             return true;
         }

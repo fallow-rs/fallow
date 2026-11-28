@@ -10,7 +10,7 @@ use std::process::ExitCode;
 
 use crate::base_worktree::{
     CacheMaxAgeSource, ResolvedCacheMaxAge, SweepDecision, SweepEntry, SweepMode, SweepPass,
-    SweepScope, SweepSizes, log_sweep_entries, resolve_cache_max_age_with_source,
+    SweepReport, SweepScope, SweepSizes, log_sweep_entries, resolve_cache_max_age_with_source,
     sweep_reusable_caches_with_report,
 };
 use crate::report::{format_bytes, plural};
@@ -50,14 +50,18 @@ pub fn run_audit_cache_prune(opts: &AuditCachePruneOptions<'_>) -> ExitCode {
         SweepMode::Apply
     };
     let cache_dir = project_cache_dir(opts);
-    let mut report = sweep_reusable_caches_with_report(
-        opts.root,
-        resolved.max_age,
-        &scan_root,
-        mode,
-        SweepSizes::Measure,
-        SweepScope::All,
-    );
+    let mut report = SweepReport::default();
+    for dir in fallow_engine::audit_snapshot_dir::audit_snapshot_scan_dirs() {
+        let part = sweep_reusable_caches_with_report(
+            opts.root,
+            resolved.max_age,
+            &dir,
+            mode,
+            SweepSizes::Measure,
+            SweepScope::All,
+        );
+        report.entries.extend(part.entries);
+    }
     report
         .entries
         .extend(crate::audit::sweep_base_snapshot_cache(
@@ -69,6 +73,10 @@ pub fn run_audit_cache_prune(opts: &AuditCachePruneOptions<'_>) -> ExitCode {
     report
         .entries
         .sort_by(|left, right| left.path.cmp(&right.path));
+    // Each scan also visits the Git-registered entries of the repository.
+    report
+        .entries
+        .dedup_by(|left, right| left.path == right.path);
     log_sweep_entries(&report, mode, resolved.max_age);
 
     let counts = PruneCounts::tally(&report.entries);

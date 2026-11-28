@@ -195,6 +195,7 @@ jobs:
               - 'crates/engine/src/repo_refs.rs'
               - 'crates/engine/src/repo_refs_linked_worktree.rs'
               - 'crates/engine/src/base_worktree_orphans.rs'
+              - 'crates/engine/src/audit_snapshot_dir.rs'
               - 'crates/engine/src/shell_quote.rs'
               - 'crates/engine/src/validate.rs'
               - 'crates/engine/src/write_guard.rs'

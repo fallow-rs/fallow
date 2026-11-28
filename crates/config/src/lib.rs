@@ -72,7 +72,8 @@ pub use config_writer::*;
 pub use external_plugin::*;
 pub use fixability::*;
 pub use ignore_files::{
-    IgnoreFileSources, checked_global_gitignore, checked_walk_builder, readable_ignore_file,
+    IgnoreFileSources, WalkKind, checked_global_gitignore, checked_walk_builder,
+    readable_ignore_file,
 };
 pub use package_manager::PackageManager;
 #[doc(hidden)]
@@ -80,7 +81,7 @@ pub use permutation::{PermutationSite, sort_permuted};
 pub use production_env::*;
 pub use rule_pack::*;
 pub use run_inputs::*;
-pub use source_walk::{source_walk_builder, source_walked_workspaces};
+pub use source_walk::{parallel_walk_builder, source_walk_builder, source_walked_workspaces};
 pub use workspace::*;
 pub use workspace_owners::WorkspaceOwners;
 

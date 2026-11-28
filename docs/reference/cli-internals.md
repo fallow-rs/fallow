@@ -1442,8 +1442,9 @@ directory has no parse cache yet.
 ## Audit cache maintenance
 
 `fallow audit-cache` maintains the reusable base-snapshot caches
-(`$TMPDIR/fallow-audit-base-cache-*`) that `fallow audit` builds and
-garbage-collects. Two subcommands with distinct semantics:
+(`$TMPDIR/fallow-audit-snapshots-<euid>/fallow-audit-base-cache-*` on Unix,
+`$TMPDIR/fallow-audit-base-cache-*` on Windows) that `fallow audit` builds
+and garbage-collects. Two subcommands with distinct semantics:
 
 - `audit-cache remove`: delete every cache owned by an explicit `--root`,
   warm or not. Requires `--root` and `--yes` (non-interactive), exits 2 on
@@ -1474,6 +1475,34 @@ garbage-collects. Two subcommands with distinct semantics:
   (`crates/cli/src/audit_cache.rs`).
 
 Shared invariants (`crates/cli/src/base_worktree.rs`):
+
+- The snapshots live in the snapshot directory of the user
+  (`crates/engine/src/audit_snapshot_dir.rs`). On Unix it is
+  `fallow-audit-snapshots-<euid>` in the temp dir, made with mode 0700. A link,
+  a non-directory, a directory of another user, or a directory with group or
+  other access at that path is refused, and the audit stops with exit 2.
+  Fallow never changes or removes such a path. The sweeps, `prune` and
+  `remove` scan that directory and the temp dir, where earlier versions kept
+  the snapshots. In the temp dir, an entry with the name of the requested
+  root's cache counts as that root's own entry.
+- The `.sha` and `.last-used` sidecars are read only when they are regular
+  files of the effective user (`sidecar_metadata_is_trusted`).
+- An analysis of a snapshot reads nothing above the snapshot root.
+  `fallow_types::audit_snapshot::snapshot_root` finds the root by its
+  location: a `fallow-audit-base-*` directory in the snapshot directory.
+  The upward lookups use `lookup_ancestors`, and the resolver file system
+  (`resolver_for_root` in `crates/graph/src/read_trace.rs`) finds no lookup
+  name above the root. The source walk applies no `.ignore` file above the
+  repository top level, which the `.git` stub of the snapshot marks. The
+  `ignore` crate keeps its own parent rules only when no `.ignore` is above
+  the top level and only the user or root can create a file in each
+  directory there (`fallow_types::read_scope::only_owner_writes`), so no
+  other user can add one between the check and the read. Otherwise the walk
+  sets `parents(false)`, and for a root below the top level
+  `crates/config/src/ignore_parent_rules.rs` applies the files between the
+  root and the top level with the precedence of the crate. It reads the
+  ignore files of a walked directory the way the walker in use reads them:
+  by path for `build`, by exact listing name for `build_parallel`.
 
 - Both prune modes and the per-audit sweep share one decision code path
   (`sweep_reusable_caches_with_report`), so prune can never drift from what

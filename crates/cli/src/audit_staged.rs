@@ -154,7 +154,7 @@ fn staged_worktree_path() -> Option<PathBuf> {
         .duration_since(SystemTime::UNIX_EPOCH)
         .ok()?
         .as_nanos();
-    Some(std::env::temp_dir().join(format!(
+    Some(crate::base_worktree::ensure_snapshot_dir()?.join(format!(
         "fallow-audit-base-{}-staged-{nanos}-{seq}",
         std::process::id()
     )))

@@ -62,6 +62,174 @@ pub fn may_widen_scope(dir: &Path, root: &Path) -> bool {
     sid_owner_rule_allows(&dir_owner, &root_owner, &user)
 }
 
+/// True when only the current user or root can create a file in the
+/// directory `dir`: one of them owns it, and neither its group nor other
+/// users may write to it. On macOS no entry of its access list may allow a
+/// write either. Only an owner can change the owner, the mode or the access
+/// list, so another user cannot make the result false later. A metadata
+/// error counts as false.
+///
+/// A volume mounted with `noowners` reports the current user as the owner
+/// of each file, so this rule passes there for every user. Such a volume
+/// lets each user write each file anyway.
+#[cfg(unix)]
+#[must_use]
+pub fn only_owner_writes(dir: &Path) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    std::fs::metadata(dir).is_ok_and(|metadata| {
+        private_dir_rule(
+            metadata.uid(),
+            metadata.mode(),
+            rustix::process::geteuid().as_raw(),
+        )
+    }) && !access_list_allows_a_write(dir)
+}
+
+/// True when an access list entry of `dir` lets a principal write to it.
+#[cfg(target_os = "macos")]
+fn access_list_allows_a_write(dir: &Path) -> bool {
+    macos_acl::allows_a_write(dir)
+}
+
+/// The access list of a directory on a Unix target other than macOS: the
+/// owner rule of [`only_owner_writes`] reads the mode only. On Linux a POSIX
+/// access list entry that lets a user or group write also sets the group
+/// write bit of the mode, through the mask, so the mode rule sees it. An
+/// NFSv4 access list on a network volume can grant a write without the mode
+/// bit, which this rule does not read.
+#[cfg(all(unix, not(target_os = "macos")))]
+const fn access_list_allows_a_write(_dir: &Path) -> bool {
+    false
+}
+
+/// The extended access list (ACL) of a macOS directory.
+#[cfg(target_os = "macos")]
+#[expect(
+    unsafe_code,
+    reason = "the access list lookup of a directory requires libSystem FFI calls"
+)]
+mod macos_acl {
+    use std::ffi::{CString, c_char, c_int, c_void};
+    use std::os::unix::ffi::OsStrExt as _;
+    use std::path::Path;
+
+    /// `ACL_TYPE_EXTENDED` of `<sys/acl.h>`.
+    const ACL_TYPE_EXTENDED: c_int = 0x0000_0100;
+    const ACL_FIRST_ENTRY: c_int = 0;
+    const ACL_NEXT_ENTRY: c_int = -1;
+    /// `ACL_EXTENDED_ALLOW` of `<sys/acl.h>`.
+    const ACL_EXTENDED_ALLOW: c_int = 1;
+    /// `ACL_ENTRY_ONLY_INHERIT` of `<sys/acl.h>`: the entry applies only to
+    /// the children that inherit it, not to the directory itself.
+    const ACL_ENTRY_ONLY_INHERIT: c_int = 1 << 8;
+    /// The rights that let a principal add an entry to a directory
+    /// (`add_file`, which is also `write_data`, and `add_subdirectory`), or
+    /// give itself that right later (the rights to change the access list
+    /// and the owner).
+    const WRITE_RIGHTS: [c_int; 4] = [1 << 2, 1 << 5, 1 << 12, 1 << 13];
+
+    unsafe extern "C" {
+        fn acl_get_file(path: *const c_char, acl_type: c_int) -> *mut c_void;
+        fn acl_get_entry(acl: *mut c_void, entry_id: c_int, entry: *mut *mut c_void) -> c_int;
+        fn acl_get_tag_type(entry: *mut c_void, tag: *mut c_int) -> c_int;
+        fn acl_get_permset(entry: *mut c_void, permset: *mut *mut c_void) -> c_int;
+        fn acl_get_perm_np(permset: *mut c_void, perm: c_int) -> c_int;
+        fn acl_get_flagset_np(object: *mut c_void, flagset: *mut *mut c_void) -> c_int;
+        fn acl_get_flag_np(flagset: *mut c_void, flag: c_int) -> c_int;
+        fn acl_free(object: *mut c_void) -> c_int;
+    }
+
+    /// True when an allow entry of the access list of `dir` grants one of
+    /// the [`WRITE_RIGHTS`], to any principal. The list of the target of a
+    /// link counts, the same as for the metadata read. A deny entry, such as
+    /// the default `everyone deny delete` of a home directory, grants
+    /// nothing, and neither does an entry that only children inherit. An
+    /// error other than a missing list, and an entry whose kind or rights
+    /// cannot be read, count as true.
+    pub(super) fn allows_a_write(dir: &Path) -> bool {
+        let Ok(path) = CString::new(dir.as_os_str().as_bytes()) else {
+            return true;
+        };
+        // SAFETY: `path` is a NUL-terminated string that lives for the call.
+        let acl = unsafe { acl_get_file(path.as_ptr(), ACL_TYPE_EXTENDED) };
+        if acl.is_null() {
+            // A directory without an access list gives ENOENT.
+            return std::io::Error::last_os_error().kind() != std::io::ErrorKind::NotFound;
+        }
+        // The SAFETY notes below rest on this: `acl` is the live list that
+        // acl_get_file returned. Each entry, permission set and flag set points into
+        // it, and none is used after the acl_free at the end. Each out
+        // pointer points to a live local.
+        let mut allows = false;
+        let mut entry_id = ACL_FIRST_ENTRY;
+        let mut entry: *mut c_void = std::ptr::null_mut();
+        loop {
+            // SAFETY: `acl` is live and `entry` is a live local.
+            let status = unsafe { acl_get_entry(acl, entry_id, &raw mut entry) };
+            if status != 0 {
+                break;
+            }
+            entry_id = ACL_NEXT_ENTRY;
+            let mut tag: c_int = 0;
+            // SAFETY: `entry` points into the live `acl`; `tag` is a live local.
+            if unsafe { acl_get_tag_type(entry, &raw mut tag) } != 0 {
+                allows = true;
+                break;
+            }
+            if tag != ACL_EXTENDED_ALLOW {
+                continue;
+            }
+            let mut flagset: *mut c_void = std::ptr::null_mut();
+            // SAFETY: `entry` points into the live `acl`; `flagset` is a live
+            // local.
+            if unsafe { acl_get_flagset_np(entry, &raw mut flagset) } != 0 {
+                allows = true;
+                break;
+            }
+            // SAFETY: `flagset` points into the live `acl`.
+            let only_inherit = unsafe { acl_get_flag_np(flagset, ACL_ENTRY_ONLY_INHERIT) };
+            if only_inherit == 1 {
+                continue;
+            }
+            let mut permset: *mut c_void = std::ptr::null_mut();
+            // SAFETY: `entry` points into the live `acl`; `permset` is a live
+            // local.
+            if unsafe { acl_get_permset(entry, &raw mut permset) } != 0 {
+                allows = true;
+                break;
+            }
+            let grants = |right: c_int| {
+                // SAFETY: `permset` points into the live `acl`.
+                let granted = unsafe { acl_get_perm_np(permset, right) };
+                granted == 1
+            };
+            if WRITE_RIGHTS.into_iter().any(grants) {
+                allows = true;
+                break;
+            }
+        }
+        // SAFETY: `acl` is freed once, after its last use.
+        unsafe { acl_free(acl) };
+        allows
+    }
+}
+
+/// [`only_owner_writes`] on a target without the Unix owner model: the
+/// result is false, so a caller takes its safe path.
+#[cfg(not(unix))]
+#[must_use]
+pub const fn only_owner_writes(_dir: &Path) -> bool {
+    false
+}
+
+/// The rule of [`only_owner_writes`] over the owner `uid` and the `mode` of
+/// a directory, for the effective user `euid`.
+#[cfg(unix)]
+const fn private_dir_rule(uid: u32, mode: u32, euid: u32) -> bool {
+    const WRITABLE_BY_GROUP_OR_ALL: u32 = 0o022;
+    mode & WRITABLE_BY_GROUP_OR_ALL == 0 && (uid == euid || uid == 0)
+}
+
 /// True when the directory `dir` above the analysis root `root` may widen
 /// the read scope. On a target without an owner model the rule does not
 /// apply, and the result is true.
@@ -216,6 +384,84 @@ mod tests {
 
     const PRIVATE_DIR: u32 = 0o040_755;
     const SHARED_DIR: u32 = 0o041_777;
+
+    #[test]
+    fn only_the_owner_writes_to_a_directory_of_the_user_or_root_without_shared_write() {
+        assert!(private_dir_rule(501, PRIVATE_DIR, 501));
+        assert!(private_dir_rule(0, PRIVATE_DIR, 501));
+        assert!(!private_dir_rule(1001, PRIVATE_DIR, 501));
+        assert!(!private_dir_rule(501, SHARED_DIR, 501));
+        assert!(!private_dir_rule(0, 0o040_775, 501));
+    }
+
+    /// An access list entry that lets all users add files makes a private
+    /// directory shared. A deny entry does not.
+    #[cfg(target_os = "macos")]
+    #[test]
+    #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+    fn an_access_list_that_allows_a_write_makes_a_directory_shared() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let dir = directory.path();
+        assert!(only_owner_writes(dir));
+        let chmod = |entry: &str| {
+            std::process::Command::new("chmod")
+                .args(["+a", entry])
+                .arg(dir)
+                .status()
+                .is_ok_and(|status| status.success())
+        };
+        if !chmod("everyone deny delete") {
+            return;
+        }
+        assert!(only_owner_writes(dir));
+        assert!(chmod("everyone allow add_file"));
+        assert!(!only_owner_writes(dir));
+    }
+
+    /// The rule follows a link to a directory, as the metadata read does,
+    /// so the access list of the target counts.
+    #[cfg(target_os = "macos")]
+    #[test]
+    #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+    fn the_access_list_of_a_linked_directory_counts() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let target = directory.path().join("target");
+        std::fs::create_dir(&target).expect("target directory");
+        let link = directory.path().join("link");
+        std::os::unix::fs::symlink(&target, &link).expect("link to the directory");
+        let granted = std::process::Command::new("chmod")
+            .args(["+a", "everyone allow add_file"])
+            .arg(&target)
+            .status()
+            .is_ok_and(|status| status.success());
+        if !granted {
+            return;
+        }
+        assert!(!only_owner_writes(&target));
+        assert!(!only_owner_writes(&link));
+    }
+
+    /// An entry that only later entries inherit does not apply to the
+    /// directory itself.
+    #[cfg(target_os = "macos")]
+    #[test]
+    #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+    fn an_access_list_entry_that_only_children_inherit_keeps_a_directory_private() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let dir = directory.path();
+        let granted = std::process::Command::new("chmod")
+            .args([
+                "+a",
+                "everyone allow add_file,file_inherit,directory_inherit,only_inherit",
+            ])
+            .arg(dir)
+            .status()
+            .is_ok_and(|status| status.success());
+        if !granted {
+            return;
+        }
+        assert!(only_owner_writes(dir));
+    }
 
     #[test]
     fn a_directory_of_the_current_user_widens_the_scope() {

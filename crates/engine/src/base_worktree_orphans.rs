@@ -46,10 +46,13 @@ pub fn remove_audit_worktree(repo_root: &Path, path: &Path) {
 }
 
 /// Remove the snapshots of dead processes: their Git registrations in
-/// `repo_root` and their directories in the temp dir. Entries younger than
-/// [`ORPHAN_MIN_AGE`] stay.
+/// `repo_root` and their directories in each directory of
+/// [`audit_snapshot_scan_dirs`](crate::audit_snapshot_dir::audit_snapshot_scan_dirs).
+/// Entries younger than [`ORPHAN_MIN_AGE`] stay.
 pub fn sweep_orphan_audit_worktrees(repo_root: &Path) {
-    sweep_orphan_audit_worktrees_in(repo_root, &std::env::temp_dir(), ORPHAN_MIN_AGE);
+    for dir in crate::audit_snapshot_dir::audit_snapshot_scan_dirs() {
+        sweep_orphan_audit_worktrees_in(repo_root, &dir, ORPHAN_MIN_AGE);
+    }
 }
 
 /// [`sweep_orphan_audit_worktrees`] with an explicit temp dir and age floor.
