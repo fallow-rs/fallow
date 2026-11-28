@@ -569,6 +569,36 @@ mod tests {
     }
 
     #[test]
+    fn large_yaml_config_with_merged_defaults_gives_every_handler() {
+        use std::fmt::Write as _;
+        let mut source = String::from("custom:\n  defaults: &defaults\n");
+        for key in 0..15 {
+            writeln!(
+                source,
+                "    setting{key}: value-of-the-shared-setting-{key}"
+            )
+            .unwrap();
+        }
+        source.push_str("functions:\n");
+        for function in 0..250 {
+            write!(
+                source,
+                "  function{function}:\n    <<: *defaults\n    handler: src/handlers/function{function}.main\n    events:\n      - http: {{ path: /function{function}, method: get }}\n"
+            )
+            .unwrap();
+        }
+        let result = resolve("/project/serverless.yml", &source);
+        let entries = entry_patterns(&result);
+        assert_eq!(entries.len(), 250, "{entries:?}");
+        assert!(
+            entries
+                .iter()
+                .any(|entry| entry.starts_with("src/handlers/function249")),
+            "{entries:?}"
+        );
+    }
+
+    #[test]
     fn yaml_config_with_cloudformation_tags_gives_handlers_and_plugins() {
         let source = r"
 service: TestService

@@ -9,39 +9,8 @@ use std::fmt;
 use deser_core::{Context, TrackLocations};
 use deser_value::{Kind, Map, Value};
 
-/// The memory that alias expansion may add to the parsed documents of one
-/// source, in bytes.
-///
-/// The parser limits aliases by the number of nodes that they replay, and
-/// each replayed scalar is copied into the parsed value. A short source can
-/// replay one long scalar many times, so the node limit alone does not bound
-/// memory. A replayed node never holds more text than the source, so a node
-/// limit of this budget divided by the source length bounds the copies.
-/// Real configs replay a few hundred nodes at most.
-const MAX_ALIAS_EXPANSION_BYTES: usize = 256 * 1024 * 1024;
-
-/// The memory of one parsed node beyond its text, in bytes.
-const NODE_OVERHEAD_BYTES: usize = 128;
-
-/// The node limit of the parser for aliases when the source is short.
-const MAX_ALIAS_EVENTS: usize = 1_000_000;
-
-/// The number of nodes that aliases may replay in each document of a stream
-/// of `documents` documents.
-fn alias_event_limit(source: &str, documents: usize) -> usize {
-    let per_node = source.len().saturating_add(NODE_OVERHEAD_BYTES);
-    (MAX_ALIAS_EXPANSION_BYTES / per_node / documents.max(1)).min(MAX_ALIAS_EVENTS)
-}
-
-/// An upper bound of the number of documents in a YAML stream. Each document
-/// after the first starts at a line that starts with `---` or follows a line
-/// that starts with `...`.
-fn document_count_bound(source: &str) -> usize {
-    1 + source
-        .split(['\n', '\r'])
-        .filter(|line| line.starts_with("---") || line.starts_with("..."))
-        .count()
-}
+#[path = "yaml_alias_budget.rs"]
+mod alias_budget;
 
 /// A YAML parse error.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -77,12 +46,14 @@ impl YamlDocument {
 /// document, has a duplicate mapping key, or has aliases that expand above
 /// the memory budget for alias expansion.
 pub fn parse(source: &str) -> Result<YamlDocument, YamlError> {
-    deser_yaml::DeserializerConfig::builder()
-        .alias_limit(alias_event_limit(source, 1))
-        .build()
-        .from_str::<Value>(source)
-        .map(YamlDocument)
-        .map_err(|error| YamlError(error.to_string()))
+    alias_budget::within_alias_budget(source, |alias_limit| {
+        deser_yaml::DeserializerConfig::builder()
+            .alias_limit(alias_limit)
+            .build()
+            .from_str::<Value>(source)
+    })
+    .map(YamlDocument)
+    .map_err(YamlError)
 }
 
 /// Parse `source` as a single YAML document and keep the source position
@@ -96,14 +67,15 @@ pub fn parse(source: &str) -> Result<YamlDocument, YamlError> {
 ///
 /// Returns an error in the same cases as [`parse`].
 pub fn parse_with_locations(source: &str) -> Result<YamlDocument, YamlError> {
-    let config = deser_yaml::DeserializerConfig::builder()
-        .context(Context::with(TrackLocations(true)))
-        .alias_limit(alias_event_limit(source, 1))
-        .build();
-    config
-        .from_str::<Value>(source)
-        .map(YamlDocument)
-        .map_err(|error| YamlError(error.to_string()))
+    alias_budget::within_alias_budget(source, |alias_limit| {
+        deser_yaml::DeserializerConfig::builder()
+            .context(Context::with(TrackLocations(true)))
+            .alias_limit(alias_limit)
+            .build()
+            .from_str::<Value>(source)
+    })
+    .map(YamlDocument)
+    .map_err(YamlError)
 }
 
 /// Parse every document of the YAML stream in `source`.
@@ -116,18 +88,16 @@ pub fn parse_with_locations(source: &str) -> Result<YamlDocument, YamlError> {
 /// mapping key, or has aliases that expand above the memory budget for
 /// alias expansion. The budget is for the whole stream.
 pub fn parse_documents(source: &str) -> Result<Vec<YamlDocument>, YamlError> {
-    let config = deser_yaml::DeserializerConfig::builder()
-        .alias_limit(alias_event_limit(source, document_count_bound(source)))
-        .build();
-    let mut deserializer = deser_yaml::Deserializer::from_str_with_config(source, config);
-    deserializer
-        .iter::<Value>()
-        .map(|document| {
-            document
-                .map(YamlDocument)
-                .map_err(|error| YamlError(error.to_string()))
-        })
-        .collect()
+    alias_budget::within_alias_budget(source, |alias_limit| {
+        let config = deser_yaml::DeserializerConfig::builder()
+            .alias_limit(alias_limit)
+            .build();
+        deser_yaml::Deserializer::from_str_with_config(source, config)
+            .iter::<Value>()
+            .map(|document| document.map(YamlDocument))
+            .collect::<Result<Vec<_>, _>>()
+    })
+    .map_err(YamlError)
 }
 
 /// A borrowed node of a parsed YAML document.
@@ -474,10 +444,61 @@ mod tests {
 
     #[test]
     fn the_alias_budget_covers_the_whole_stream() {
-        // 50 documents that each replay a 1,000-byte string 1,000 times.
-        let document = nested_aliases(1_000, 3);
+        // 50 documents that each replay a 1,000-byte string 10,000 times:
+        // about 10 MB for each document and 500 MB for the stream.
+        let document = nested_aliases(1_000, 4);
         let source = format!("---\n{document}").repeat(50);
         assert!(parse_documents(&source).is_err());
+    }
+
+    /// A Serverless config whose functions each merge one shared mapping of
+    /// 15 entries, as large configs do.
+    fn merged_defaults(functions: usize) -> String {
+        use std::fmt::Write as _;
+        let mut yaml = String::from("custom:\n  defaults: &defaults\n");
+        for key in 0..15 {
+            writeln!(yaml, "    setting{key}: value-of-the-shared-setting-{key}")
+                .expect("writing to a String cannot fail");
+        }
+        yaml.push_str("functions:\n");
+        for function in 0..functions {
+            write!(
+                yaml,
+                "  function{function}:\n    <<: *defaults\n    handler: src/handlers/function{function}.main\n    events:\n      - http: {{ path: /function{function}, method: get }}\n"
+            )
+            .expect("writing to a String cannot fail");
+        }
+        yaml
+    }
+
+    #[test]
+    fn merge_keys_of_a_large_config_stay_within_the_budget() {
+        let source = merged_defaults(250);
+        assert!(source.len() > 25_000, "{} bytes", source.len());
+        let document = parse(&source).unwrap();
+        let functions = document.root().get("functions").unwrap();
+        assert_eq!(functions.as_mapping().unwrap().len(), 250);
+        let last = functions.get("function249").unwrap();
+        assert_eq!(
+            last.get("setting14").and_then(|node| node.as_str()),
+            Some("value-of-the-shared-setting-14")
+        );
+        assert_eq!(
+            last.get("handler").and_then(|node| node.as_str()),
+            Some("src/handlers/function249.main")
+        );
+    }
+
+    #[test]
+    fn expansion_above_the_budget_fails_fast() {
+        let started = std::time::Instant::now();
+        assert!(parse(&nested_aliases(4_000, 5)).is_err());
+        assert!(parse(&nested_aliases(20_000, 5)).is_err());
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(5),
+            "took {:?}",
+            started.elapsed()
+        );
     }
 
     #[test]

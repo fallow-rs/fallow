@@ -1516,8 +1516,16 @@ fn resolve_plugin_filesystem_config(
     let Some(source) = crate::discover::project_read::read_project_file(root, abs_path) else {
         return;
     };
-    let plugin_result = crate::discover::project_read::with_project_root(root, || {
-        plugin.resolve_config(abs_path, &source, root)
+    // A warning that a parser emits for this file, such as a YAML file that
+    // the alias budget refuses, then names the file.
+    let config_span = tracing::warn_span!(
+        "config",
+        path = %abs_path.strip_prefix(root).unwrap_or(abs_path).display()
+    );
+    let plugin_result = config_span.in_scope(|| {
+        crate::discover::project_read::with_project_root(root, || {
+            plugin.resolve_config(abs_path, &source, root)
+        })
     });
     if plugin_result.is_empty() {
         return;
