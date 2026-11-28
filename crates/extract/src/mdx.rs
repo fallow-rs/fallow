@@ -563,7 +563,7 @@ fn parse_statement_body(
     parsed_suppressions: crate::suppress::ParsedSuppressions,
     gates: crate::module_parse::ExtractionGates,
 ) -> (ModuleInfo, bool) {
-    if extraction.body.is_empty() {
+    if extraction.body.is_empty() || !crate::nesting::fragment_within_limits(&extraction.body) {
         let info =
             ModuleInfoExtractor::new().into_module_info(file_id, content_hash, parsed_suppressions);
         return (info, true);

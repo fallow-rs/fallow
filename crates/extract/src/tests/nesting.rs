@@ -489,12 +489,13 @@ fn wide_pattern_over_wide_source_records_bounded_entries() {
 
 #[test]
 fn deep_inline_html_script_skips_its_body() {
-    // The quotes on the first line make the whole-file scan read the deep
-    // script as one string, so only the guard of the inline parse sees the
+    // The quotes on the first line make the code view of the whole-file
+    // scan read the deep script as one string, and the JSX view reads it as
+    // the text of the `div`, so only the guard of the inline parse sees the
     // depth.
     let source = format!(
-        "<p>'</p><script type=\"module\">import \"./deep.js\"; const x = {}1{};</script><p>'</p>\n\
-         <script type=\"module\">import \"./ok.js\";</script>\n",
+        "<div><p>'</p><script type=\"module\">import \"./deep.js\"; const x = {}1{};</script><p>'</p>\n\
+         <script type=\"module\">import \"./ok.js\";</script></div>\n",
         "[".repeat(DEEP),
         "]".repeat(DEEP)
     );
@@ -560,4 +561,69 @@ fn an_empty_grid_template_areas_value_is_not_rendered() {
         let analytics = crate::css_metrics::compute_css_analytics(source);
         assert!(analytics.is_some(), "{source}");
     }
+}
+
+/// Nested type-argument lists past the cap of 10 levels. Twelve levels keep
+/// the parse short when a guard misses them.
+fn nested_type_arguments() -> String {
+    format!("{}b{}", "t<{[".repeat(12), "]".repeat(12))
+}
+
+/// A template expression is parsed on its own, so the whole-file scan, which
+/// reads an attribute value as a string, does not see its nesting.
+#[test]
+fn nested_type_arguments_in_a_template_attribute_degrade() {
+    let nested = nested_type_arguments();
+    let refused = [
+        (
+            "src/App.vue",
+            format!("<template><p v-html=\"{nested}\"></p></template>\n"),
+        ),
+        (
+            "src/Title.vue",
+            format!(
+                "<script setup lang=\"ts\">\nimport {{ b }} from './b';\n</script>\n\
+                 <template><p :title=\"{nested}\"></p></template>\n"
+            ),
+        ),
+        (
+            "src/Title.svelte",
+            format!(
+                "<script lang=\"ts\">\nimport {{ b }} from './b';\n</script>\n\
+                 <p title=\"{{{nested}}}\"></p>\n"
+            ),
+        ),
+    ]
+    .into_iter()
+    .map(|(path, source)| (path, parse(path, &source).parse_nesting_too_deep))
+    .collect::<Vec<_>>();
+    let parsed: Vec<&str> = refused
+        .iter()
+        .filter(|(_, too_deep)| !too_deep)
+        .map(|(path, _)| *path)
+        .collect();
+    assert!(parsed.is_empty(), "parsed: {parsed:?}");
+}
+
+/// A backtick in an HTML comment of a component file does not hide the
+/// nesting of the script block after it.
+#[test]
+fn a_backtick_in_markup_does_not_hide_a_nested_script_block() {
+    let source = format!(
+        "<template><!-- ` --><p>x</p></template>\n\
+         <script setup lang=\"ts\">\nexport const x = {};\n</script>\n<!-- ` -->\n",
+        nested_type_arguments()
+    );
+    let info = parse("src/App.vue", &source);
+    assert!(info.parse_nesting_too_deep);
+}
+
+/// Real template expressions stay parsed.
+#[test]
+fn ordinary_template_expressions_still_parse() {
+    let source = "<script setup lang=\"ts\">\nimport { format } from './format';\n</script>\n\
+                  <template><p :title=\"format(a < b ? [1] : { k: [c] })\">{{ format(1) }}</p></template>\n";
+    let info = parse("src/App.vue", source);
+    assert!(!info.parse_nesting_too_deep);
+    assert!(!info.parse_panicked);
 }

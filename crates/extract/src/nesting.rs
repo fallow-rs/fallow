@@ -20,8 +20,23 @@
 //!
 //! The same scan also counts the `<` tokens that the TypeScript parser can
 //! try as nested type-argument lists, because each such level multiplies the
-//! parse time. [`MAX_TYPE_ARGUMENT_NESTING`] caps that count.
+//! parse time. [`MAX_TYPE_ARGUMENT_NESTING`] caps that count, and
+//! [`reread_budget`] caps the bytes that the parser reads again after a
+//! failed list.
+//!
+//! In a JSX file the parser reads the text of an element as text, so quotes,
+//! comment openers and closing brackets there are not tokens. A plain scan
+//! cannot tell such text from code. Each script source is therefore scanned
+//! twice: once as code and once with JSX elements, and a source is refused
+//! when either view passes a limit. A `.ts` file can be parsed with JSX after
+//! a parse without JSX finds nothing, so both views apply to every source.
+//!
+//! A fragment that the extraction parses on its own, such as a template
+//! expression or a component script block, gets its own scan through
+//! [`fragment_within_limits`], because the scan of the whole file reads it in
+//! another context.
 
+use std::cell::Cell;
 use std::path::Path;
 
 use fallow_types::discover::FileId;
@@ -46,6 +61,55 @@ use crate::visitor::ModuleInfoExtractor;
 /// Real code, minified bundles and generated declaration files included,
 /// stays below this cap.
 const MAX_TYPE_ARGUMENT_NESTING: u32 = 10;
+
+/// Bytes that the parser may read again after failed type-argument lists in
+/// any source, see [`reread_budget`].
+const BASE_TYPE_ARGUMENT_REREADS: u64 = 256 * 1024;
+
+/// Bytes per source byte that the parser may read again after failed
+/// type-argument lists, see [`reread_budget`].
+const TYPE_ARGUMENT_REREADS_PER_BYTE: u64 = 16;
+
+/// The number of bytes that the parser may read again after failed
+/// type-argument lists before a source of `len` bytes is not parsed.
+///
+/// The parser reads each `a<` of a flat chain such as `a<a<a<...<a;` as a
+/// list that holds the rest of the chain, fails at the `;`, and reads the
+/// rest again from the next `<`. The nodes of each failed attempt stay
+/// allocated until the parse ends, so the memory grows with the square of the
+/// chain: 16 KB of such a chain take about 4 GB. The scan adds each byte once
+/// for each list that is open there, and drops the bytes of a list that the
+/// parser keeps, see [`Scanner::close_type_arguments`]. The budget allows a
+/// fixed amount plus a small multiple of the source, so the extra work stays
+/// linear. A list can end long after the bytes that it counted, so the scan
+/// compares the sum with the budget only at its end.
+const fn reread_budget(len: usize) -> u64 {
+    BASE_TYPE_ARGUMENT_REREADS.saturating_add(TYPE_ARGUMENT_REREADS_PER_BYTE * len as u64)
+}
+
+thread_local! {
+    /// Whether [`fragment_within_limits`] refused a fragment on this thread
+    /// since the last [`take_refused_fragment`].
+    static REFUSED_FRAGMENT: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Whether a fragment that the extraction parses on its own, such as a
+/// template expression or a script block, is within the nesting limits.
+/// A refusal is recorded for [`take_refused_fragment`], so the parse of the
+/// whole file can be refused too.
+pub fn fragment_within_limits(fragment: &str) -> bool {
+    let within = !scan_nesting(fragment, Dialect::Script).exceeds_limits();
+    if !within {
+        REFUSED_FRAGMENT.with(|refused| refused.set(true));
+    }
+    within
+}
+
+/// Returns and clears whether [`fragment_within_limits`] refused a fragment
+/// on this thread.
+pub fn take_refused_fragment() -> bool {
+    REFUSED_FRAGMENT.with(|refused| refused.replace(false))
+}
 
 /// Bracket nesting depth past which a file is not parsed.
 ///
@@ -215,22 +279,44 @@ struct Nesting {
     brackets: u32,
     /// Maximum nesting of `<` that can open a type-argument list.
     type_arguments: u32,
+    /// Whether the bytes that the parser can read again after failed
+    /// type-argument lists pass [`reread_budget`].
+    rereads_exceeded: bool,
 }
 
 impl Nesting {
     const fn exceeds_limits(&self) -> bool {
-        self.brackets > MAX_NESTING_DEPTH || self.type_arguments > MAX_TYPE_ARGUMENT_NESTING
+        self.brackets > MAX_NESTING_DEPTH
+            || self.type_arguments > MAX_TYPE_ARGUMENT_NESTING
+            || self.rereads_exceeded
     }
 }
 
 /// Measures the nesting of `source`. The scan stops as soon as a value passes
-/// its limit, so each value is at most its limit + 1.
+/// its limit, so each value is at most its limit + 1. A script source is
+/// scanned as code and with JSX elements, and each value is the higher one.
 fn scan_nesting(source: &str, dialect: Dialect) -> Nesting {
+    let code = scan_view(source, dialect, false);
+    if dialect != Dialect::Script || code.exceeds_limits() || !source.contains('<') {
+        return code;
+    }
+    let jsx = scan_view(source, dialect, true);
+    Nesting {
+        brackets: code.brackets.max(jsx.brackets),
+        type_arguments: code.type_arguments.max(jsx.type_arguments),
+        rereads_exceeded: jsx.rereads_exceeded,
+    }
+}
+
+fn scan_view(source: &str, dialect: Dialect, jsx: bool) -> Nesting {
     let mut scanner = Scanner::new(source, MAX_NESTING_DEPTH, dialect);
+    scanner.jsx = jsx;
+    scanner.skip_hashbang();
     scanner.scan();
     Nesting {
         brackets: scanner.max_depth,
         type_arguments: scanner.max_type_arguments,
+        rereads_exceeded: scanner.rereads > scanner.reread_budget,
     }
 }
 
@@ -262,7 +348,7 @@ struct Scanner<'a> {
     /// division, judged from the previous significant byte.
     regex_allowed: bool,
     /// Each open `<` that can start a type-argument list, outermost first.
-    /// Each entry is deeper than the one before it.
+    /// No entry is deeper than the one after it.
     type_arguments: Vec<TypeArguments>,
     max_type_arguments: u32,
     /// Depth of each open `(` and `[`, innermost last. Only these brackets
@@ -271,9 +357,29 @@ struct Scanner<'a> {
     /// Depth of each open `(` that the parser can also try as a parameter
     /// list, innermost last, see [`Scanner::opens_parameter_list`].
     parameter_lists: Vec<u32>,
+    /// Depth of each open `(` of an `if`, `while`, `for` or `with` header,
+    /// innermost last. A `/` after its `)` starts a regex.
+    control_headers: Vec<u32>,
     /// Whether this scanner reads the body of a guessed regex as code, see
     /// [`Scanner::count_regex_type_arguments`].
     regex_body: bool,
+    /// Whether this scan reads JSX elements, see [`Scanner::scan_jsx`].
+    jsx: bool,
+    /// The elements of the innermost JSX expression that are open.
+    jsx_elements: u32,
+    /// Each open `{` container of a JSX element, innermost last. The `}` that
+    /// brings the depth back to its value resumes the element.
+    jsx_containers: Vec<JsxContainer>,
+    /// The bytes that the parser can read again after failed type-argument
+    /// lists: each byte once for each list that is open there, without the
+    /// lists that the parser keeps.
+    rereads: u64,
+    reread_budget: u64,
+    /// For each source byte, the literal guesses that failed after they read
+    /// it, as [`GuessState`] bits. Empty until a guess fails.
+    failed_guesses: Vec<u8>,
+    /// Each byte that the current literal guess read, with its state.
+    guess_trail: Vec<(usize, u8)>,
     /// Depth and `(` offset of each open stylesheet color function,
     /// innermost last.
     colors: Vec<(u32, usize)>,
@@ -299,6 +405,47 @@ struct TypeArguments {
     depth: u32,
     /// How many open lists, this one included, nest behind a `(` or `[`.
     level: u32,
+    /// The depth and level of the innermost open list at a lower depth.
+    outer: Option<(u32, u32)>,
+    /// The `extends` of conditional types in this list that wait for their
+    /// `?`.
+    conditions: u32,
+    /// The `?` of conditional types in this list that wait for their `:`.
+    branches: u32,
+    /// Offset after the `<`.
+    start: usize,
+    /// [`Scanner::rereads`] at the `<`.
+    rereads_at_start: u64,
+}
+
+/// The part of a JSX element that a scan reads.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum JsxPart {
+    /// The attributes of an opening tag.
+    Attributes,
+    /// The children of an element.
+    Children,
+}
+
+/// An open `{` container in a JSX element.
+#[derive(Clone, Copy)]
+struct JsxContainer {
+    /// Bracket depth inside the `{`.
+    depth: u32,
+    /// The part of the element that the `}` resumes.
+    part: JsxPart,
+    /// The open elements of the JSX expression around the container.
+    elements: u32,
+}
+
+/// The states of a literal guess, as bits of [`Scanner::failed_guesses`].
+struct GuessState;
+
+impl GuessState {
+    const SINGLE_QUOTE: u8 = 1;
+    const DOUBLE_QUOTE: u8 = 2;
+    const REGEX: u8 = 4;
+    const REGEX_CLASS: u8 = 8;
 }
 
 impl<'a> Scanner<'a> {
@@ -316,7 +463,15 @@ impl<'a> Scanner<'a> {
             max_type_arguments: 0,
             expression_brackets: Vec::new(),
             parameter_lists: Vec::new(),
+            control_headers: Vec::new(),
             regex_body: false,
+            jsx: false,
+            jsx_elements: 0,
+            jsx_containers: Vec::new(),
+            rereads: 0,
+            reread_budget: reread_budget(source.len()),
+            failed_guesses: Vec::new(),
+            guess_trail: Vec::new(),
             colors: Vec::new(),
             max_colors: 0,
             color_cost: 0,
@@ -332,6 +487,7 @@ impl Scanner<'_> {
             if self.passed_limit() {
                 return;
             }
+            let start = self.pos;
             self.pos += 1;
             match byte {
                 b'\\' | b'(' | b'/'
@@ -339,19 +495,9 @@ impl Scanner<'_> {
                 b'(' | b'[' | b'{' => self.open_bracket(byte),
                 b')' | b']' | b'}'
                     if self.dialect == Dialect::Style && !self.close_style_block(byte) => {}
-                b'}' if self.templates.last() == Some(&self.depth) => {
-                    self.templates.pop();
-                    self.depth -= 1;
-                    self.close_type_arguments_above_depth();
-                    self.skip_template_text();
-                }
-                b')' | b']' | b'}' => {
-                    self.depth = self.depth.saturating_sub(1);
-                    self.close_type_arguments_above_depth();
-                    self.regex_allowed = byte == b'}';
-                    self.close_color_functions();
-                }
-                b'<' | b'>' | b';' | b'=' | b'&' | b'|' | b'?' | b'`'
+                b'}' if self.resume_after_brace() => {}
+                b')' | b']' | b'}' => self.close_bracket(byte),
+                b'<' | b'>' | b';' | b'=' | b'&' | b'|' | b'?' | b':' | b'`' | b's'
                     if self.dialect == Dialect::Script =>
                 {
                     self.scan_script_byte(byte);
@@ -364,7 +510,39 @@ impl Scanner<'_> {
                 b' ' | b'\t' | b'\n' | b'\r' => {}
                 _ => self.regex_allowed = starts_expression(byte),
             }
+            self.count_rereads(start);
         }
+    }
+
+    /// Ends the `${` substitution or the JSX `{` container that the `}` at
+    /// `pos - 1` closes, and reads on in its template or element. Returns
+    /// false for a `}` that closes a plain bracket.
+    fn resume_after_brace(&mut self) -> bool {
+        if self.templates.last() == Some(&self.depth) {
+            self.templates.pop();
+            self.depth -= 1;
+            self.close_type_arguments_above_depth();
+            self.skip_template_text();
+            return true;
+        }
+        if self
+            .jsx_containers
+            .last()
+            .is_some_and(|container| container.depth == self.depth)
+        {
+            self.close_jsx_container();
+            return true;
+        }
+        false
+    }
+
+    /// Closes the bracket that the `byte` at `pos - 1` ends.
+    fn close_bracket(&mut self, byte: u8) {
+        let header = byte == b')' && self.control_headers.last() == Some(&self.depth);
+        self.depth = self.depth.saturating_sub(1);
+        self.close_type_arguments_above_depth();
+        self.regex_allowed = byte == b'}' || header;
+        self.close_color_functions();
     }
 
     fn open(&mut self) {
@@ -377,15 +555,38 @@ impl Scanner<'_> {
         self.max_depth > self.limit || self.max_type_arguments > MAX_TYPE_ARGUMENT_NESTING
     }
 
+    /// Adds the bytes from `start` to `pos` once for each open type-argument
+    /// list, because a failed list makes the parser read them again.
+    fn count_rereads(&mut self, start: usize) {
+        let open = self.type_arguments.len() as u64;
+        let read = (self.pos - start) as u64;
+        self.rereads = self.rereads.saturating_add(open.saturating_mul(read));
+    }
+
+    /// Skips a `#!` line at the start of the source, which the parser reads
+    /// as a comment.
+    fn skip_hashbang(&mut self) {
+        if self.dialect != Dialect::Script || !self.bytes.starts_with(b"#!") {
+            return;
+        }
+        while self.pos < self.bytes.len() && !self.at_line_terminator() {
+            self.pos += 1;
+        }
+    }
+
     /// Opens a bracket. A `(` or `[` can hold an expression inside a type.
     fn open_bracket(&mut self, byte: u8) {
         let parameter_list = byte == b'(' && self.opens_parameter_list();
+        let header = byte == b'(' && self.opens_control_header();
         self.open();
         if byte != b'{' {
             self.expression_brackets.push(self.depth);
         }
         if parameter_list {
             self.parameter_lists.push(self.depth);
+        }
+        if header {
+            self.control_headers.push(self.depth);
         }
         if self.dialect == Dialect::Style {
             self.style_closers.push(match byte {
@@ -423,11 +624,28 @@ impl Scanner<'_> {
         matches!(rest.first(), Some(b'{' | b'[' | b'(' | b'/'))
     }
 
+    /// Whether the `(` at `pos - 1` opens the header of an `if`, `while`,
+    /// `for` or `with` statement. A member such as `a.if(` is a call.
+    fn opens_control_header(&self) -> bool {
+        if self.dialect != Dialect::Script {
+            return false;
+        }
+        let (word, start) = self.word_before(self.pos - 1);
+        let member = self.bytes[..start].trim_ascii_end().last() == Some(&b'.');
+        !member && matches!(word, b"if" | b"while" | b"for" | b"with")
+    }
+
     /// Handles the script tokens that stylesheets do not have: a template
-    /// literal and the tokens that open or end a type-argument list.
+    /// literal, the tokens that open or end a type-argument list, and the
+    /// last byte of an `extends` keyword.
     fn scan_script_byte(&mut self, byte: u8) {
         match byte {
             b'`' => self.skip_template_text(),
+            b's' => {
+                self.regex_allowed = false;
+                self.note_extends();
+            }
+            b'<' if self.jsx && self.at_jsx_tag() => self.open_jsx_element(),
             b'<' => {
                 self.open_type_arguments();
                 self.regex_allowed = true;
@@ -440,74 +658,220 @@ impl Scanner<'_> {
     }
 
     /// Records the `<` at `pos - 1` as a possible type-argument list. A `<`
-    /// at the depth of the last open one replaces it. A `<` in a deeper
-    /// bracket nests one level deeper only behind a `(` or `[` opened after
-    /// the enclosing `<`: a type such as `A<{ b: C<D> }>` holds no
-    /// expression, so the parser does not retry it. `<=` and `<<=` cannot
-    /// open a list.
+    /// at the depth of an open one keeps its level, because the parser
+    /// retries it inside the same brackets. A `<` in a deeper bracket nests
+    /// one level deeper only behind a `(` or `[` opened after the enclosing
+    /// `<`: a type such as `A<{ b: C<D> }>` holds no expression, so the
+    /// parser does not retry it. `<=` and `<<=` cannot open a list. The
+    /// parser splits `<<` into two `<`, and the second one opens a list
+    /// only before the name of a type parameter, so `x << 1` is a shift.
     fn open_type_arguments(&mut self) {
         if self.bytes.get(self.pos) == Some(&b'<') {
             self.pos += 1;
+            let rest = self.bytes[self.pos..].trim_ascii_start();
+            if !rest.first().copied().is_some_and(is_identifier_start) {
+                return;
+            }
         }
         if self.bytes.get(self.pos) == Some(&b'=') {
             return;
         }
-        // A sibling `<` at the same depth keeps the level of the list that it
-        // replaces. The levels match for code, and a list carried out of a
-        // regex body keeps its nesting.
-        let replaced = if self
+        let sibling = self
             .type_arguments
             .last()
-            .is_some_and(|open| open.depth == self.depth)
-        {
-            self.type_arguments.pop().map_or(0, |open| open.level)
-        } else {
-            0
-        };
-        let level = self
-            .type_arguments
-            .last()
-            .map_or(1, |outer| {
-                let behind = |brackets: &[u32]| {
-                    brackets
-                        .last()
-                        .is_some_and(|&bracket| bracket > outer.depth)
-                };
-                outer.level
+            .filter(|open| open.depth == self.depth)
+            .map_or(0, |open| open.level);
+        let outer = self.enclosing_type_arguments(self.depth);
+        let level = outer
+            .map_or(1, |(depth, level)| {
+                let behind =
+                    |brackets: &[u32]| brackets.last().is_some_and(|&bracket| bracket > depth);
+                level
                     + u32::from(behind(&self.expression_brackets))
                     + u32::from(behind(&self.parameter_lists))
             })
-            .max(replaced);
+            .max(sibling);
+        self.push_type_arguments(self.depth, level);
+    }
+
+    /// The depth and level of the innermost open `<` below `depth`. A list
+    /// at `depth` stores it, so siblings do not search the stack.
+    fn enclosing_type_arguments(&self, depth: u32) -> Option<(u32, u32)> {
+        let last = self.type_arguments.last()?;
+        if last.depth < depth {
+            Some((last.depth, last.level))
+        } else {
+            last.outer
+        }
+    }
+
+    fn push_type_arguments(&mut self, depth: u32, level: u32) {
+        let outer = self.enclosing_type_arguments(depth);
         self.type_arguments.push(TypeArguments {
-            depth: self.depth,
+            depth,
             level,
+            outer,
+            conditions: 0,
+            branches: 0,
+            start: self.pos,
+            rereads_at_start: self.rereads,
         });
         self.max_type_arguments = self.max_type_arguments.max(level);
     }
 
-    /// Ends the open `<` at the current depth when the `byte` at `pos - 1`
-    /// closes a type-argument list (`>`) or cannot appear in one (`;`, `=`,
-    /// `&&`, `||`, `??`). The parser stops its attempt at such a token, so a
-    /// later `<` is not nested in it. The arrow `=>` is valid in a type and
-    /// ends nothing, and a single `&`, `|` or `?` is valid in a type too.
+    /// Ends open `<` at the current depth when the `byte` at `pos - 1` closes
+    /// a type-argument list or cannot appear in one. The parser stops its
+    /// attempt at such a token, so a later `<` is not nested in it.
+    ///
+    /// - `>` closes the innermost list.
+    /// - `;`, `=`, `&&`, `||` and `??` end every list. The arrow `=>` is
+    ///   valid in a type and ends nothing, and a single `&` or `|` is valid
+    ///   in a type too.
+    /// - `?` before the start of a type and `?.` end every list, unless the
+    ///   `?` belongs to a conditional type `A extends B ? C : D`. A `?`
+    ///   before `,`, `>` or a closer can be a postfix `T?` and ends nothing.
+    /// - `:` ends every list, unless it belongs to a conditional type.
     fn end_type_arguments(&mut self, byte: u8) {
         let next = self.bytes.get(self.pos).copied();
-        let ends = match byte {
-            b'>' => self.pos < 2 || self.bytes[self.pos - 2] != b'=',
-            b'=' => next != Some(b'>'),
-            b'&' | b'|' | b'?' => next == Some(byte),
-            _ => true,
-        };
-        if matches!(byte, b'&' | b'|' | b'?') && ends {
+        if matches!(byte, b'&' | b'|' | b'?') && next == Some(byte) {
             self.pos += 1;
+            self.end_all_type_arguments_at_depth();
+            return;
         }
-        if ends
-            && self
-                .type_arguments
-                .last()
-                .is_some_and(|open| open.depth == self.depth)
+        match byte {
+            b'>' if self.pos >= 2 && self.bytes[self.pos - 2] == b'=' => {}
+            b'>' => self.close_type_arguments(),
+            b'=' if next == Some(b'>') => {}
+            b'&' | b'|' => {}
+            b'?' => self.end_type_arguments_at_question_mark(),
+            b':' => {
+                if let Some(open) = self.innermost_type_arguments_at_depth()
+                    && open.branches > 0
+                {
+                    open.branches -= 1;
+                } else {
+                    self.end_all_type_arguments_at_depth();
+                }
+            }
+            _ => self.end_all_type_arguments_at_depth(),
+        }
+    }
+
+    /// Closes the innermost open `<` at the current depth at the `>` at
+    /// `pos - 1`. When a token that can follow type arguments comes next,
+    /// the parser keeps the list and reads its bytes once, also the bytes of
+    /// the lists inside it, so they are not read again.
+    fn close_type_arguments(&mut self) {
+        let Some(open) = self.innermost_type_arguments_at_depth().copied() else {
+            return;
+        };
+        self.type_arguments.pop();
+        if !self.type_arguments_may_end_here() {
+            return;
+        }
+        let outer = self.type_arguments.len() as u64;
+        let span = (self.pos - open.start) as u64;
+        self.rereads = open
+            .rereads_at_start
+            .saturating_add(outer.saturating_mul(span));
+    }
+
+    /// Whether the parser keeps a type-argument list that a `>` at `pos - 1`
+    /// closes: the next token is a call, a template, an operator, or a token
+    /// that cannot start an expression, or it stands on the next line. A
+    /// `>=`, `>`, `<`, `+`, `-` or the start of an operand rejects the list.
+    fn type_arguments_may_end_here(&self) -> bool {
+        let rest = &self.bytes[self.pos..];
+        if rest.first() == Some(&b'=') {
+            return false;
+        }
+        let spaces = rest
+            .iter()
+            .take_while(|&&byte| matches!(byte, b' ' | b'\t' | 0x0B | 0x0C))
+            .count();
+        let rest = &rest[spaces..];
+        let Some(&next) = rest.first() else {
+            return true;
+        };
+        match next {
+            b'\n' | b'\r' | b'(' | b'`' => true,
+            b'<' | b'>' | b'+' | b'-' | b'[' | b'{' | b'~' | b'@' | b'#' | b'\'' | b'"' => false,
+            b'!' => rest.get(1) == Some(&b'='),
+            b'.' => !rest.get(1).is_some_and(u8::is_ascii_digit),
+            _ if next.is_ascii_digit() => false,
+            _ if is_identifier_start(next) => {
+                let word_len = rest
+                    .iter()
+                    .take_while(|&&byte| is_identifier_byte(byte))
+                    .count();
+                matches!(
+                    &rest[..word_len],
+                    b"in" | b"instanceof" | b"as" | b"satisfies"
+                )
+            }
+            _ => true,
+        }
+    }
+
+    /// Handles a single `?` at `pos - 1`, see [`Scanner::end_type_arguments`].
+    fn end_type_arguments_at_question_mark(&mut self) {
+        let rest = &self.bytes[self.pos..];
+        let optional_chain =
+            rest.first() == Some(&b'.') && !rest.get(1).is_some_and(u8::is_ascii_digit);
+        if optional_chain {
+            self.end_all_type_arguments_at_depth();
+            return;
+        }
+        let postfix = matches!(
+            rest.trim_ascii_start().first(),
+            None | Some(b',' | b'>' | b')' | b']' | b'}' | b'=' | b';' | b':' | b'?')
+        );
+        if postfix {
+            return;
+        }
+        if let Some(open) = self.innermost_type_arguments_at_depth()
+            && open.conditions > 0
+        {
+            open.conditions -= 1;
+            open.branches += 1;
+        } else {
+            self.end_all_type_arguments_at_depth();
+        }
+    }
+
+    /// The innermost open `<` at the current depth.
+    fn innermost_type_arguments_at_depth(&mut self) -> Option<&mut TypeArguments> {
+        let depth = self.depth;
+        self.type_arguments
+            .last_mut()
+            .filter(|open| open.depth == depth)
+    }
+
+    fn end_all_type_arguments_at_depth(&mut self) {
+        while self
+            .type_arguments
+            .last()
+            .is_some_and(|open| open.depth == self.depth)
         {
             self.type_arguments.pop();
+        }
+    }
+
+    /// Records an `extends` keyword that ends at `pos - 1`. In an open list
+    /// it starts a conditional type, whose `?` and `:` stay in the list.
+    fn note_extends(&mut self) {
+        let end = self.pos;
+        let keyword = b"extends";
+        if !self.bytes[..end].ends_with(keyword)
+            || self.bytes.get(end).copied().is_some_and(is_identifier_byte)
+            || end
+                .checked_sub(keyword.len() + 1)
+                .is_some_and(|before| is_identifier_byte(self.bytes[before]))
+        {
+            return;
+        }
+        if let Some(open) = self.innermost_type_arguments_at_depth() {
+            open.conditions += 1;
         }
     }
 
@@ -520,7 +884,11 @@ impl Scanner<'_> {
         {
             self.type_arguments.pop();
         }
-        for brackets in [&mut self.expression_brackets, &mut self.parameter_lists] {
+        for brackets in [
+            &mut self.expression_brackets,
+            &mut self.parameter_lists,
+            &mut self.control_headers,
+        ] {
             while brackets.last().is_some_and(|&bracket| bracket > self.depth) {
                 brackets.pop();
             }
@@ -721,7 +1089,20 @@ impl Scanner<'_> {
     /// newline, as in the CSS tokenizer.
     fn skip_string(&mut self, quote: u8) {
         let start = self.pos;
+        let state = if quote == b'\'' {
+            GuessState::SINGLE_QUOTE
+        } else {
+            GuessState::DOUBLE_QUOTE
+        };
+        self.guess_trail.clear();
         while let Some(&byte) = self.bytes.get(self.pos) {
+            crate::cost::walk_step();
+            if self.dialect == Dialect::Script {
+                if self.guess_failed_here(state) {
+                    break;
+                }
+                self.guess_trail.push((self.pos, state));
+            }
             self.pos += 1;
             match byte {
                 b'\\' if self.dialect == Dialect::Style => self.skip_style_escape(),
@@ -739,6 +1120,7 @@ impl Scanner<'_> {
         }
         if self.dialect == Dialect::Script {
             self.pos = start;
+            self.record_failed_guess();
         }
     }
 
@@ -754,10 +1136,18 @@ impl Scanner<'_> {
         let mut class_base = None;
         let mut local = 0_u32;
         let mut peak = 0_u32;
+        self.guess_trail.clear();
         while let Some(&byte) = self.bytes.get(self.pos) {
-            if self.at_line_terminator() {
+            crate::cost::walk_step();
+            let state = if class_base.is_some() {
+                GuessState::REGEX_CLASS
+            } else {
+                GuessState::REGEX
+            };
+            if self.at_line_terminator() || self.guess_failed_here(state) {
                 break;
             }
+            self.guess_trail.push((self.pos, state));
             self.pos += 1;
             match byte {
                 // A regex cannot continue on the next line.
@@ -783,7 +1173,31 @@ impl Scanner<'_> {
             }
         }
         self.pos = start;
+        self.record_failed_guess();
         false
+    }
+
+    /// Whether a literal guess that failed read the byte at `pos` in `state`.
+    /// The rest of a guess depends only on its position and state, so a new
+    /// guess that reaches the same byte in the same state fails too.
+    fn guess_failed_here(&self, state: u8) -> bool {
+        self.failed_guesses
+            .get(self.pos)
+            .is_some_and(|states| states & state != 0)
+    }
+
+    /// Records the bytes in [`Scanner::guess_trail`] for the guess that
+    /// failed.
+    fn record_failed_guess(&mut self) {
+        if self.guess_trail.is_empty() {
+            return;
+        }
+        if self.failed_guesses.is_empty() {
+            self.failed_guesses = vec![0; self.bytes.len()];
+        }
+        for &(pos, state) in &self.guess_trail {
+            self.failed_guesses[pos] |= state;
+        }
     }
 
     /// Counts the `<` of the regex body `start..end` as type arguments. The
@@ -812,7 +1226,10 @@ impl Scanner<'_> {
         };
         let mut scanner = Scanner::new(text, u32::MAX, Dialect::Script);
         scanner.regex_body = true;
+        scanner.jsx = self.jsx;
+        scanner.reread_budget = u64::MAX;
         scanner.scan();
+        self.rereads = self.rereads.saturating_add(scanner.rereads);
         for list in &scanner.type_arguments {
             self.carry_type_arguments(base + list.depth, open.saturating_add(list.level));
         }
@@ -846,8 +1263,7 @@ impl Scanner<'_> {
             level = level.max(last.level);
             self.type_arguments.pop();
         }
-        self.type_arguments.push(TypeArguments { depth, level });
-        self.max_type_arguments = self.max_type_arguments.max(level);
+        self.push_type_arguments(depth, level);
     }
 
     /// Skips template text up to the closing backtick or the next `${`,
@@ -973,14 +1389,163 @@ impl Scanner<'_> {
     /// Whether the word before the `/` at `pos - 1` is a keyword that a regex
     /// literal can follow.
     fn after_keyword(&self) -> bool {
-        let before = &self.bytes[..self.pos - 1];
-        let before = before.trim_ascii_end();
+        REGEX_KEYWORDS.contains(&self.word_before(self.pos - 1).0)
+    }
+
+    /// The identifier that ends before `end`, after optional whitespace, and
+    /// its start offset. The word is empty when no identifier ends there.
+    fn word_before(&self, end: usize) -> (&[u8], usize) {
+        let before = self.bytes[..end].trim_ascii_end();
         let start = before
             .iter()
-            .rposition(|byte| !(byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'$')))
+            .rposition(|&byte| !is_identifier_byte(byte))
             .map_or(0, |index| index + 1);
-        REGEX_KEYWORDS.contains(&&before[start..])
+        (&before[start..], start)
     }
+}
+
+/// The JSX view of the scan.
+impl Scanner<'_> {
+    /// Whether the `<` at `pos - 1` opens a JSX element: it stands where an
+    /// expression starts, and a tag name or the `>` of a fragment follows.
+    /// In a TSX file, `<T,>` and `<T extends U>` open the type parameters of
+    /// an arrow function instead.
+    fn at_jsx_tag(&self) -> bool {
+        if !(self.regex_allowed || self.after_keyword()) {
+            return false;
+        }
+        match self.bytes.get(self.pos) {
+            Some(b'>') => true,
+            Some(&byte) if is_identifier_start(byte) => !self.opens_type_parameters(),
+            _ => false,
+        }
+    }
+
+    /// Whether the name after the `<` at `pos - 1` is followed by `,` or by
+    /// `extends` and a type.
+    fn opens_type_parameters(&self) -> bool {
+        let name_end = self.jsx_name_end(self.pos);
+        let rest = self.bytes[name_end..].trim_ascii_start();
+        if rest.first() == Some(&b',') {
+            return true;
+        }
+        rest.strip_prefix(b"extends").is_some_and(|after| {
+            after.first().is_some_and(u8::is_ascii_whitespace)
+                && !matches!(after.trim_ascii_start().first(), Some(b'=' | b'>' | b'/'))
+        })
+    }
+
+    /// The end of the JSX tag name that starts at `start`.
+    fn jsx_name_end(&self, start: usize) -> usize {
+        self.bytes[start..]
+            .iter()
+            .position(|&byte| !is_jsx_name_byte(byte))
+            .map_or(self.bytes.len(), |len| start + len)
+    }
+
+    /// Reads the JSX element whose `<` is at `pos - 1`, up to its end or to
+    /// the first `{` container in it.
+    fn open_jsx_element(&mut self) {
+        self.jsx_elements = 1;
+        self.pos = self.jsx_name_end(self.pos);
+        self.scan_jsx(JsxPart::Attributes);
+    }
+
+    /// Reads JSX from `pos` in `part` of the innermost open element. Returns
+    /// at a `{` container, whose code the main scan reads, or after the last
+    /// open element of the JSX expression closes. Element nesting is a count,
+    /// so deep markup needs no deep call stack.
+    fn scan_jsx(&mut self, mut part: JsxPart) {
+        while let Some(&byte) = self.bytes.get(self.pos) {
+            self.pos += 1;
+            match (part, byte) {
+                (_, b'{') => {
+                    self.open_bracket(b'{');
+                    self.jsx_containers.push(JsxContainer {
+                        depth: self.depth,
+                        part,
+                        elements: self.jsx_elements,
+                    });
+                    self.jsx_elements = 0;
+                    return;
+                }
+                (JsxPart::Attributes, b'"' | b'\'') => self.skip_jsx_string(byte),
+                (JsxPart::Attributes, b'/') if self.bytes.get(self.pos) == Some(&b'>') => {
+                    self.pos += 1;
+                    if self.close_jsx_element() {
+                        return;
+                    }
+                    part = JsxPart::Children;
+                }
+                (JsxPart::Attributes, b'>') => part = JsxPart::Children,
+                (JsxPart::Children, b'<') if self.bytes.get(self.pos) == Some(&b'/') => {
+                    while let Some(&byte) = self.bytes.get(self.pos) {
+                        self.pos += 1;
+                        if byte == b'>' {
+                            break;
+                        }
+                    }
+                    if self.close_jsx_element() {
+                        return;
+                    }
+                }
+                (JsxPart::Children, b'<') => {
+                    self.jsx_elements += 1;
+                    self.pos = self.jsx_name_end(self.pos);
+                    part = JsxPart::Attributes;
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// Skips a JSX attribute string. It has no escapes and can span lines.
+    fn skip_jsx_string(&mut self, quote: u8) {
+        self.pos = self.bytes[self.pos..]
+            .iter()
+            .position(|&byte| byte == quote)
+            .map_or(self.bytes.len(), |len| self.pos + len + 1);
+    }
+
+    /// Closes the innermost open element. Returns true when that ends the
+    /// JSX expression, so the main scan reads code again after an operand.
+    fn close_jsx_element(&mut self) -> bool {
+        self.jsx_elements = self.jsx_elements.saturating_sub(1);
+        if self.jsx_elements > 0 {
+            return false;
+        }
+        self.regex_allowed = false;
+        true
+    }
+
+    /// Ends the `{` container at the current depth and reads on in its
+    /// element.
+    fn close_jsx_container(&mut self) {
+        let Some(container) = self.jsx_containers.pop() else {
+            return;
+        };
+        self.depth -= 1;
+        self.close_type_arguments_above_depth();
+        self.jsx_elements = container.elements;
+        self.scan_jsx(container.part);
+    }
+}
+
+/// Whether `byte` can be part of a JavaScript identifier. A byte of a
+/// non-ASCII character counts, so a word is never cut inside one.
+const fn is_identifier_byte(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'$') || byte >= 0x80
+}
+
+/// Whether `byte` can start a JavaScript identifier or a JSX tag name.
+const fn is_identifier_start(byte: u8) -> bool {
+    byte.is_ascii_alphabetic() || matches!(byte, b'_' | b'$') || byte >= 0x80
+}
+
+/// Whether `byte` can be part of a JSX tag name, such as `a.b`, `a:b` or
+/// `my-tag`.
+const fn is_jsx_name_byte(byte: u8) -> bool {
+    is_identifier_byte(byte) || matches!(byte, b'.' | b':' | b'-')
 }
 
 /// Whether a `/` after `byte` starts a regex literal. After an identifier,
@@ -1254,5 +1819,159 @@ mod tests {
         let at_limit = "[".repeat(MAX_NESTING_DEPTH as usize);
         assert!(!exceeds_nesting_limit(&at_limit));
         assert!(exceeds_nesting_limit(&format!("{at_limit}[")));
+    }
+
+    /// Nested type-argument lists far past the cap: `t<{[` 40 times, then
+    /// `1` and the closing brackets.
+    fn nested_type_arguments() -> String {
+        format!("{}1{}", "t<{[".repeat(40), "]".repeat(40))
+    }
+
+    /// The parser tries each `a<` of a flat chain as a type-argument list that
+    /// holds the rest of the chain, so it reads the chain once per `<`.
+    #[test]
+    fn a_flat_less_than_chain_exceeds_the_reread_budget() {
+        let chain = format!("let a = 1;\nexport const x = {}a;\n", "a<".repeat(12_000));
+        assert!(exceeds_nesting_limit(&chain));
+        let list = format!("export const x = [{}];\n", "a<a,".repeat(6_000));
+        assert!(exceeds_nesting_limit(&list));
+        let closed = format!(
+            "export const x = {}a{} a;\n",
+            "a<".repeat(4_000),
+            ">".repeat(4_000)
+        );
+        assert!(exceeds_nesting_limit(&closed));
+    }
+
+    /// Each `<` of a flat chain finds its enclosing list in constant time, so
+    /// the scan of a long chain stays linear.
+    #[test]
+    fn a_long_flat_chain_scans_in_time() {
+        let chain = format!("x = {}a;", "a<".repeat(1_000_000));
+        let (done, finished) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = done.send(exceeds_nesting_limit(&chain));
+        });
+        let refused = finished
+            .recv_timeout(std::time::Duration::from_secs(20))
+            .expect("the scan must end in time");
+        assert!(refused);
+    }
+
+    /// Flat comparisons that the parser reads once stay under the budget.
+    #[test]
+    fn ordinary_comparisons_stay_under_the_reread_budget() {
+        let ternary = "x < 10 ? 1 : ".repeat(400);
+        assert!(!exceeds_nesting_limit(&format!("const y = {ternary}0;")));
+        let entries = "a < 10, ".repeat(200);
+        assert!(!exceeds_nesting_limit(&format!("const y = [{entries}];")));
+        let object = "k: a < 10, f() { return [1, 2, 3].map((v) => v * 2); },\n".repeat(2_000);
+        assert!(!exceeds_nesting_limit(&format!(
+            "const y = {{ {object} }};"
+        )));
+        let shifts = "K.a << 1, -1, -1, -1, -1, -1, -1, -1, -1, -1,\n".repeat(2_000);
+        assert!(!exceeds_nesting_limit(&format!("const t = [{shifts}];")));
+        let generic = format!("type T = {}x{};", "A<".repeat(200), ">".repeat(200));
+        assert!(!exceeds_nesting_limit(&generic));
+        // The parser keeps a list that a call follows, and reads it once.
+        let call = format!(
+            "const v = f<{}x{}>();",
+            "A<".repeat(5_000),
+            ">".repeat(5_000)
+        );
+        assert!(!exceeds_nesting_limit(&call));
+        let conditional = "T extends U ? A<B> : C<D> | ".repeat(500);
+        assert!(!exceeds_nesting_limit(&format!(
+            "type X<T> = F<{conditional} never>;"
+        )));
+    }
+
+    /// A string or regex guess that does not close reads at most to the end
+    /// of its line. A later guess that reaches a byte in the same state ends
+    /// the same way, so each byte is read a bounded number of times.
+    #[test]
+    fn failed_literal_guesses_read_each_byte_a_bounded_number_of_times() {
+        let shapes = [
+            ("/[}".repeat(4_000), Dialect::Script),
+            ("\"\\\"".repeat(4_000), Dialect::Script),
+            ("'\\'".repeat(4_000), Dialect::Script),
+            ("\"\\\"\\\n".repeat(3_000), Dialect::Script),
+            ("x = {} / a /[(".repeat(1_000), Dialect::Script),
+            ("\"\\\"\\\n".repeat(3_000), Dialect::Style),
+        ];
+        for (source, dialect) in shapes {
+            let (_, work) = crate::cost::measure(|| scan_nesting(&source, dialect));
+            assert!(
+                work.walk_steps <= 4 * source.len(),
+                "{} steps for {} bytes of {:?}",
+                work.walk_steps,
+                source.len(),
+                &source[..12]
+            );
+        }
+    }
+
+    /// A guess that fails does not change the result of a later guess in
+    /// another state.
+    #[test]
+    fn a_failed_guess_does_not_stop_a_later_guess_that_closes() {
+        assert_eq!(depth_of("a = b / c; d = /'/; e = '/' + (((1)))"), 3);
+        assert_eq!(depth_of("a = \"x; b = 'x\"(' + (1)"), 2);
+    }
+
+    /// JSX text is not code. A quote pair, a comment opener or a backtick
+    /// there does not start a literal for the parser, so it must not hide
+    /// the expression container that follows it.
+    #[test]
+    fn literal_openers_in_jsx_text_do_not_hide_type_arguments() {
+        let nested = nested_type_arguments();
+        for (open, close) in [
+            ("'", "'"),
+            ("\"", "\""),
+            ("//", ""),
+            ("/*", "*/"),
+            ("`", "`"),
+        ] {
+            let source = format!("export const x = <p>{open} {{{nested}}} {close}</p>;\n");
+            assert!(exceeds_nesting_limit(&source), "{open}");
+        }
+        // Text and attribute strings of real markup stay under the cap.
+        let markup = "<a href=\"x\" title='it&apos;s'>it's {n} items (of {total})</a>\n";
+        assert!(!exceeds_nesting_limit(&format!(
+            "export const x = <div>{}</div>;",
+            markup.repeat(500)
+        )));
+    }
+
+    /// A `)` in JSX text is text, so it does not close the `(` that opened
+    /// before the element.
+    #[test]
+    fn a_closer_in_jsx_text_does_not_end_type_arguments() {
+        let source = format!("export const x = {}1;\n", "t<(a=<p>)</p>+".repeat(40));
+        assert!(exceeds_nesting_limit(&source));
+    }
+
+    /// A `/` after the `)` of an `if`, `while`, `for` or `with` header starts
+    /// a regex, so a quote in it does not start a string.
+    #[test]
+    fn a_regex_after_a_control_header_does_not_hide_type_arguments() {
+        let nested = nested_type_arguments();
+        for keyword in ["if", "while", "for", "with"] {
+            let source =
+                format!("{keyword} (a) /'/.test(b); {nested}; {keyword} (a) /'/.test(b);\n");
+            assert!(exceeds_nesting_limit(&source), "{keyword}");
+        }
+        // A `)` of a call still ends an operand.
+        assert_eq!(depth_of("f(a) / ((b)) / c"), 2);
+    }
+
+    /// The parser reads the `#!` line at the start of a source as a comment.
+    #[test]
+    fn a_backtick_on_the_hashbang_line_does_not_hide_type_arguments() {
+        let source = format!(
+            "#!/usr/bin/env node `\n{};\n// `\n",
+            nested_type_arguments()
+        );
+        assert!(exceeds_nesting_limit(&source));
     }
 }

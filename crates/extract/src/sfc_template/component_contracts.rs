@@ -222,6 +222,9 @@ fn template_binding_may_shadow(source: &str, local: &str) -> bool {
 fn literal_keys(source: &str) -> Option<Vec<String>> {
     use oxc_ast::ast::{Expression, Statement};
     let source = format!("({source});");
+    if !crate::nesting::fragment_within_limits(&source) {
+        return None;
+    }
     let allocator = oxc_allocator::Allocator::default();
     let parsed = oxc_parser::Parser::new(&allocator, &source, oxc_span::SourceType::ts()).parse();
     if parsed.fatal_error || !parsed.diagnostics.is_empty() {

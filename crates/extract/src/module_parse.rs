@@ -152,6 +152,7 @@ fn parse_source_bounded(
     options: &ExtractionOptions<'_>,
 ) -> ModuleInfo {
     let bounded = crate::nesting::parse_file_bounded(path, source, || {
+        crate::nesting::take_refused_fragment();
         let module = parse_source_to_module_unbounded(
             file_id,
             path,
@@ -160,16 +161,18 @@ fn parse_source_bounded(
             need_complexity,
             options,
         );
-        // The CSS comment mask counts on the thread that parsed. Carry the
-        // count back in case that was a sized thread.
-        (module, crate::css_masked_bytes::take())
+        // A fragment that nests too deep refuses the whole file. The CSS
+        // comment mask counts on the thread that parsed. Carry both back in
+        // case that was a sized thread.
+        let refused = crate::nesting::take_refused_fragment();
+        (module, crate::css_masked_bytes::take(), refused)
     });
     match bounded {
-        Some((module, masked_bytes)) => {
+        Some((_, _, true)) | None => crate::nesting::too_deep_module(file_id, source, content_hash),
+        Some((module, masked_bytes, false)) => {
             crate::css_masked_bytes::add(masked_bytes);
             module
         }
-        None => crate::nesting::too_deep_module(file_id, source, content_hash),
     }
 }
 

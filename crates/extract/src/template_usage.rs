@@ -281,6 +281,9 @@ pub fn analyze_template_snippet_into(usage: &mut TemplateUsage, input: &Template
 
     let locals = named_locals(snippet, input.locals);
     let wrapped = wrap_snippet(snippet, input.kind, &locals);
+    if !crate::nesting::fragment_within_limits(&wrapped) {
+        return;
+    }
     let allocator = Allocator::default();
     let parser_return = Parser::new(&allocator, &wrapped, SourceType::ts()).parse();
 
@@ -432,6 +435,9 @@ pub fn collect_unresolved_refs_and_accesses(
     }
 
     let wrapped = wrap_snippet(snippet, kind, locals);
+    if !crate::nesting::fragment_within_limits(&wrapped) {
+        return (FxHashSet::default(), Vec::new());
+    }
     let allocator = Allocator::default();
     let parser_return = Parser::new(&allocator, &wrapped, SourceType::ts()).parse();
     let semantic_ret = SemanticBuilder::new().build(&parser_return.program);
@@ -532,6 +538,9 @@ fn with_parsed_template_expression<R>(
         return None;
     }
     let wrapped = format!("const __f_tpl_sink = ({snippet});");
+    if !crate::nesting::fragment_within_limits(&wrapped) {
+        return None;
+    }
     let allocator = Allocator::default();
     let parser_return = Parser::new(&allocator, &wrapped, SourceType::ts()).parse();
     let Statement::VariableDeclaration(decl) = parser_return.program.body.first()? else {
