@@ -316,7 +316,7 @@ fn audit_states_the_cause_without_claiming_a_whole_project_report() {
         "the document names the ref that failed: {message}"
     );
     assert!(
-        message.contains("unknown revision") || message.contains("ambiguous argument"),
+        message.contains("bad revision") || message.contains("unknown revision"),
         "the document carries git's own cause: {message}"
     );
     assert!(

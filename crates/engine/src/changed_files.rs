@@ -111,6 +111,7 @@ fn augment_git_failed(stderr: &str) -> String {
     if lower.contains("not a valid object name")
         || lower.contains("unknown revision")
         || lower.contains("ambiguous argument")
+        || lower.contains("bad revision")
     {
         format!(
             "{stderr} (shallow clone? try `git fetch --unshallow`, or set `fetch-depth: 0` on actions/checkout / `GIT_DEPTH: 0` in GitLab CI)"
@@ -437,6 +438,7 @@ fn committed_changed_files(
             "-z",
             "--end-of-options",
             &format!("{git_ref}...HEAD"),
+            "--",
         ],
     )
 }
@@ -445,7 +447,7 @@ fn working_tree_changed_files(
     cwd: &Path,
     toplevel: &Path,
 ) -> Result<FxHashSet<PathBuf>, ChangedFilesError> {
-    let mut files = collect_git_paths(cwd, toplevel, &["diff", "--name-only", "-z", "HEAD"])?;
+    let mut files = collect_git_paths(cwd, toplevel, &["diff", "--name-only", "-z", "HEAD", "--"])?;
     if untracked_files_excluded() {
         return Ok(files);
     }
@@ -500,12 +502,20 @@ pub fn try_get_renamed_files(
             "--find-renames",
             "--end-of-options",
             &format!("{git_ref}...HEAD"),
+            "--",
         ],
     )?;
     let staged = collect_git_rename_pairs(
         root,
         &toplevel,
-        &["diff", "--name-status", "-z", "--find-renames", "HEAD"],
+        &[
+            "diff",
+            "--name-status",
+            "-z",
+            "--find-renames",
+            "HEAD",
+            "--",
+        ],
     )?;
     for pair in staged {
         if let Some(chained) = renames.iter_mut().find(|rename| rename.to == pair.from) {
@@ -605,7 +615,7 @@ fn changed_diff(
     if detect_copies {
         args.extend(["-M", "-C"]);
     }
-    args.extend(["--end-of-options", &merge_base]);
+    args.extend(["--end-of-options", &merge_base, "--"]);
     let output = spawn_output(&mut git_command(root, &args))
         .map_err(|e| ChangedFilesError::GitMissing(e.to_string()))?;
 
@@ -1214,6 +1224,48 @@ mod tests {
         }
     }
 
+    /// A tracked file with the name of a revision must not make git read
+    /// the revision as a path.
+    #[test]
+    fn a_file_named_as_a_revision_does_not_stop_the_diff() {
+        let repo = tempfile::tempdir().expect("tempdir");
+        let root = dunce::canonicalize(repo.path()).expect("canonical root");
+        for args in [
+            &["init", "--quiet", "-b", "main"][..],
+            &["config", "user.email", "test@example.com"][..],
+            &["config", "user.name", "Test User"][..],
+            &["config", "commit.gpgsign", "false"][..],
+        ] {
+            run_git(&root, args);
+        }
+        std::fs::write(root.join("a.ts"), "old\n").expect("initial file");
+        run_git(&root, &["add", "."]);
+        run_git(&root, &["commit", "--quiet", "-m", "base"]);
+        let base = crate::git_fixture::fixture_git_capture(&root, &["rev-parse", "HEAD"]);
+        run_git(&root, &["branch", "base"]);
+        for name in ["HEAD", "base...HEAD", base.as_str()] {
+            std::fs::write(root.join(name), "x\n").expect("revision-named file");
+        }
+        run_git(&root, &["mv", "a.ts", "b.ts"]);
+        run_git(&root, &["add", "."]);
+        run_git(&root, &["commit", "--quiet", "-m", "change"]);
+        run_git(&root, &["mv", "b.ts", "c.ts"]);
+
+        let changed = changed_files(&root, "base").expect("changed files");
+        for name in ["HEAD", "c.ts"] {
+            assert!(changed.contains(&root.join(name)), "{changed:?}");
+        }
+        assert_eq!(
+            try_get_renamed_files(&root, "base").expect("renamed files"),
+            vec![RenamedFile {
+                from: root.join("a.ts"),
+                to: root.join("c.ts")
+            }]
+        );
+        let diff = try_get_changed_diff(&root, "base").expect("changed diff");
+        assert!(diff.contains("b/HEAD"), "{diff}");
+    }
+
     fn run_git(root: &Path, args: &[&str]) {
         let output = crate::git_fixture::fixture_git_command_with_identity(
             root,
@@ -1254,6 +1306,11 @@ mod tests {
         );
         assert!(
             ChangedFilesError::GitFailed("unknown revision main".to_string())
+                .describe()
+                .contains("fetch-depth: 0")
+        );
+        assert!(
+            ChangedFilesError::GitFailed("fatal: bad revision 'main...HEAD'".to_string())
                 .describe()
                 .contains("fetch-depth: 0")
         );
