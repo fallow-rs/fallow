@@ -460,4 +460,45 @@ fn cloud_rows_keep_unknown_without_local_structure() {
         report.blast_radius[0].caller_count_weighted_by_traffic,
         None
     );
+    // Not known, documented as 0 next to the `unknown` band.
+    assert_eq!(report.blast_radius[0].caller_count, 0);
+}
+
+/// The only function of the importer file has no local match (an anonymous
+/// callback that the AST names otherwise). Its hits still count for that
+/// file, as in the cloud sum, instead of a null traffic value.
+#[test]
+fn cloud_join_counts_unmatched_hits_in_a_resolved_importer_file() {
+    let info = StaticFunctionInfo {
+        caller_count: 1,
+        ..static_info("src/api.ts", "handler", 10, 22)
+    };
+    let mut static_index =
+        static_index_with(vec![info, static_info("src/routes.ts", "route", 1, 9)]);
+    static_index
+        .importers
+        .insert("src/api.ts".to_owned(), vec!["src/routes.ts".to_owned()]);
+    let mut callback = cloud_function(
+        "/app/src/routes.ts",
+        "(anonymous_3)",
+        Some(40),
+        Some(40),
+        Some(44),
+    );
+    callback.tracking_state = CloudTrackingState::Called;
+    callback.hit_count = Some(10_000);
+    let mut function = cloud_function("src/api.ts", "handler", Some(10), Some(10), Some(22));
+    function.tracking_state = CloudTrackingState::Called;
+    function.hit_count = Some(50);
+    let mut snapshot = cloud_context(2, 0);
+    snapshot.functions = vec![callback, function];
+
+    let report = merge_cloud_snapshot(&snapshot, &static_index, 1).report;
+
+    let blast = report
+        .blast_radius
+        .iter()
+        .find(|row| row.function == "handler")
+        .expect("handler row");
+    assert_eq!(blast.caller_count_weighted_by_traffic, Some(10_000));
 }

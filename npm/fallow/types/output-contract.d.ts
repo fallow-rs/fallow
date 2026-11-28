@@ -11642,7 +11642,8 @@ function: string
  */
 line: number
 /**
- * Static caller count from the module graph.
+ * Count of the files that import the function's file. `0` when
+ * `risk_band` is `unknown`: the count is then not known.
  */
 caller_count: number
 /**

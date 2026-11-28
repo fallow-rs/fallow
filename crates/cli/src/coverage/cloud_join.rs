@@ -2,6 +2,8 @@
 //! `coverage analyze --cloud`: which cloud functions match, and the gate that
 //! caps `safe_to_delete` when the local graph misses too many of them.
 
+use std::path::Path;
+
 use fallow_output::{
     RuntimeCoverageConfidence, RuntimeCoverageFinding, RuntimeCoverageHotPath,
     RuntimeCoverageMessage, RuntimeCoverageVerdict,
@@ -9,7 +11,7 @@ use fallow_output::{
 
 use super::analyze::{
     StaticFunctionInfo, StaticIndex, cloud_finding, cloud_finding_decision, cloud_observation_days,
-    importance_reason, match_cloud_function, stable_runtime_id,
+    importance_reason, match_cloud_function, resolve_function_path, stable_runtime_id,
 };
 use super::cloud_client::{CloudRuntimeContext, CloudRuntimeFunction, CloudTrackingState};
 use super::cloud_context_ids::ContextIdResolver;
@@ -113,8 +115,14 @@ pub(super) fn collect_cloud_merge_entries(
     let ids = ContextIdResolver::from_index(static_index);
     let mut traffic = FileTraffic::default();
     for (function, local) in &matches {
-        if let Some(local) = local {
-            traffic.add(&local.path, function.hit_count.unwrap_or(0));
+        let hits = function.hit_count.unwrap_or(0);
+        match local {
+            Some(local) => traffic.add(&local.path, hits),
+            None => {
+                if let Some(path) = resolve_function_path(function, static_index) {
+                    traffic.add(Path::new(path), hits);
+                }
+            }
         }
     }
     let weighted_of = |local: &StaticFunctionInfo| {

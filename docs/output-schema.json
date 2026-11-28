@@ -3049,7 +3049,7 @@
         },
         "caller_count": {
           "type": "integer",
-          "description": "Static caller count from the module graph."
+          "description": "Count of the files that import the function's file. `0` when\n`risk_band` is `unknown`: the count is then not known."
         },
         "caller_count_weighted_by_traffic": {
           "type": [

@@ -110,3 +110,48 @@ const fn risk_band_rank(risk_band: RuntimeCoverageRiskBand) -> u8 {
         RuntimeCoverageRiskBand::High => 3,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sidecar_row(function: &str, caller_count: u32, band: &str) -> ProtocolBlastRadiusEntry {
+        serde_json::from_value(serde_json::json!({
+            "id": format!("fallow:blast:{function}"),
+            "file": "src/a.ts",
+            "function": function,
+            "line": 1,
+            "caller_count": caller_count,
+            "caller_count_weighted_by_traffic": 2_000_000,
+            "risk_band": band,
+        }))
+        .expect("protocol row")
+    }
+
+    /// The sidecar bands on traffic too and multiplies the own invocations
+    /// by the callers. The report bands on the importer count alone and has
+    /// no importer traffic in a local run (fallow-cloud#1642).
+    #[test]
+    fn local_rows_band_on_callers_and_carry_no_traffic() {
+        let rows = map_runtime_blast_radius(vec![
+            sidecar_row("rare", 1, "high"),
+            sidecar_row("wide", 7, "high"),
+            sidecar_row("wider", 9, "medium"),
+        ]);
+
+        let bands: Vec<(&str, RuntimeCoverageRiskBand)> = rows
+            .iter()
+            .map(|row| (row.function.as_str(), row.risk_band))
+            .collect();
+        assert_eq!(
+            bands,
+            vec![
+                ("wider", RuntimeCoverageRiskBand::Medium),
+                ("wide", RuntimeCoverageRiskBand::Medium),
+                ("rare", RuntimeCoverageRiskBand::Low),
+            ]
+        );
+        let json = serde_json::to_value(&rows[0]).expect("serialize");
+        assert!(json["caller_count_weighted_by_traffic"].is_null());
+    }
+}

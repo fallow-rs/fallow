@@ -701,7 +701,8 @@ pub struct RuntimeCoverageBlastRadiusEntry {
     pub function: String,
     /// 1-indexed line number the function starts on.
     pub line: u32,
-    /// Static caller count from the module graph.
+    /// Count of the files that import the function's file. `0` when
+    /// `risk_band` is `unknown`: the count is then not known.
     pub caller_count: u32,
     /// Production runtime hits in the importer files of the function: the sum
     /// of the hits of the functions in the files that import it. `null` when

@@ -7,6 +7,8 @@ use std::path::Path;
 use fallow_output::RuntimeCoverageRiskBand;
 use rustc_hash::FxHashMap;
 
+use super::analyze::normalize_runtime_path;
+
 /// Importer files from which the band is `high`.
 const HIGH_CALLERS: u32 = 20;
 /// Importer files from which the band is `medium`.
@@ -27,8 +29,9 @@ pub const fn risk_band(caller_count: u32) -> RuntimeCoverageRiskBand {
 }
 
 /// Production runtime hits per repo-relative file, from the cloud functions
-/// that matched the local AST. A file with a matched function is observed,
-/// also when its hits are zero.
+/// whose runtime path resolves to a local file. A function that does not
+/// match a local function still counts for its file, as in the cloud sum. A
+/// file with a resolved function is observed, also when its hits are zero.
 #[derive(Debug, Default)]
 pub(super) struct FileTraffic {
     hits: FxHashMap<String, u64>,
@@ -37,7 +40,7 @@ pub(super) struct FileTraffic {
 impl FileTraffic {
     /// Adds the hits of one matched cloud function in `path`.
     pub(super) fn add(&mut self, path: &Path, hits: u64) {
-        let total = self.hits.entry(normalized(path)).or_default();
+        let total = self.hits.entry(normalize_runtime_path(path)).or_default();
         *total = total.saturating_add(hits);
     }
 
@@ -51,12 +54,6 @@ impl FileTraffic {
             .copied()
             .reduce(u64::saturating_add)
     }
-}
-
-fn normalized(path: &Path) -> String {
-    path.to_string_lossy()
-        .trim_start_matches('/')
-        .replace('\\', "/")
 }
 
 #[cfg(test)]

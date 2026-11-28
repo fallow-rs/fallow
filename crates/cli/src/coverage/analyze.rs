@@ -1326,7 +1326,7 @@ pub(super) fn match_cloud_function(
 /// prefix removed. When the checkout has that exact path, it is the answer.
 /// Otherwise, and for an older cloud without the field, the suffix match on
 /// the runtime path is the fallback.
-fn resolve_function_path<'index>(
+pub(super) fn resolve_function_path<'index>(
     function: &CloudRuntimeFunction,
     static_index: &'index StaticIndex,
 ) -> Option<&'index str> {
@@ -1480,7 +1480,7 @@ fn nearest_cloud_candidate(
     }
 }
 
-fn normalize_runtime_path(path: &Path) -> String {
+pub(super) fn normalize_runtime_path(path: &Path) -> String {
     path.to_string_lossy()
         .trim_start_matches('/')
         .replace('\\', "/")
