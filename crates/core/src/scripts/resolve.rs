@@ -82,6 +82,10 @@ fn installed_package(
 /// dependency's `package.json` from `node_modules/` and extracting `bin`.
 ///
 /// Probes each provided `node_modules/` root, which covers non-hoisted setups.
+/// A dependency name that is not a package directory name (see
+/// [`is_package_directory_name`]) is skipped. A package can be a link to a
+/// store outside the project, so the manifest read checks only that the file
+/// is a regular file within the size limit.
 #[must_use]
 pub fn build_bin_to_package_map(
     node_modules_roots: &[&Path],
@@ -89,13 +93,20 @@ pub fn build_bin_to_package_map(
 ) -> FxHashMap<String, String> {
     let mut map = FxHashMap::default();
 
-    for dep_name in dep_names {
+    for dep_name in dep_names
+        .iter()
+        .filter(|name| is_package_directory_name(name))
+    {
         let bin = node_modules_roots.iter().find_map(|root| {
             let pkg_path = root
                 .join("node_modules")
                 .join(dep_name)
                 .join("package.json");
-            let content = std::fs::read_to_string(&pkg_path).ok()?;
+            let content = fallow_types::read_guard::read_to_string_bounded(
+                &pkg_path,
+                fallow_types::read_guard::DEFAULT_MAX_READ_BYTES,
+            )
+            .ok()?;
             let pkg = serde_json::from_str::<serde_json::Value>(&content).ok()?;
             pkg.get("bin").cloned()
         });
@@ -109,6 +120,22 @@ pub fn build_bin_to_package_map(
     }
 
     map
+}
+
+/// True when `name` names one package directory below `node_modules`: `name`
+/// or `@scope/name`, with no empty, `.` or `..` segment and no drive or root
+/// part. A manifest can declare any string as a dependency name, so a name
+/// must pass this check before it is joined into a path.
+fn is_package_directory_name(name: &str) -> bool {
+    if !crate::resolve::is_valid_package_name(name) || name.contains(':') {
+        return false;
+    }
+    let segments: Vec<&str> = name.split('/').collect();
+    let expected = if name.starts_with('@') { 2 } else { 1 };
+    segments.len() == expected
+        && segments
+            .iter()
+            .all(|segment| !segment.is_empty() && *segment != "." && *segment != "..")
 }
 
 /// The binary names that a `bin` field declares: the unscoped package name
@@ -954,6 +981,44 @@ mod tests {
 
         let map = build_bin_to_package_map(&[root.path(), ws.path()], &["my-ws-tool".to_string()]);
         assert_eq!(&map["wstool"], "my-ws-tool");
+    }
+
+    #[test]
+    fn bin_map_skips_a_dependency_name_that_is_not_a_package_directory() {
+        let base = tempfile::tempdir().unwrap();
+        let root = base.path().join("project");
+        std::fs::create_dir_all(root.join("node_modules")).unwrap();
+        let other = base.path().join("other");
+        std::fs::create_dir_all(&other).unwrap();
+        std::fs::write(
+            other.join("package.json"),
+            r#"{"name": "other", "bin": {"othertool": "./cli.js"}}"#,
+        )
+        .unwrap();
+
+        let map = build_bin_to_package_map(&[root.as_path()], &["../../other".to_string()]);
+
+        assert!(map.is_empty(), "{map:?}");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn bin_map_resolves_a_package_linked_from_outside_the_project() {
+        let base = tempfile::tempdir().unwrap();
+        let root = base.path().join("project");
+        std::fs::create_dir_all(root.join("node_modules")).unwrap();
+        let store = base.path().join("store/linked");
+        std::fs::create_dir_all(&store).unwrap();
+        std::fs::write(
+            store.join("package.json"),
+            r#"{"name": "linked", "bin": {"linkedtool": "./cli.js"}}"#,
+        )
+        .unwrap();
+        std::os::unix::fs::symlink(&store, root.join("node_modules/linked")).unwrap();
+
+        let map = build_bin_to_package_map(&[root.as_path()], &["linked".to_string()]);
+
+        assert_eq!(map.get("linkedtool").map(String::as_str), Some("linked"));
     }
 
     fn workspace_package(json: &str) -> fallow_config::PackageJson {

@@ -606,7 +606,7 @@ fn complete_file_digests(report: &mut MutationReport, root: &Path) {
     let added: Vec<fallow_output::MutationPlanFile> = missing
         .into_iter()
         .filter_map(|file| {
-            let bytes = std::fs::read(root.join(file)).ok()?;
+            let bytes = crate::mutation_inspect::read_report_source(root, Path::new(file))?;
             Some(fallow_output::MutationPlanFile {
                 path: file.to_owned(),
                 source_sha256: crate::mutation_inspect::sha256_hex(&bytes),
@@ -632,7 +632,7 @@ fn code_lookup(report: &MutationReport, root: &Path) -> CodeLookup {
         let file = mutant.location.file.as_str();
         let source = sources.entry(file).or_insert_with(|| {
             let expected = report.files.iter().find(|entry| entry.path == file)?;
-            let bytes = std::fs::read(root.join(file)).ok()?;
+            let bytes = crate::mutation_inspect::read_report_source(root, Path::new(file))?;
             (crate::mutation_inspect::sha256_hex(&bytes) == expected.source_sha256)
                 .then(|| String::from_utf8(bytes).ok())
                 .flatten()

@@ -1582,7 +1582,8 @@ pub struct MutationInspectOutput {
     /// The SHA-256 digest of the file in the report.
     pub report_sha256: Option<String>,
     /// The SHA-256 digest of the current file. `null` when the file is
-    /// missing.
+    /// missing, resolves outside the project root, is not a regular file,
+    /// or is too large to read.
     pub current_sha256: Option<String>,
     /// The original and mutated code. `null` for a stale packet.
     pub code: Option<MutationInspectCode>,

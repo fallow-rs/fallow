@@ -101,6 +101,10 @@ impl Plan {
     }
 }
 
+#[cfg(all(test, unix))]
+#[path = "setup_hooks_status_link_tests.rs"]
+mod status_link_tests;
+
 #[cfg(test)]
 mod tests {
     use super::*;

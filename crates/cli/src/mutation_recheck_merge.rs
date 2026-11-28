@@ -284,9 +284,7 @@ fn killing_test_files_exist(
 /// that leaves the root or a file that cannot be read.
 fn current_digest(root: &Path, file: &str) -> Option<String> {
     let relative = report_relative_path(file).ok()?;
-    std::fs::read(root.join(relative))
-        .ok()
-        .map(|bytes| sha256_hex(&bytes))
+    crate::mutation_inspect::read_report_source(root, relative).map(|bytes| sha256_hex(&bytes))
 }
 
 /// Counts the earlier function results of the files outside the run again

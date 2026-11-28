@@ -48,7 +48,7 @@ pub fn tasks(
     for mutant in report.mutants.iter().filter(|mutant| is_open(mutant)) {
         let relative = report_relative_path(&mutant.file)?;
         let current = files.entry(mutant.file.as_str()).or_insert_with(|| {
-            std::fs::read(root.join(relative)).ok().map(|bytes| {
+            crate::mutation_inspect::read_report_source(root, relative).map(|bytes| {
                 let digest = sha256_hex(&bytes);
                 (bytes, digest)
             })

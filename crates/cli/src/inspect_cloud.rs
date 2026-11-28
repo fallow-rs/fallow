@@ -49,8 +49,14 @@ pub struct LocalFunction {
 }
 
 /// The functions of the local file, in the shape of the uploaded inventory.
+/// A file that resolves outside `root`, is not a regular file or is too
+/// large has no functions.
 pub fn local_functions(root: &Path, file: &str) -> Vec<LocalFunction> {
-    let Ok(source) = std::fs::read_to_string(root.join(file)) else {
+    let Ok(source) = fallow_types::read_guard::read_to_string_inside(
+        root,
+        Path::new(file),
+        fallow_types::read_guard::DEFAULT_MAX_READ_BYTES,
+    ) else {
         return Vec::new();
     };
     let mut seen: FxHashSet<(String, u32)> = FxHashSet::default();
@@ -377,6 +383,31 @@ mod tests {
             production_callers: None,
             summary: String::new(),
         }
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn a_local_file_link_out_of_the_root_has_no_functions() {
+        let dir = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let target = outside.path().join("a.ts");
+        std::fs::write(&target, "export function a() {}\n").unwrap();
+        std::fs::create_dir_all(dir.path().join("src")).unwrap();
+        std::os::unix::fs::symlink(&target, dir.path().join("src/a.ts")).unwrap();
+
+        assert_eq!(local_functions(dir.path(), "src/a.ts"), Vec::new());
+    }
+
+    #[test]
+    fn a_local_file_inside_the_root_gives_its_functions() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("src")).unwrap();
+        std::fs::write(dir.path().join("src/a.ts"), "export function a() {}\n").unwrap();
+
+        let functions = local_functions(dir.path(), "src/a.ts");
+
+        assert_eq!(functions.len(), 1);
+        assert_eq!(functions[0].name, "a");
     }
 
     #[test]

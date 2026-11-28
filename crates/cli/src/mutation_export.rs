@@ -143,7 +143,8 @@ fn current_source(report: &SavedReport, root: &Path, path: &str) -> Result<Strin
         .source_sha256
         .as_str();
     let relative = report_relative_path(path).map_err(|_| "the path leaves the project root")?;
-    let bytes = std::fs::read(root.join(relative)).map_err(|_| "the file cannot be read")?;
+    let bytes = crate::mutation_inspect::read_report_source(root, relative)
+        .ok_or("the file cannot be read")?;
     if sha256_hex(&bytes) != expected {
         return Err("the file changed after the run");
     }

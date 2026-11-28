@@ -23740,7 +23740,8 @@ report_status?: (MutantStatus | null)
 report_sha256?: (string | null)
 /**
  * The SHA-256 digest of the current file. `null` when the file is
- * missing.
+ * missing, resolves outside the project root, is not a regular file,
+ * or is too large to read.
  */
 current_sha256?: (string | null)
 /**

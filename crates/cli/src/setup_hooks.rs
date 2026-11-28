@@ -30,7 +30,7 @@ pub use symlink_guard::{execute_agent_hooks, symlinked_hook_target};
 
 #[path = "setup_hooks_gitignore.rs"]
 mod gitignore;
-use crate::state_file::read_optional_text;
+use crate::state_file::{read_optional_text, read_optional_text_in_root as read_in_root};
 pub use gitignore::ensure_gitignore_entry;
 use gitignore::gitignore_needs_entry;
 
@@ -337,7 +337,7 @@ fn git_hook_status(root: &Path) -> HookSurfaceStatus {
     let git_hook = crate::init::git_hook_location::git_pre_commit_path(root);
     let husky = root.join(".husky").join("pre-commit");
     let path = if husky.exists() { husky } else { git_hook };
-    let raw = read_optional_text(&path).ok().flatten();
+    let raw = read_in_root(root, &path).ok().flatten();
     let managed = raw
         .as_deref()
         .is_some_and(|text| text.contains(crate::init::GIT_HOOK_MARKER));
@@ -378,13 +378,13 @@ fn gate_hook_status(
     script_path: &Path,
     expected_handler: &str,
 ) -> HookSurfaceStatus {
-    let settings = read_optional_text(settings_path).ok().flatten();
+    let settings = read_in_root(root, settings_path).ok().flatten();
     let settings_has_handler = settings.as_deref().is_some_and(settings_has_fallow_handler);
     let handler_stale = settings_has_handler
         && !settings.as_deref().is_some_and(|raw| {
             raw.contains(&serde_json::to_string(expected_handler).unwrap_or_default())
         });
-    let script = read_optional_text(script_path).ok().flatten();
+    let script = read_in_root(root, script_path).ok().flatten();
     let script_managed = script
         .as_deref()
         .is_some_and(|text| text.contains(HOOK_SCRIPT_MARKER));
@@ -401,7 +401,7 @@ fn gate_hook_status(
 
 fn codex_hook_status(root: &Path) -> HookSurfaceStatus {
     let path = root.join("AGENTS.md");
-    let raw = read_optional_text(&path).ok().flatten();
+    let raw = read_in_root(root, &path).ok().flatten();
     let has_start = raw
         .as_deref()
         .is_some_and(|text| text.contains(AGENTS_BLOCK_START));
