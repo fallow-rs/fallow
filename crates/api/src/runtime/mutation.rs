@@ -1251,10 +1251,8 @@ fn execute(
     let init = init_request(planned, &root, &run_dir);
     let dry_cache = result_cache.as_ref().map(|keys| {
         let operators = planned.operators.as_deref();
-        dry_run_cache(keys, &mutation_cache, &run_files(plan), operators, &init)
+        dry_run_cache(keys, &mutation_cache, (plan, &root), operators, &init)
     });
-    let dry_cache =
-        dry_cache.map(|cache| Arc::new(super::mutation_reach::with_facts(cache, &root, plan)));
     let config = ScheduleConfig {
         init,
         runner: range.clone(),
@@ -1272,11 +1270,7 @@ fn execute(
             .clone()
             .map(|cache| cache as Arc<dyn DryRunLookup>),
         journal: Some(Arc::clone(&run_journal.journal) as Arc<dyn OutcomeJournal>),
-        reach: super::mutation_reach::schedule_config(
-            options.reach_selection,
-            plan,
-            dry_cache.as_ref(),
-        ),
+        reach: super::mutation_reach::schedule_config(options, plan, dry_cache.as_ref()),
     };
     let spawner = ProcessSpawner {
         runtime: runtime.path.clone(),
@@ -1289,16 +1283,8 @@ fn execute(
     let mut outcome = run_schedule_with_progress(&spawner, &schedule, &config, progress)
         .map_err(|error| schedule_error(&error, &config.runner, config.runner_timeout))?;
     let runner = runner_output(&outcome, name, manifest, &runtime);
-    let reach = super::mutation_reach::ReachRequest::new(
-        options.reach_selection,
-        !options.kill_matrix_targets.is_empty(),
-    );
-    let cache = store_results(
-        result_cache.as_deref(),
-        dry_cache.as_deref(),
-        reach,
-        &mut outcome,
-    );
+    let caches = (result_cache.as_deref(), dry_cache.as_deref());
+    let cache = store_results(caches, options, &mut outcome);
     let journal_run_id = Some(run_journal.journal.run_id().to_owned());
     let resume = settle_journal(options, run_journal, &mut outcome);
     let (record, witness) = record_and_search(options, &outcome, spawner, &config, &mutation_cache);

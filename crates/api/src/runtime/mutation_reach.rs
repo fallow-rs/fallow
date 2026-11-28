@@ -64,7 +64,7 @@ pub(super) fn with_facts(cache: DryRunCache, root: &Path, plan: &MutationPlan) -
 
 /// The scheduler config of the reach selection.
 pub(super) fn schedule_config(
-    mode: ReachSelectionMode,
+    options: &crate::mutation::MutationRunOptions,
     plan: &MutationPlan,
     dry_cache: Option<&Arc<DryRunCache>>,
 ) -> Option<ReachConfig> {
@@ -73,7 +73,7 @@ pub(super) fn schedule_config(
     let planned: FxHashSet<&str> = plan.files.iter().map(|file| file.path.as_str()).collect();
     Some(ReachConfig {
         lookup,
-        check: mode == ReachSelectionMode::Check,
+        check: options.reach_selection == ReachSelectionMode::Check,
         probe_only: probes
             .files
             .keys()

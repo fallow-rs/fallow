@@ -2264,7 +2264,7 @@ For example, with GitHub Actions:
 
 The probes live in `crates/mutation/src/reach.rs`, the plan part in
 `crates/engine/src/mutation/probes.rs`, the record and the rule in
-`crates/api/src/mutation/dry_run_cache/reach.rs`, and the scheduler part in
+`crates/api/src/mutation/dry_run_cache/reach/mod.rs`, and the scheduler part in
 `crates/api/src/mutation/scheduler/reach_select.rs`.
 
 ## Outcome journal and resume

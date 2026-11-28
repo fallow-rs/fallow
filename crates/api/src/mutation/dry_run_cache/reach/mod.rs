@@ -608,7 +608,7 @@ impl ReachStore {
                 (path.clone(), fact.key)
             })
             .collect();
-        let snapshot = hash_ids(files.iter().flat_map(|(path, key)| [path, key]));
+        let snapshot = hash_ids(files.iter().flat_map(<[&String; 2]>::from));
         let mut recorded = 0;
         for share in shares {
             let statics = hash_ids(share.statics.iter());

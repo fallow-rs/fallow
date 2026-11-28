@@ -188,18 +188,7 @@ pub(super) fn build(
         .map(|candidate| plan_file(&context, candidate))
         .collect();
 
-    let mut files = Vec::new();
-    let mut mutants = Vec::new();
-    let mut skipped_files = Vec::new();
-    let mut probed = std::collections::BTreeMap::new();
-    for outcome in outcomes {
-        if let (Some(file), Some(probe)) = (&outcome.file, outcome.probed) {
-            probed.insert(file.path.clone(), probe);
-        }
-        files.extend(outcome.file);
-        mutants.extend(outcome.mutants);
-        skipped_files.extend(outcome.skipped);
-    }
+    let (mut files, mut mutants, skipped_files, probed) = join_outcomes(outcomes);
     if let Some(ids) = &request.mutant_ids {
         prune_unselected(&mut mutants, ids);
     }
@@ -223,30 +212,13 @@ pub(super) fn build(
     let test_files: Vec<String> = test_files.into_iter().collect();
     let reach = super::reach::test_reach(graph, inputs.root, &test_files);
     let support_files = super::reach::support_files(graph, inputs.root, inputs.setup_files);
-    let config_support_files = if request.probes {
-        super::reach::support_files(graph, inputs.root, &[])
-    } else {
-        Vec::new()
-    };
-    let probes = request.probes.then(|| {
-        probed.retain(|path, _| runnable.contains(path.as_str()));
-        let planned: FxHashSet<&str> = files
-            .iter()
-            .map(|file| file.path.as_str())
-            .chain(config_support_files.iter().map(String::as_str))
-            .collect();
-        let worker_files: Vec<String> = reach
-            .files
-            .iter()
-            .chain(&support_files)
-            .cloned()
-            .collect::<BTreeSet<String>>()
-            .into_iter()
-            .collect();
-        let reach_only = super::probes::probe_reach_files(inputs.root, &worker_files, &planned);
-        probed.extend(reach_only);
-        super::PlanProbes { files: probed }
-    });
+    let workers: [&[String]; 2] = [&reach.files, &support_files];
+    let (probes, config_support_files) = probes_of(
+        request.probes,
+        inputs,
+        (probed, &runnable),
+        (&files, &workers),
+    );
     MutationPlan {
         probes,
         config_support_files,
@@ -263,6 +235,83 @@ pub(super) fn build(
         unmatched_paths,
         skipped_tests: skipped_tests(&context),
     }
+}
+
+/// The probed files of a plan with probes (`enabled`), and the runner
+/// config modules with their reach. `probed` holds the probed code of each
+/// file with a mutant; only the files in `runnable` stay.
+fn probes_of(
+    enabled: bool,
+    inputs: &MutationPlanInputs<'_>,
+    (probed, runnable): (
+        std::collections::BTreeMap<String, super::ProbedFile>,
+        &FxHashSet<&str>,
+    ),
+    (files, workers): (&[PlannedFile], &[&[String]]),
+) -> (Option<super::PlanProbes>, Vec<String>) {
+    if !enabled {
+        return (None, Vec::new());
+    }
+    let root = inputs.root;
+    let config = super::reach::support_files(inputs.graph.as_graph(), root, &[]);
+    let probed = probed
+        .into_iter()
+        .filter(|(path, _)| runnable.contains(path.as_str()))
+        .collect();
+    let probes = plan_probes(root, probed, (files, &config), workers);
+    (Some(probes), config)
+}
+
+type JoinedOutcomes = (
+    Vec<PlannedFile>,
+    Vec<RankEntry>,
+    Vec<SkippedFile>,
+    std::collections::BTreeMap<String, super::ProbedFile>,
+);
+
+/// Joins the outcomes of the files: the planned files, the mutants, the
+/// skipped files, and the probed code of each planned file.
+fn join_outcomes(outcomes: Vec<FileOutcome>) -> JoinedOutcomes {
+    let mut joined: JoinedOutcomes = Default::default();
+    for outcome in outcomes {
+        if let (Some(file), Some(probe)) = (&outcome.file, outcome.probed) {
+            joined.3.insert(file.path.clone(), probe);
+        }
+        joined.0.extend(outcome.file);
+        joined.1.extend(outcome.mutants);
+        joined.2.extend(outcome.skipped);
+    }
+    joined
+}
+
+/// The probed files of a plan: `probed`, the probed code of the files with a
+/// mutant, and a probed copy of each other script file of `worker_files`.
+/// The files of `config` load in the main process of the runner, where no
+/// probe records, so they get no copy.
+fn plan_probes(
+    root: &Path,
+    mut probed: std::collections::BTreeMap<String, super::ProbedFile>,
+    (files, config): (&[PlannedFile], &[String]),
+    worker_files: &[&[String]],
+) -> super::PlanProbes {
+    let planned: FxHashSet<&str> = files
+        .iter()
+        .map(|file| file.path.as_str())
+        .chain(config.iter().map(String::as_str))
+        .collect();
+    let worker_files: Vec<String> = worker_files
+        .iter()
+        .flat_map(|list| list.iter())
+        .cloned()
+        .collect::<BTreeSet<String>>()
+        .into_iter()
+        .collect();
+    probed.extend(super::probes::probe_reach_files(
+        root,
+        &worker_files,
+        &planned,
+    ));
+    super::PlanProbes { files: probed }
 }
 
 /// Prunes each mutant that is not in `ids` and that no other rule pruned.
@@ -484,11 +533,11 @@ fn plan_file(context: &Context<'_>, candidate: &Candidate<'_>) -> FileOutcome {
 
 const fn skip_reason(error: &MutationError) -> SkipReason {
     match error {
-        MutationError::Parse { .. } => SkipReason::Parse,
+        // Only the probe pass gives `ProbePlacement`, and that pass keeps the
+        // plain copy.
+        MutationError::Parse { .. } | MutationError::ProbePlacement => SkipReason::Parse,
         MutationError::ReservedName { .. } => SkipReason::ReservedName,
         MutationError::TooLarge => SkipReason::TooLarge,
-        // Only the probe pass gives it, and that pass keeps the plain copy.
-        MutationError::ProbePlacement => SkipReason::Parse,
     }
 }
 
