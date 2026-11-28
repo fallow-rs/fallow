@@ -1414,7 +1414,7 @@ fn dispatch_fix(dispatch: &DispatchContext<'_>, args: &FixDispatchArgs) -> ExitC
         type_aware: cli.type_aware_override(),
         type_aware_projects: &cli.type_aware_project,
         type_aware_require: cli.type_aware_require.map(Into::into),
-        scope: args.scope.clone(),
+        scope: fix::FixScope::of_cli(cli, args.scope.clone()),
         show_cascade: cli.show_cascade,
     })
 }

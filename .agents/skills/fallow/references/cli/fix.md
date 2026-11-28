@@ -16,6 +16,8 @@ Common global flags for this command: [`--format`](global-flags.md), [`--quiet`]
 
 `--force` is an alias for `--yes`.
 
+`fix` plans only the findings that `dead-code` reports with the same scope: the positional path, `--workspace`, `--changed-workspaces`, `--changed-since`, the package baselines of `workspaces.changedSince`, and a diff from `--diff-file`, `--diff-stdin` or `FALLOW_DIFF_FILE`. An unknown workspace or a `--changed-workspaces` ref that does not resolve exits with code 2.
+
 ## What gets fixed
 
 - Unused exports (removes the `export` keyword; whole-enum block when every member is unused). In an `export { ... }` list, on one line or over several lines, it removes the unused names and keeps the layout and comments of the names that stay. It deletes the full statement when no name is left.
