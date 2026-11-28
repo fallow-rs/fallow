@@ -3547,15 +3547,15 @@ mod shard_tests;
 
 #[path = "adopt_tests.rs"]
 mod adopt_tests;
-
 #[path = "split_tests.rs"]
 mod split_tests;
 
 #[path = "dry_store_tests.rs"]
 mod dry_store_tests;
-
 #[path = "worker_checks_tests.rs"]
 mod worker_checks_tests;
 
 #[path = "reach_select_tests.rs"]
 mod reach_select_tests;
+#[path = "retry_order_tests.rs"]
+mod retry_order_tests;

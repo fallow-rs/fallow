@@ -3,12 +3,14 @@
 //! weight for the time reserve.
 
 use std::collections::BTreeSet;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
 
 use fallow_output::MutantStatus;
 use rustc_hash::FxHashSet;
 
-use super::DryRunFacts;
 use super::window::timeout_ms;
+use super::{Attempt, DryRunFacts, Job};
 
 /// Widens `tests` to each passing test of their files. Without
 /// `test_filter` the runner runs whole test files (`protocol.md` section 5).
@@ -68,6 +70,45 @@ pub(super) fn confirmation_tests(
 pub(super) fn retry_extra_ms(retry_total: f64, first_total: f64) -> u64 {
     let extra = (retry_total - first_total).max(0.0).ceil();
     if extra.is_finite() { extra as u64 } else { 0 }
+}
+
+/// Gives the retry queue its preferred order. Under a time budget the
+/// cheapest retries come first, so a wide retry of a survivor does not keep
+/// the cheap retries of other suspects from their place before the
+/// deadline. A worker still takes a job of the test files that its
+/// companion holds first. A retry of a timeout costs its doubled timeout,
+/// which `timed_out` marks. Each survivor keeps its own wide retry: the
+/// clean wide retry of one mutant proves nothing about another mutant of
+/// the same function (issue #5488).
+pub(super) fn retry_order(suspects: &mut [Job], budgeted: bool, timed_out: impl Fn(&Job) -> bool) {
+    if budgeted {
+        suspects.sort_by_cached_key(|job| {
+            if timed_out(job) {
+                job.estimate_ms.max(job.timeout_ms)
+            } else {
+                job.estimate_ms
+            }
+        });
+    }
+}
+
+/// The summed run time of the retries that ran more tests than their first
+/// run: the survivor retries with each test of their files. A retry that
+/// ran as parts on more workers counts its wall time.
+#[derive(Debug, Default)]
+pub(super) struct WideTime(AtomicU64);
+
+impl WideTime {
+    pub(super) fn add(&self, job: &Job, attempt: &Attempt) {
+        if !job.first_tests.is_empty() {
+            self.0
+                .fetch_add(attempt.duration_ms.unwrap_or(0), Ordering::Relaxed);
+        }
+    }
+
+    pub(super) fn total(&self) -> Duration {
+        Duration::from_millis(self.0.load(Ordering::Relaxed))
+    }
 }
 
 /// Gives the final status from the first and the retry status. A retry that

@@ -22,7 +22,10 @@ use super::setup_timeout::{self_check_help, setup_timeout_hint};
 use super::transport::{CompanionLink, CompanionSpawner, SpawnFailure};
 use super::{MutationProgress, MutationProgressSink};
 use reserve::{CompanionStart, PhaseDeadline, Retry};
-use retry_set::{confirmation_tests, fastest_first, retried_status, retry_extra_ms, whole_files};
+use retry_set::{
+    WideTime, confirmation_tests, fastest_first, retried_status, retry_extra_ms, retry_order,
+    whole_files,
+};
 
 mod adopt;
 mod check_parts;
@@ -220,6 +223,9 @@ pub struct ScheduleTimings {
     pub dry_run: Duration,
     pub mutants: Duration,
     pub retry: Duration,
+    /// The summed worker time of the survivor retries that ran each test
+    /// of their test files.
+    pub retry_wide_worker: Duration,
 }
 
 /// The result of a schedule.
@@ -1748,10 +1754,16 @@ fn run_first_pass(
 fn retry_suspects(
     runner: PhaseRunner<'_>,
     facts: &DryRunFacts,
-    suspects: Vec<Job>,
+    mut suspects: Vec<Job>,
     mut first_runs: FxHashMap<String, MutantAttempt>,
     outcome: &mut ScheduleOutcome,
 ) -> Result<(), ScheduleError> {
+    retry_order(&mut suspects, runner.config.deadline.is_some(), |job| {
+        outcome
+            .results
+            .get(&job.id)
+            .is_some_and(|first| first.status == MutantStatus::Timeout)
+    });
     let mut retry_files: Vec<String> = suspects
         .iter()
         .flat_map(|job| &job.tests)
@@ -1773,7 +1785,9 @@ fn retry_suspects(
             ))
         })
         .collect();
+    let wide = WideTime::default();
     let finished = |job: &Job, attempt: &Attempt| {
+        wide.add(job, attempt);
         journal_retry(runner.config, &firsts, job, attempt);
     };
     let (retries, workers) = run_phase(
@@ -1784,6 +1798,7 @@ fn retry_suspects(
         (Vec::new(), &finished, facts),
         |done, total| MutationProgress::Retries { done, total },
     )?;
+    outcome.timings.retry_wide_worker = wide.total();
     note_control_failures(outcome, facts, runner.memo);
     for (job, attempt) in retries {
         if attempt.status == MutantStatus::Pending {
