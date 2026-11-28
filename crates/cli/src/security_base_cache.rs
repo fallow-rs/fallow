@@ -13,7 +13,7 @@ use super::{
     SECURITY_BASE_SNAPSHOT_CACHE_VERSION, SecurityBaseSnapshotCacheKey, SecurityKeySnapshot,
 };
 
-const MAX_SECURITY_BASE_SNAPSHOT_CACHE_SIZE: usize = 8 * 1024 * 1024;
+const MAX_SECURITY_BASE_SNAPSHOT_CACHE_SIZE: u64 = 8 * 1024 * 1024;
 
 #[derive(bitcode::Encode, bitcode::Decode)]
 struct CachedSecurityKeySnapshot {
@@ -30,11 +30,15 @@ fn security_base_snapshot_cache_dir(config: &fallow_config::ResolvedConfig) -> P
     ))
 }
 
+fn snapshot_file_name(key: &SecurityBaseSnapshotCacheKey) -> String {
+    format!("{:016x}.bin", key.hash)
+}
+
 fn security_base_snapshot_cache_file(
     config: &fallow_config::ResolvedConfig,
     key: &SecurityBaseSnapshotCacheKey,
 ) -> PathBuf {
-    security_base_snapshot_cache_dir(config).join(format!("{:016x}.bin", key.hash))
+    security_base_snapshot_cache_dir(config).join(snapshot_file_name(key))
 }
 
 /// Refuse a symlink that leaves the cache base on the way to `file`, then
@@ -54,11 +58,15 @@ pub fn load_cached_security_base_snapshot(
     if config.no_cache {
         return None;
     }
-    let path = security_base_snapshot_cache_file(config, key);
-    let data = std::fs::read(path).ok()?;
-    if data.len() > MAX_SECURITY_BASE_SNAPSHOT_CACHE_SIZE {
-        return None;
-    }
+    let dir = security_base_snapshot_cache_dir(config);
+    let data = config
+        .cache_target()
+        .with_dir(&dir)
+        .read_file(
+            &snapshot_file_name(key),
+            MAX_SECURITY_BASE_SNAPSHOT_CACHE_SIZE,
+        )
+        .ok()?;
     let cached: CachedSecurityKeySnapshot = bitcode::decode(&data).ok()?;
     if cached.version != SECURITY_BASE_SNAPSHOT_CACHE_VERSION
         || cached.cli_version != env!("CARGO_PKG_VERSION")
@@ -134,5 +142,43 @@ mod tests {
         };
         save_cached_security_base_snapshot(&config, &key, &snapshot);
         assert_eq!(std::fs::read_dir(&outside).expect("outside").count(), 0);
+    }
+
+    #[test]
+    fn a_snapshot_link_out_of_the_cache_dir_is_not_read() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let resolve = |root: PathBuf| {
+            fallow_config::FallowConfig::default().resolve(
+                root,
+                fallow_config::OutputFormat::Human,
+                1,
+                false,
+                true,
+                None,
+            )
+        };
+        let root = dir.path().join("project");
+        let outside = dir.path().join("outside");
+        std::fs::create_dir_all(&root).expect("root");
+        std::fs::create_dir_all(&outside).expect("outside");
+        let key = SecurityBaseSnapshotCacheKey {
+            hash: 1,
+            base_sha: "abc".to_owned(),
+        };
+        let snapshot = SecurityKeySnapshot {
+            reachable: std::iter::once("src/a.ts".to_owned()).collect(),
+        };
+        let outside_config = resolve(outside);
+        save_cached_security_base_snapshot(&outside_config, &key, &snapshot);
+        assert!(load_cached_security_base_snapshot(&outside_config, &key).is_some());
+
+        let config = resolve(root);
+        std::fs::create_dir_all(security_base_snapshot_cache_dir(&config)).expect("cache dir");
+        std::os::unix::fs::symlink(
+            security_base_snapshot_cache_file(&outside_config, &key),
+            security_base_snapshot_cache_file(&config, &key),
+        )
+        .expect("link");
+        assert!(load_cached_security_base_snapshot(&config, &key).is_none());
     }
 }

@@ -331,7 +331,7 @@ impl AnalysisSession {
         let cache_max_size_bytes =
             crate::project_config::resolve_cache_max_size_bytes(&self.config);
         let mut store = fallow_extract::cache::CacheStore::load(
-            &self.config.cache_dir,
+            self.config.cache_target(),
             &self.config.root,
             self.config.cache_config_hash,
             cache_max_size_bytes,
@@ -1749,7 +1749,7 @@ mod tests {
             session.disk_cache_stale.store(true, Ordering::SeqCst);
             session.flush_parse_cache();
             let store = fallow_extract::cache::CacheStore::load(
-                &session.config.cache_dir,
+                session.config.cache_target(),
                 &session.config.root,
                 session.config.cache_config_hash,
                 crate::project_config::resolve_cache_max_size_bytes(&session.config),
@@ -2400,10 +2400,9 @@ wrapper();
         let cold_exports = crate::module_graph::module_value_exports(
             cold.graph.as_ref().expect("cold graph retained"),
         );
-        assert!(
-            fallow_graph::cache::GraphCacheStore::load(&cold_session.config().cache_dir).is_ok(),
-            "cold analysis must persist the graph cache"
-        );
+        let graph_cache =
+            fallow_graph::cache::GraphCacheStore::load(cold_session.config().cache_target());
+        assert!(graph_cache.is_ok(), "cold run must save the graph cache");
 
         let warm_session = AnalysisSession::load(root, None).expect("warm session loads");
         let warm = warm_session

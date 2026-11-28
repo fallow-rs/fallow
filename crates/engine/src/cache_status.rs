@@ -43,7 +43,7 @@ pub struct ParseCacheStatus {
 pub fn inspect_parse_cache(config: &ResolvedConfig) -> ParseCacheStatus {
     let size_bytes = cache_file_size(&config.cache_dir);
     let rejection = fallow_extract::cache::CacheStore::load(
-        &config.cache_dir,
+        config.cache_target(),
         &config.root,
         fallow_config::cache_config_hash(&config.external_plugins, &config.flags),
         crate::project_config::resolve_cache_max_size_bytes(config),
@@ -78,7 +78,7 @@ pub struct GraphCacheStatus {
 #[must_use]
 pub fn inspect_graph_cache(config: &ResolvedConfig) -> GraphCacheStatus {
     let size_bytes = cache_entry_size(&config.cache_dir, fallow_graph::cache::GRAPH_CACHE_FILE);
-    let rejection = match fallow_graph::cache::GraphCacheStore::load(&config.cache_dir) {
+    let rejection = match fallow_graph::cache::GraphCacheStore::load(config.cache_target()) {
         Ok(store) => (store.manifest.root != config.root).then_some(CacheRejection::RootMismatch),
         Err(rejection) => Some(rejection),
     };

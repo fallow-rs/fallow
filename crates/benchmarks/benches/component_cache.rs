@@ -415,7 +415,7 @@ fn component_cache_store_load(c: &mut Criterion) {
     c.bench_function("component_cache_store_load", |bencher| {
         bencher.iter(|| {
             CacheStore::load(
-                fixture.dir.path(),
+                fallow_types::path_guard::CacheTarget::inside(fixture.dir.path()),
                 fixture.dir.path(),
                 CONFIG_HASH,
                 DEFAULT_CACHE_MAX_SIZE,
@@ -446,7 +446,7 @@ fn component_cache_cached_to_module(c: &mut Criterion) {
         bencher.iter_batched(
             || {
                 CacheStore::load(
-                    fixture.dir.path(),
+                    fallow_types::path_guard::CacheTarget::inside(fixture.dir.path()),
                     fixture.dir.path(),
                     CONFIG_HASH,
                     DEFAULT_CACHE_MAX_SIZE,

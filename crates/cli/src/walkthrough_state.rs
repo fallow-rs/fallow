@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 use fallow_types::path_guard::{CacheTarget, lexically_normalized};
 use serde::{Deserialize, Serialize};
 
-use crate::state_file::{Existing, load_existing};
+use crate::state_file::{Existing, load_existing_inside};
 
 /// Current ledger format version. Bumped only on a breaking shape change; a
 /// reader that sees an unknown version treats the file as empty (safe default).
@@ -87,12 +87,21 @@ impl ViewedState {
 /// treated as empty (forward-compat: a future writer's shape never crashes an
 /// older render).
 #[must_use]
-pub fn load_viewed_state(cache_dir: &Path) -> ViewedState {
-    let path = fallow_config::walkthrough_state_path(cache_dir);
-    match load_existing(&path, parse_viewed_state) {
+pub fn load_viewed_state(root: &Path, cache_dir: &Path) -> ViewedState {
+    match load_ledger(root, cache_dir) {
         Existing::Loaded(state) => state,
         Existing::Absent | Existing::Unreadable(_) | Existing::Invalid(_) => ViewedState::default(),
     }
+}
+
+/// Read the ledger of `cache_dir`. The file must resolve inside the base
+/// that the writes of the cache directory of `root` stay in.
+fn load_ledger(root: &Path, cache_dir: &Path) -> Existing<ViewedState> {
+    load_existing_inside(
+        &CacheTarget::new(root, cache_dir).write_base(),
+        &fallow_config::walkthrough_state_path(cache_dir),
+        parse_viewed_state,
+    )
 }
 
 /// Parse a ledger and refuse a version or a schema that this build does
@@ -122,7 +131,7 @@ fn mark_viewed(
     current_hash: &str,
 ) -> std::io::Result<()> {
     let path = fallow_config::walkthrough_state_path(cache_dir);
-    let mut state = match load_existing(&path, parse_viewed_state) {
+    let mut state = match load_ledger(root, cache_dir) {
         Existing::Absent => ViewedState::default(),
         Existing::Loaded(state) => state,
         Existing::Unreadable(err) => {
@@ -258,7 +267,7 @@ mod tests {
     #[test]
     fn missing_file_loads_empty_default() {
         let dir = temp_cache();
-        let state = load_viewed_state(dir.path());
+        let state = load_viewed_state(dir.path(), dir.path());
         assert!(state.entries.is_empty());
         assert_eq!(state.version, VIEWED_STATE_VERSION);
     }
@@ -268,7 +277,7 @@ mod tests {
         let dir = temp_cache();
         let path = fallow_config::walkthrough_state_path(dir.path());
         std::fs::write(&path, b"{ not json").expect("write");
-        let state = load_viewed_state(dir.path());
+        let state = load_viewed_state(dir.path(), dir.path());
         assert!(state.entries.is_empty());
     }
 
@@ -287,6 +296,26 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
+    fn a_ledger_link_out_of_the_root_is_not_read() {
+        let dir = temp_cache();
+        let root = dir.path().join("project");
+        let outside = dir.path().join("outside");
+        std::fs::create_dir_all(root.join(".fallow")).expect("cache dir");
+        std::fs::create_dir_all(&outside).expect("outside");
+        mark_viewed(&outside, &outside, &["src/a.ts".to_string()], "h").expect("mark");
+        let cache_dir = root.join(".fallow");
+        std::os::unix::fs::symlink(
+            fallow_config::walkthrough_state_path(&outside),
+            fallow_config::walkthrough_state_path(&cache_dir),
+        )
+        .expect("link");
+
+        let state = load_viewed_state(&root, &cache_dir);
+        assert!(!state.is_viewed("src/a.ts", "h"));
+    }
+
+    #[test]
     fn unknown_version_loads_empty_default() {
         let dir = temp_cache();
         let path = fallow_config::walkthrough_state_path(dir.path());
@@ -295,7 +324,7 @@ mod tests {
             br#"{"version":999,"schema":"walkthrough-viewed-marks","graph_snapshot_hash":"h","entries":{"a.ts":{"viewed_at":"t"}}}"#,
         )
         .expect("write");
-        let state = load_viewed_state(dir.path());
+        let state = load_viewed_state(dir.path(), dir.path());
         assert!(state.entries.is_empty());
     }
 
@@ -303,7 +332,7 @@ mod tests {
     fn mark_then_load_round_trips() {
         let dir = temp_cache();
         mark_viewed(dir.path(), dir.path(), &["src/a.ts".to_string()], "hash1").expect("mark");
-        let state = load_viewed_state(dir.path());
+        let state = load_viewed_state(dir.path(), dir.path());
         assert!(state.is_viewed("src/a.ts", "hash1"));
         assert!(!state.is_viewed("src/b.ts", "hash1"));
     }
@@ -312,7 +341,7 @@ mod tests {
     fn stale_hash_reads_as_not_viewed_but_keeps_entry() {
         let dir = temp_cache();
         mark_viewed(dir.path(), dir.path(), &["src/a.ts".to_string()], "hash1").expect("mark");
-        let state = load_viewed_state(dir.path());
+        let state = load_viewed_state(dir.path(), dir.path());
         // A different current hash: the mark is ignored for this render.
         assert!(!state.is_viewed("src/a.ts", "hash2"));
         // ...but the entry on disk is not deleted (carry-forward).
@@ -324,7 +353,7 @@ mod tests {
         let dir = temp_cache();
         mark_viewed(dir.path(), dir.path(), &["src/a.ts".to_string()], "hash1").expect("mark a");
         mark_viewed(dir.path(), dir.path(), &["src/b.ts".to_string()], "hash2").expect("mark b");
-        let state = load_viewed_state(dir.path());
+        let state = load_viewed_state(dir.path(), dir.path());
         assert!(state.is_viewed("src/b.ts", "hash2"));
         // The hash1 mark was reset when the snapshot moved.
         assert!(!state.entries.contains_key("src/a.ts"));
@@ -340,7 +369,7 @@ mod tests {
             "hash1",
         )
         .expect("mark");
-        let state = load_viewed_state(dir.path());
+        let state = load_viewed_state(dir.path(), dir.path());
         // Hash-matched files read as viewed; an un-marked file does not.
         assert!(state.is_viewed("src/a.ts", "hash1"));
         assert!(state.is_viewed("src/b.ts", "hash1"));

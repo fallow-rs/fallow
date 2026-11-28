@@ -343,14 +343,20 @@ fn cache_from_before_script_extension_policy_is_rejected_on_unchanged_files() {
     let cache = tempfile::tempdir().expect("cache");
     let config = create_config_with_cache(dir.path().to_path_buf(), cache.path().to_path_buf());
     let cold = fallow_core::analyze(&config).expect("cold analysis");
-    let mut store = fallow_core::graph_cache::GraphCacheStore::load(cache.path()).expect("cache");
+    let mut store = fallow_core::graph_cache::GraphCacheStore::load(
+        fallow_types::path_guard::CacheTarget::inside(cache.path()),
+    )
+    .expect("cache");
     store.version = PRE_SCRIPT_EXTENSION_CACHE_VERSION;
     store.manifest.version = PRE_SCRIPT_EXTENSION_CACHE_VERSION;
     // Model an old resolver graph without touching any project input fingerprint.
     store.graph.modules_mut().clear();
     store.save(fallow_types::path_guard::CacheTarget::inside(cache.path()));
     assert_eq!(
-        fallow_core::graph_cache::GraphCacheStore::load(cache.path()).err(),
+        fallow_core::graph_cache::GraphCacheStore::load(
+            fallow_types::path_guard::CacheTarget::inside(cache.path())
+        )
+        .err(),
         Some(CacheRejection::VersionMismatch),
         "the previous graph version must never replay after this resolution change"
     );

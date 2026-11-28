@@ -40,6 +40,11 @@ use super::scheduler::{CachedResult, ResultLookup, ScheduleOutcome, ScheduledMut
 
 /// The file name of the cache below `<cache dir>/mutation`.
 pub const RESULT_CACHE_FILE: &str = "results.json";
+
+/// The size limit of the result cache file. A larger file, a file that is not
+/// a regular file, and a file that resolves outside the cache base give an
+/// empty cache.
+const MAX_RESULT_CACHE_BYTES: u64 = 256 * 1024 * 1024;
 /// The version of the key and of the file format. A change to the key
 /// parts or to the file shape needs a new version.
 const FORMAT_VERSION: u32 = 7;
@@ -317,7 +322,8 @@ impl ResultCache {
     #[must_use]
     pub fn open(mutation_cache: &Path, root: &Path, runner: &str, files: KeyFiles) -> Self {
         let cache = Self::keys_only(mutation_cache, root, runner, files);
-        let state = std::fs::read(&cache.file)
+        let state = fallow_types::path_guard::CacheTarget::new(root, mutation_cache)
+            .read_file(RESULT_CACHE_FILE, MAX_RESULT_CACHE_BYTES)
             .ok()
             .and_then(|bytes| serde_json::from_slice::<CacheFile>(&bytes).ok())
             .filter(|state| state.format_version == FORMAT_VERSION)

@@ -1033,3 +1033,9 @@ fn import_type_reference_round_trips() {
         assert_eq!(parse_import_type_reference(plain), None, "{plain}");
     }
 }
+
+#[test]
+fn byte_offset_to_line_col_does_not_panic_on_malformed_line_offsets() {
+    assert_eq!(byte_offset_to_line_col(&[], 5), (1, 5));
+    assert_eq!(byte_offset_to_line_col(&[5, 10], 2), (1, 0));
+}

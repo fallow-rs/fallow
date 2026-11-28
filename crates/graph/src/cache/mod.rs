@@ -433,6 +433,25 @@ pub struct CachedResolvedProject {
 }
 
 impl CachedResolvedProject {
+    /// True when each decoded path has the shape that a cold run writes: a
+    /// probed path or an external target is a plain path below the root,
+    /// and a manifest path is a `package.json` key below `node_modules`. A
+    /// graph cache file from a clone can hold any path, and the probes read
+    /// these paths, so a cached resolution that fails the check is not
+    /// restored.
+    fn has_well_formed_paths(&self) -> bool {
+        self.missed_probes.has_plain_paths()
+            && self
+                .external_targets
+                .iter()
+                .all(|target| crate::missed_probes::is_plain_relative(target))
+            && self.installed_versions.has_manifest_keys()
+            && self
+                .package_manifests
+                .iter()
+                .all(|manifest| crate::installed_versions::is_manifest_key(manifest))
+    }
+
     /// True when the files that the cached resolution depends on, but that
     /// discovery does not list, changed: a file now exists at a path that the
     /// resolution checked and did not find, a resolved target outside the
@@ -535,7 +554,10 @@ pub fn restore_resolved_project(
     files: &[DiscoveredFile],
     cached: &CachedResolvedProject,
 ) -> Option<ResolvedProject> {
-    if modules.len() != cached.modules.len() || cached.probed_paths_changed(root) {
+    if modules.len() != cached.modules.len()
+        || !cached.has_well_formed_paths()
+        || cached.probed_paths_changed(root)
+    {
         return None;
     }
 
@@ -1328,6 +1350,68 @@ mod tests {
                 current.as_slice()
             );
         }
+    }
+
+    /// A graph cache file from a clone can hold any path. A probed path or
+    /// a package manifest key that leaves the root, or that names no
+    /// `package.json` below `node_modules`, takes the cache miss path before
+    /// a probe reads it.
+    #[test]
+    #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+    fn a_decoded_path_that_leaves_the_root_takes_the_cache_miss_path() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("project");
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(temp.path().join("outside.txt"), "x").unwrap();
+        let app = root.join("src/app.ts");
+        let files = vec![DiscoveredFile {
+            id: FileId(0),
+            path: app.clone(),
+            size_bytes: 1,
+        }];
+        let module = ModuleInfo::empty(FileId(0));
+        let resolved = ResolvedProject {
+            modules: vec![ResolvedModule {
+                file_id: FileId(0),
+                path: app,
+                ..ResolvedModule::default()
+            }],
+            ..ResolvedProject::default()
+        };
+        let cached = cache_resolved_project(&root, &files, &resolved).expect("stable keys");
+        let restore = |cached: &CachedResolvedProject| {
+            restore_resolved_project(&root, std::slice::from_ref(&module), &files, cached)
+        };
+        assert!(restore(&cached).is_some(), "plain paths are restored");
+
+        let mut leaving = cached.clone();
+        leaving.external_targets = vec!["../outside.txt".to_string()];
+        assert!(
+            restore(&leaving).is_none(),
+            "an external target above the root"
+        );
+
+        let mut leaving = cached.clone();
+        leaving.missed_probes =
+            crate::missed_probes::MissedProbes::from_paths(vec!["../missing.ts".to_string()]);
+        assert!(restore(&leaving).is_none(), "a missed path above the root");
+
+        let mut leaving = cached.clone();
+        leaving.package_manifests = vec!["../outside.txt".to_string()];
+        assert!(
+            restore(&leaving).is_none(),
+            "a manifest key with no package.json"
+        );
+
+        let mut leaving = cached;
+        leaving.installed_versions = serde_json::from_str(
+            r#"{"entries":[{"manifest":"node_modules/../../outside.txt","version":null}]}"#,
+        )
+        .unwrap();
+        assert!(
+            restore(&leaving).is_none(),
+            "an installed version key that leaves node_modules"
+        );
     }
 
     #[test]

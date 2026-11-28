@@ -264,8 +264,10 @@ fn assert_resolver_cache_hit_matches_cold(fixture: &str) {
     let config = create_config_with_cache(root, cache_dir.clone());
 
     let cold = fallow_core::analyze_with_trace(&config).expect("cold analysis");
-    let mut store = fallow_core::graph_cache::GraphCacheStore::load(&cache_dir)
-        .expect("persisted graph cache exists after cold run");
+    let mut store = fallow_core::graph_cache::GraphCacheStore::load(
+        fallow_types::path_guard::CacheTarget::inside(&cache_dir),
+    )
+    .expect("persisted graph cache exists after cold run");
     let current = current_manifest_with_cached_mode(&config, &store);
 
     for file in &mut store.manifest.files {
@@ -326,8 +328,10 @@ fn exact_cache_hit_rebuilds_when_a_module_path_is_outside_the_root() {
 
     let config = create_config_with_cache(root, cache_dir.clone());
     let cold = fallow_core::analyze(&config).expect("cold analysis");
-    let mut store = fallow_core::graph_cache::GraphCacheStore::load(&cache_dir)
-        .expect("persisted graph cache exists after cold run");
+    let mut store = fallow_core::graph_cache::GraphCacheStore::load(
+        fallow_types::path_guard::CacheTarget::inside(&cache_dir),
+    )
+    .expect("persisted graph cache exists after cold run");
     for module in store.graph.modules_mut() {
         module.path.clone_from(&outside);
     }
@@ -355,8 +359,10 @@ fn assert_edited_cache_rebuilds(edit: impl FnOnce(&mut fallow_core::graph::Modul
     let cache_dir = temp.path().join("cache");
     let config = create_config_with_cache(root, cache_dir.clone());
     let cold = fallow_core::analyze(&config).expect("cold analysis");
-    let mut store = fallow_core::graph_cache::GraphCacheStore::load(&cache_dir)
-        .expect("persisted graph cache exists after cold run");
+    let mut store = fallow_core::graph_cache::GraphCacheStore::load(
+        fallow_types::path_guard::CacheTarget::inside(&cache_dir),
+    )
+    .expect("persisted graph cache exists after cold run");
     edit(&mut store.graph);
     store.save(fallow_types::path_guard::CacheTarget::inside(&cache_dir));
 

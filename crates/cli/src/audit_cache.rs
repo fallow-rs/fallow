@@ -9,6 +9,7 @@ use fallow_types::audit_cache::{
     AuditCoverageFingerprint, AuditTypeAwareFingerprint,
 };
 use fallow_types::path_guard::CacheTarget;
+use fallow_types::read_guard::ReadRefusal;
 use fallow_types::source_fingerprint::SourceFingerprint;
 use rustc_hash::{FxHashMap, FxHashSet};
 use xxhash_rust::xxh3::xxh3_64;
@@ -80,6 +81,9 @@ const MAX_AUDIT_BASE_SNAPSHOT_CACHE_SIZE: usize = 16 * 1024 * 1024;
 /// [`MAX_AUDIT_BASE_SNAPSHOT_CACHE_SIZE`] each.
 pub(super) const MAX_AUDIT_BASE_SNAPSHOT_FILES: usize = 32;
 const SNAPSHOT_FILE_SUFFIX: &str = ".bin";
+/// The size limit of one coverage file in the cache key, the same limit that
+/// the coverage readers use.
+const MAX_COVERAGE_FILE_BYTES: u64 = 1024 * 1024 * 1024;
 
 pub(super) struct AuditBaseSnapshotCacheKey {
     pub(super) hash: u64,
@@ -399,8 +403,11 @@ pub(super) fn audit_base_snapshot_cache_file(
     cache_dir: &Path,
     key: &AuditBaseSnapshotCacheKey,
 ) -> PathBuf {
-    audit_base_snapshot_cache_dir(cache_dir)
-        .join(format!("{:016x}{SNAPSHOT_FILE_SUFFIX}", key.hash))
+    audit_base_snapshot_cache_dir(cache_dir).join(snapshot_file_name(key))
+}
+
+fn snapshot_file_name(key: &AuditBaseSnapshotCacheKey) -> String {
+    format!("{:016x}{SNAPSHOT_FILE_SUFFIX}", key.hash)
 }
 
 pub(super) fn ensure_audit_base_snapshot_cache_dir(dir: &Path) -> Result<(), std::io::Error> {
@@ -439,15 +446,22 @@ fn sweep_stale_snapshot_cache_versions(current_dir: &Path) {
     }
 }
 
+/// Load the base snapshot of `key`. The read is checked from `host_root`, the
+/// checkout that the user runs in, as the save is.
 pub(super) fn load_cached_base_snapshot(
     opts: &AuditOptions<'_>,
+    host_root: &Path,
     key: &AuditBaseSnapshotCacheKey,
 ) -> Option<AuditKeySnapshot> {
-    let path = audit_base_snapshot_cache_file(opts.cache_dir, key);
-    let data = std::fs::read(&path).ok()?;
-    if data.len() > MAX_AUDIT_BASE_SNAPSHOT_CACHE_SIZE {
-        return None;
-    }
+    let dir = audit_base_snapshot_cache_dir(opts.cache_dir);
+    let path = dir.join(snapshot_file_name(key));
+    let data = CacheTarget::new(host_root, opts.cache_dir)
+        .with_dir(&dir)
+        .read_file(
+            &snapshot_file_name(key),
+            MAX_AUDIT_BASE_SNAPSHOT_CACHE_SIZE as u64,
+        )
+        .ok()?;
     let cached: CachedAuditKeySnapshot = bitcode::decode(&data).ok()?;
     if cached.version != AUDIT_BASE_SNAPSHOT_CACHE_VERSION
         || cached.cli_version != env!("CARGO_PKG_VERSION")
@@ -762,7 +776,7 @@ fn coverage_fingerprint(path: &Path) -> AuditCoverageFingerprint {
 
 fn coverage_file_fingerprint(file: &Path) -> AuditCoverageFileFingerprint {
     let path = file.to_string_lossy().to_string();
-    match std::fs::read(file) {
+    match fallow_types::read_guard::read_bytes_bounded(file, MAX_COVERAGE_FILE_BYTES) {
         Ok(bytes) => AuditCoverageFileFingerprint {
             path,
             source: std::fs::metadata(file)
@@ -772,12 +786,17 @@ fn coverage_file_fingerprint(file: &Path) -> AuditCoverageFileFingerprint {
             len: Some(bytes.len()),
             error: None,
         },
-        Err(err) => AuditCoverageFileFingerprint {
+        Err(refusal) => AuditCoverageFileFingerprint {
             path,
             source: None,
             content_hash: None,
             len: None,
-            error: Some(err.kind().to_string()),
+            error: Some(match refusal {
+                ReadRefusal::Io { source, .. } => source.kind().to_string(),
+                ReadRefusal::NotRegularFile { .. } => "not a regular file".to_string(),
+                ReadRefusal::TooLarge { .. } => "too large".to_string(),
+                ReadRefusal::OutsideRoot { .. } => "outside the root".to_string(),
+            }),
         },
     }
 }
@@ -887,6 +906,29 @@ pub(super) fn audit_base_snapshot_cache_key(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A coverage input that is a named pipe gets an error fingerprint and
+    /// does not wait for a writer.
+    #[cfg(unix)]
+    #[test]
+    fn a_coverage_file_that_is_not_a_regular_file_is_not_read() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let fifo = dir.path().join("coverage.json");
+        let made = std::process::Command::new("mkfifo")
+            .arg(&fifo)
+            .status()
+            .expect("run mkfifo");
+        assert!(made.success());
+        let (send, receive) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = send.send(coverage_file_fingerprint(&fifo));
+        });
+        let fingerprint = receive
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .expect("the fingerprint does not wait for a writer");
+        assert!(fingerprint.content_hash.is_none());
+        assert!(fingerprint.error.is_some());
+    }
 
     fn cached_row(exceeded: [bool; 3], severity: u8) -> CachedComplexityFinding {
         CachedComplexityFinding {

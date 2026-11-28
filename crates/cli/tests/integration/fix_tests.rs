@@ -1970,3 +1970,46 @@ fn fix_keeps_an_export_whose_override_sets_the_rule_to_warn() {
 
     assert_eq!(planned_export_removals(root), ["cleanupJob", "deadUtil"]);
 }
+
+/// A cache directory is a path in the checkout, so a clone can hold a cache
+/// entry whose content hash matches a source file. A run that writes source
+/// edits must not let such an entry decide what it removes, so `fix --yes`
+/// analyzes with the cache off: it reads and writes no cache file. A dry run
+/// keeps the cache.
+#[test]
+fn fix_that_writes_edits_runs_with_the_cache_off() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"cache-off","main":"src/index.ts"}"#,
+    )
+    .unwrap();
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(
+        root.join("src/index.ts"),
+        "import { used } from './lib';\nconsole.log(used);\n",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("src/lib.ts"),
+        "export const used = 1;\nexport const unused = 2;\n",
+    )
+    .unwrap();
+    let cache_file = root.join(".fallow/cache.bin");
+
+    let applied = run_fallow_in_root("fix", root, &["--yes", "--format", "json", "--quiet"]);
+    assert_eq!(applied.code, 0, "{}", applied.stderr);
+    assert!(
+        !std::fs::read_to_string(root.join("src/lib.ts"))
+            .unwrap()
+            .contains("export const unused"),
+        "the fix applies"
+    );
+    assert!(!cache_file.exists(), "fix --yes writes no parse cache");
+    assert!(!root.join(".fallow/graph-cache.bin").exists());
+
+    let preview = run_fallow_in_root("fix", root, &["--dry-run", "--format", "json", "--quiet"]);
+    assert_eq!(preview.code, 0, "{}", preview.stderr);
+    assert!(cache_file.exists(), "a dry run keeps the cache");
+}

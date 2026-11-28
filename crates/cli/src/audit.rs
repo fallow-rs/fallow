@@ -537,7 +537,7 @@ impl AuditBackend for CliAuditBackend<'_> {
         if self.type_aware.cli_enabled() {
             return None;
         }
-        load_cached_base_snapshot(self.opts, key)
+        load_cached_base_snapshot(self.opts, self.host_root, key)
     }
 
     fn save_cached_base(&self, key: &AuditBaseSnapshotCacheKey, snapshot: &AuditKeySnapshot) {

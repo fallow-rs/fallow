@@ -287,6 +287,15 @@ const fn flag_on(set: bool, flag: &'static str) -> Option<Given<bool>> {
     }
 }
 
+/// True for a `fix` run that writes source edits, which is each run without
+/// `--dry-run`. The cache directory is a path in the checkout, so a clone can
+/// hold a cache entry whose content hash matches a source file. Such a run
+/// analyzes with the cache off, so a cache entry never decides what it
+/// removes.
+const fn writes_fix_edits(cli: &Cli) -> bool {
+    matches!(cli.command, Some(Command::Fix { dry_run: false, .. }))
+}
+
 /// The run inputs of a parsed command line. `None` for a command that loads
 /// no config.
 ///
@@ -299,7 +308,7 @@ pub fn command_run_inputs(cli: &Cli, env: EnvSnapshot) -> Option<RunInputs> {
     inputs.root = cli.root.clone().map(|root| given(root, "--root"));
     inputs.config_path = cli.config.clone().map(|path| given(path, "--config"));
     inputs.allow_remote_extends = flag_on(cli.allow_remote_extends, "--allow-remote-extends");
-    inputs.no_cache = flag_on(cli.no_cache, "--no-cache");
+    inputs.no_cache = flag_on(cli.no_cache || writes_fix_edits(cli), "--no-cache");
     // `--threads 0` gives the default thread count of the worker pool, so the
     // resolver gets no thread input for it.
     inputs.threads = cli

@@ -7,22 +7,35 @@
 use std::io::ErrorKind;
 use std::path::Path;
 
+use fallow_types::read_guard::{
+    DEFAULT_MAX_READ_BYTES, ReadRefusal, read_bytes_bounded, read_to_string_bounded,
+    read_to_string_inside,
+};
+
 /// Read `path` as text. A missing file is `Ok(None)`. Each other read
-/// error, which includes invalid UTF-8, is `Err`.
+/// error, which includes invalid UTF-8, is `Err`. A file that is not a
+/// regular file, or that has more than
+/// [`fallow_types::read_guard::DEFAULT_MAX_READ_BYTES`] bytes, is a read
+/// error and is not opened or read.
 pub fn read_optional_text(path: &Path) -> std::io::Result<Option<String>> {
-    match std::fs::read_to_string(path) {
-        Ok(contents) => Ok(Some(contents)),
-        Err(err) if err.kind() == ErrorKind::NotFound => Ok(None),
-        Err(err) => Err(err),
-    }
+    optional(read_to_string_bounded(path, DEFAULT_MAX_READ_BYTES))
 }
 
-/// Read `path` as bytes. A missing file is `Ok(None)`.
+/// Read `path` as bytes. A missing file is `Ok(None)`. The limits of
+/// [`read_optional_text`] apply.
 pub fn read_optional_bytes(path: &Path) -> std::io::Result<Option<Vec<u8>>> {
-    match std::fs::read(path) {
+    optional(read_bytes_bounded(path, DEFAULT_MAX_READ_BYTES))
+}
+
+fn optional<T>(read: Result<T, ReadRefusal>) -> std::io::Result<Option<T>> {
+    match read {
         Ok(contents) => Ok(Some(contents)),
-        Err(err) if err.kind() == ErrorKind::NotFound => Ok(None),
-        Err(err) => Err(err),
+        Err(refusal) if refusal.is_not_found() => Ok(None),
+        Err(ReadRefusal::Io { source, .. }) => Err(source),
+        Err(refusal) => Err(std::io::Error::new(
+            ErrorKind::InvalidInput,
+            refusal.to_string(),
+        )),
     }
 }
 
@@ -43,7 +56,29 @@ pub enum Existing<T> {
 /// Read `path` and parse the text. A read path can map `Unreadable` and
 /// `Invalid` to a default. A write path must stop or keep the file.
 pub fn load_existing<T>(path: &Path, parse: impl FnOnce(&str) -> Result<T, String>) -> Existing<T> {
-    match read_optional_text(path) {
+    parse_read(read_optional_text(path), parse)
+}
+
+/// [`load_existing`] for a file that must resolve inside `base`, such as a
+/// state file below `.fallow`. That directory is a path in the checkout, so
+/// a clone can hold a link there. A file that resolves outside `base` is
+/// `Unreadable`, and its content is not read.
+pub fn load_existing_inside<T>(
+    base: &Path,
+    path: &Path,
+    parse: impl FnOnce(&str) -> Result<T, String>,
+) -> Existing<T> {
+    parse_read(
+        optional(read_to_string_inside(base, path, DEFAULT_MAX_READ_BYTES)),
+        parse,
+    )
+}
+
+fn parse_read<T>(
+    read: std::io::Result<Option<String>>,
+    parse: impl FnOnce(&str) -> Result<T, String>,
+) -> Existing<T> {
+    match read {
         Ok(None) => Existing::Absent,
         Ok(Some(text)) => match parse(&text) {
             Ok(value) => Existing::Loaded(value),
@@ -57,6 +92,31 @@ pub fn load_existing<T>(path: &Path, parse: impl FnOnce(&str) -> Result<T, Strin
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    /// A state file below `.fallow` is a path in the checkout. A named pipe
+    /// there gives a read error and does not wait for a writer.
+    #[cfg(unix)]
+    #[test]
+    fn a_state_file_that_is_not_a_regular_file_is_a_read_error() {
+        let dir = tempdir().unwrap();
+        let fifo = dir.path().join("state.json");
+        let made = std::process::Command::new("mkfifo")
+            .arg(&fifo)
+            .status()
+            .expect("run mkfifo");
+        assert!(made.success());
+        let (send, receive) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = send.send((
+                read_optional_text(&fifo).is_err(),
+                read_optional_bytes(&fifo).is_err(),
+            ));
+        });
+        let errors = receive
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .expect("the read does not wait for a writer");
+        assert_eq!(errors, (true, true));
+    }
 
     #[test]
     fn a_missing_file_reads_as_none() {
