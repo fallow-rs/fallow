@@ -413,14 +413,22 @@ fn is_in_fixture_project(path: &Path, root: &Path) -> bool {
 }
 
 /// Resolve plugin-declared setup files (with source-extension fallback) into support entries.
+///
+/// A setup file counts only when it resolves inside the read scope of
+/// `root`. A setup file out of the scope is never an entry point, whether it
+/// exists or not.
 fn push_plugin_setup_files(
     entries: &mut CategorizedEntryPoints,
     root: &Path,
     plugin_result: &crate::plugins::AggregatedPluginResult,
 ) {
+    let exists = |path: &Path| {
+        path.symlink_metadata().is_ok()
+            && crate::discover::project_read::is_inside_scope(root, path)
+    };
     for (setup_file, pname) in &plugin_result.setup_files {
         let resolved = resolve_plugin_setup_file(root, setup_file);
-        if resolved.exists() {
+        if exists(&resolved) {
             entries.push_support(EntryPoint {
                 path: resolved,
                 source: EntryPointSource::Plugin {
@@ -431,7 +439,7 @@ fn push_plugin_setup_files(
         }
         for ext in SOURCE_EXTENSIONS {
             let with_ext = resolved.with_extension(ext);
-            if with_ext.exists() {
+            if exists(&with_ext) {
                 entries.push_support(EntryPoint {
                     path: with_ext,
                     source: EntryPointSource::Plugin {
@@ -731,5 +739,38 @@ mod tests {
 
         assert_eq!(index.matches(r"packages\app\src\a.test.ts"), vec![0]);
         assert_eq!(index.matches(r"src\main.tsx"), vec![1]);
+    }
+
+    /// A setup file out of the project is not an entry point, whether it
+    /// exists or not.
+    #[test]
+    fn plugin_setup_file_out_of_the_project_is_not_an_entry_point() {
+        let sandbox = tempfile::tempdir().expect("temp dir");
+        let root = sandbox.path().join("project");
+        std::fs::create_dir_all(&root).expect("create root");
+        std::fs::write(root.join("setup.ts"), "").expect("write setup");
+        std::fs::create_dir_all(sandbox.path().join("other")).expect("create other");
+        std::fs::write(sandbox.path().join("other/setup.ts"), "").expect("write setup");
+        let mut plugin_result = AggregatedPluginResult::default();
+        for setup_file in [
+            sandbox.path().join("other/setup.ts"),
+            sandbox.path().join("other/setup"),
+            std::path::PathBuf::from("../other/setup.ts"),
+            std::path::PathBuf::from("setup"),
+        ] {
+            plugin_result
+                .setup_files
+                .push((setup_file, "vitest".to_string()));
+        }
+
+        let mut entries = super::CategorizedEntryPoints::default();
+        super::push_plugin_setup_files(&mut entries, &root, &plugin_result);
+
+        let paths: Vec<&Path> = entries
+            .support
+            .iter()
+            .map(|entry| entry.path.as_path())
+            .collect();
+        assert_eq!(paths, [root.join("setup.ts")]);
     }
 }
