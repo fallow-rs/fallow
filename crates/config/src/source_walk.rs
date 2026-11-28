@@ -329,8 +329,21 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn source_walk_below_the_top_level_keeps_the_rules_of_the_repository() {
+        for ignore_above_top in [false, true] {
+            assert_repository_rules_apply(ignore_above_top);
+        }
+    }
+
+    /// The case of `source_walk_below_the_top_level_keeps_the_rules_of_the_repository`.
+    /// With `ignore_above_top`, a `.ignore` above the top level would drop
+    /// `src/index.ts` if it applied.
+    #[cfg(unix)]
+    fn assert_repository_rules_apply(ignore_above_top: bool) {
         let directory = tempfile::tempdir().expect("temporary directory");
-        let repository = directory.path();
+        if ignore_above_top {
+            write_file(&directory.path().join(".ignore"), "index.ts\n");
+        }
+        let repository = directory.path().join("repo");
         std::fs::create_dir_all(repository.join(".git/info")).expect("git directory");
         write_file(&repository.join(".git/info/exclude"), "excluded.ts\n");
         write_file(&repository.join(".gitignore"), "dist\n*.log\nshadowed.ts\n");
@@ -367,8 +380,65 @@ mod tests {
                 "vendor/kept.log",
             ]
             .map(String::from)
-            .to_vec()
+            .to_vec(),
+            "ignore above the top level: {ignore_above_top}"
         );
+    }
+
+    /// The layout of the parent re-include tests: the repository `.ignore`
+    /// re-includes what a closer `.gitignore` ignores. An `.ignore` match
+    /// wins over a `.gitignore` match at any level.
+    #[cfg(unix)]
+    fn parent_re_include_layout(base: &Path) -> PathBuf {
+        let repository = base.join("repo");
+        std::fs::create_dir_all(repository.join(".git")).expect("git directory");
+        write_file(&repository.join(".ignore"), "!gen.ts\n!generated/\n");
+        let root = repository.join("pkg");
+        write_file(&root.join(".gitignore"), "gen.ts\ngenerated/\ndropped.ts\n");
+        for file in [
+            "gen.ts",
+            "generated/a.ts",
+            "dropped.ts",
+            "src/index.ts",
+            "unrelated.ts",
+        ] {
+            write_file(&root.join(file), "");
+        }
+        root
+    }
+
+    #[cfg(unix)]
+    const PARENT_RE_INCLUDE_KEPT: [&str; 5] = [
+        ".gitignore",
+        "gen.ts",
+        "generated/a.ts",
+        "src/index.ts",
+        "unrelated.ts",
+    ];
+
+    #[cfg(unix)]
+    #[test]
+    fn source_walk_keeps_a_parent_ignore_re_include_over_a_closer_gitignore() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let root = parent_re_include_layout(directory.path());
+
+        let walked =
+            walked_files_within(source_walk_builder(&root, |_| true), &root).expect("walk ends");
+        assert_eq!(walked, PARENT_RE_INCLUDE_KEPT.map(String::from).to_vec());
+    }
+
+    /// With an `.ignore` above the top level, the walk drops that file and
+    /// keeps the precedence of the files inside the repository.
+    #[cfg(unix)]
+    #[test]
+    fn source_walk_keeps_a_parent_re_include_when_an_ignore_file_is_above_the_top_level() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        write_file(&directory.path().join(".ignore"), "unrelated.ts\n");
+        let root = parent_re_include_layout(directory.path());
+
+        let walked =
+            walked_files_within(source_walk_builder(&root, |_| true), &root).expect("walk ends");
+        assert_eq!(walked, PARENT_RE_INCLUDE_KEPT.map(String::from).to_vec());
     }
 
     #[cfg(unix)]

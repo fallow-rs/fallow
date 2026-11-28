@@ -1,18 +1,22 @@
-//! The ignore rules of the directories between a walk root and the top level
-//! of its repository.
+//! The ignore rules of a walk inside a repository that has an `.ignore`
+//! file above its top level.
 //!
-//! A walk inside a repository sets `parents(false)` on the `ignore` crate, so
-//! the crate applies no rule from a directory above the walk root. These
-//! rules then apply the ignore files of the directories from the parent of
-//! the root up to and including the top level, with the precedence of the
-//! crate: for each kind of ignore file the closest match wins, and a match of
-//! `.ignore` rules wins over `.gitignore` rules, which win over the exclude
-//! file. The `.gitignore` and exclude rules of the repository do not apply
-//! below a nested repository. No file above the top level applies.
+//! The `ignore` crate applies the `.ignore` file of each parent directory of
+//! the walk root, also above the top level of the repository. Git applies no
+//! ignore file from above a repository. When such a file exists, the walk
+//! sets `parents(false)` on the crate, and the crate applies only the
+//! `.ignore` files inside the walk. These rules apply every other kind with
+//! the precedence of the crate, over the directories of the walk and the
+//! parent directories up to and including the top level:
 //!
-//! The crate drops an entry that its own rules ignore before the walk filter
-//! sees it. A parent `.ignore` file that re-includes (`!`) such an entry
-//! therefore does not bring it back.
+//! - the closest match of each kind wins;
+//! - a `.ignore` match wins over a `.gitignore` match, which wins over an
+//!   exclude match, which wins over a match of the global excludes file;
+//! - `.gitignore` and exclude rules stop at the nearest directory with
+//!   `.git`, so a nested repository keeps only its own rules.
+//!
+//! A `.ignore` match inside the walk is the closest match of the strongest
+//! kind, so an entry that the crate drops for it is ignored here too.
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -21,12 +25,13 @@ use ignore::Match;
 use ignore::gitignore::{Gitignore, GitignoreBuilder};
 use rustc_hash::FxHashMap;
 
-use super::{DirReads, check, first_line};
+use super::{DirReads, check, checked_global_gitignore, first_line};
 
-/// The ignore files of one directory inside the walk.
+/// The ignore files of one directory.
 struct DirRules {
     dot_ignore: Gitignore,
     git_ignore: Gitignore,
+    git_exclude: Gitignore,
     has_git: bool,
 }
 
@@ -35,50 +40,37 @@ pub(super) struct ParentRules {
     canonical_root: PathBuf,
     scope: PathBuf,
     reads: DirReads,
-    /// The rules of each parent directory, closest first.
-    dot_ignore: Vec<Gitignore>,
-    git_ignore: Vec<Gitignore>,
-    git_exclude: Option<Gitignore>,
+    /// The rules of each parent directory up to the top level, closest first.
+    parents: Vec<DirRules>,
+    global: Gitignore,
     walked_dirs: Mutex<FxHashMap<PathBuf, Arc<DirRules>>>,
 }
 
 impl ParentRules {
-    /// The rules of the parent directories of `canonical_root` up to and
-    /// including `scope`. `None` when no parent file has a rule.
-    pub(super) fn load(
-        root: &Path,
-        canonical_root: &Path,
-        scope: &Path,
-        reads: DirReads,
-    ) -> Option<Self> {
-        let parents: Vec<&Path> = canonical_root
+    pub(super) fn load(root: &Path, canonical_root: &Path, scope: &Path, reads: DirReads) -> Self {
+        let parents = canonical_root
             .ancestors()
             .skip(1)
             .take_while(|dir| dir.starts_with(scope))
+            .map(|dir| dir_rules(dir, reads, scope))
             .collect();
-        let dot_ignore = rules_of(&parents, reads.dot_ignore, ".ignore", scope);
-        let git_ignore = rules_of(&parents, reads.sources.git_ignore, ".gitignore", scope);
-        let git_exclude = reads
-            .sources
-            .git_exclude
-            .then(|| git_exclude_rules(scope))
-            .flatten();
-        if dot_ignore.is_empty() && git_ignore.is_empty() && git_exclude.is_none() {
-            return None;
-        }
-        Some(Self {
+        let global = if reads.sources.git_global {
+            checked_global_gitignore()
+        } else {
+            Gitignore::empty()
+        };
+        Self {
             root: root.to_path_buf(),
             canonical_root: canonical_root.to_path_buf(),
             scope: scope.to_path_buf(),
             reads,
-            dot_ignore,
-            git_ignore,
-            git_exclude,
+            parents,
+            global,
             walked_dirs: Mutex::default(),
-        })
+        }
     }
 
-    /// True when a parent rule ignores the walk entry at `entry_path`.
+    /// True when the rules ignore the walk entry at `entry_path`.
     pub(super) fn ignores(&self, entry_path: &Path, is_dir: bool) -> bool {
         let Ok(relative) = entry_path.strip_prefix(&self.root) else {
             return false;
@@ -87,30 +79,39 @@ impl ParentRules {
             return false;
         }
         let path = self.canonical_root.join(relative);
-        let parent_dot_ignore = closest(self.dot_ignore.iter(), &path, is_dir);
-        let parent_git_ignore = closest(self.git_ignore.iter(), &path, is_dir);
-        let parent_exclude = self
-            .git_exclude
-            .as_ref()
-            .map_or(Match::None, |rules| matched(rules, &path, is_dir));
-        if parent_dot_ignore.is_none() && parent_git_ignore.is_none() && parent_exclude.is_none() {
-            return false;
-        }
         let walked = self.walked_dirs_of(&path);
-        let walked_dot_ignore = closest(walked.iter().map(|dir| &dir.dot_ignore), &path, is_dir);
-        let dot_ignore = walked_dot_ignore.or(parent_dot_ignore);
-        if !dot_ignore.is_none() {
-            return dot_ignore.is_ignore();
+        let chain: Vec<&DirRules> = walked
+            .iter()
+            .map(Arc::as_ref)
+            .chain(self.parents.iter())
+            .collect();
+
+        let dot_ignore = closest(chain.iter().map(|dir| &dir.dot_ignore), &path, is_dir);
+        // The crate applies Git rules only when a directory of the chain is a
+        // repository.
+        let any_git = chain.iter().any(|dir| dir.has_git);
+        let (mut git_ignore, mut git_exclude) = (Match::None, Match::None);
+        for dir in chain.iter().take_while(|_| any_git) {
+            if git_ignore.is_none() {
+                git_ignore = matched(&dir.git_ignore, &path, is_dir);
+            }
+            if git_exclude.is_none() {
+                git_exclude = matched(&dir.git_exclude, &path, is_dir);
+            }
+            if dir.has_git {
+                break;
+            }
         }
-        if walked.iter().any(|dir| dir.has_git) {
-            return false;
-        }
-        let walked_git_ignore = closest(walked.iter().map(|dir| &dir.git_ignore), &path, is_dir);
-        let git_ignore = walked_git_ignore.or(parent_git_ignore);
-        if !git_ignore.is_none() {
-            return git_ignore.is_ignore();
-        }
-        parent_exclude.is_ignore()
+        let global = if any_git {
+            matched(&self.global, entry_path, is_dir)
+        } else {
+            Match::None
+        };
+        dot_ignore
+            .or(git_ignore)
+            .or(git_exclude)
+            .or(global)
+            .is_ignore()
     }
 
     /// The rules of each walked directory that holds `path`, closest first:
@@ -129,16 +130,7 @@ impl ParentRules {
         {
             return Arc::clone(rules);
         }
-        let rules = Arc::new(DirRules {
-            dot_ignore: dir_rules(dir, self.reads.dot_ignore, ".ignore", &self.scope),
-            git_ignore: dir_rules(
-                dir,
-                self.reads.sources.git_ignore,
-                ".gitignore",
-                &self.scope,
-            ),
-            has_git: dir != self.canonical_root && dir.join(".git").exists(),
-        });
+        let rules = Arc::new(dir_rules(dir, self.reads, &self.scope));
         if let Ok(mut cache) = self.walked_dirs.lock() {
             cache.insert(dir.to_path_buf(), Arc::clone(&rules));
         }
@@ -146,18 +138,28 @@ impl ParentRules {
     }
 }
 
-/// The rules of the file `name` in each of `dirs` that has one.
-fn rules_of(dirs: &[&Path], read: bool, name: &str, scope: &Path) -> Vec<Gitignore> {
-    dirs.iter()
-        .map(|dir| dir_rules(dir, read, name, scope))
-        .filter(|rules| !rules.is_empty())
-        .collect()
+/// The ignore files of `dir` that the walk reads, rooted at `dir`. A
+/// directory counts as a repository the way the crate counts it: it has a
+/// `.git` or `.jj` entry, and the walk reads `.gitignore` or exclude files.
+fn dir_rules(dir: &Path, reads: DirReads, scope: &Path) -> DirRules {
+    let vcs = reads.sources.git_ignore || reads.sources.git_exclude;
+    let has_git = vcs && (dir.join(".git").metadata().is_ok() || dir.join(".jj").exists());
+    let git_exclude = if reads.sources.git_exclude && has_git {
+        git_exclude_rules(dir)
+    } else {
+        Gitignore::empty()
+    };
+    DirRules {
+        dot_ignore: file_rules(dir, reads.dot_ignore, ".ignore", scope),
+        git_ignore: file_rules(dir, reads.sources.git_ignore, ".gitignore", scope),
+        git_exclude,
+        has_git,
+    }
 }
 
-/// The rules of the file `name` in `dir`, rooted at `dir`. A file that fails
-/// the check gives no rules: the walk already turned off its kind or skips
-/// its directory.
-fn dir_rules(dir: &Path, read: bool, name: &str, scope: &Path) -> Gitignore {
+/// The rules of the file `name` in `dir`. A file that fails the check gives
+/// no rules: the walk already turned off its kind or skips its directory.
+fn file_rules(dir: &Path, read: bool, name: &str, scope: &Path) -> Gitignore {
     let path = dir.join(name);
     if !read || check(&path, Some(scope)) != Ok(true) {
         return Gitignore::empty();
@@ -168,25 +170,32 @@ fn dir_rules(dir: &Path, read: bool, name: &str, scope: &Path) -> Gitignore {
 /// The rules of the exclude file of the repository at `top`, rooted at
 /// `top`. The file is found the same way as `resolve_git_commondir` in the
 /// `ignore` crate finds it.
-fn git_exclude_rules(top: &Path) -> Option<Gitignore> {
+fn git_exclude_rules(top: &Path) -> Gitignore {
     let git = top.join(".git");
-    let metadata = std::fs::metadata(&git).ok()?;
-    let common = if metadata.is_dir() {
-        git
-    } else {
-        let git_dir = PathBuf::from(first_line(&git)?.strip_prefix("gitdir: ")?);
-        let commondir = first_line(&git_dir.join("commondir"))?;
-        if commondir.starts_with('.') {
-            git_dir.join(commondir)
-        } else {
-            PathBuf::from(commondir)
-        }
+    let Ok(metadata) = std::fs::metadata(&git) else {
+        return Gitignore::empty();
     };
-    let exclude = common.join("info").join("exclude");
+    let common = if metadata.is_dir() {
+        Some(git)
+    } else {
+        first_line(&git)
+            .and_then(|line| line.strip_prefix("gitdir: ").map(PathBuf::from))
+            .and_then(|git_dir| {
+                let commondir = first_line(&git_dir.join("commondir"))?;
+                Some(if commondir.starts_with('.') {
+                    git_dir.join(commondir)
+                } else {
+                    PathBuf::from(commondir)
+                })
+            })
+    };
+    let Some(exclude) = common.map(|common| common.join("info").join("exclude")) else {
+        return Gitignore::empty();
+    };
     if check(&exclude, None) != Ok(true) {
-        return None;
+        return Gitignore::empty();
     }
-    Some(build(top, &exclude)).filter(|rules| !rules.is_empty())
+    build(top, &exclude)
 }
 
 fn build(root: &Path, file: &Path) -> Gitignore {

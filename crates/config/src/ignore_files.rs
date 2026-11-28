@@ -159,6 +159,14 @@ fn has_git_entry(dir: &Path) -> bool {
     std::fs::symlink_metadata(dir.join(".git")).is_ok()
 }
 
+/// True when a directory above the top level `top` holds a `.ignore` file
+/// that the `ignore` crate would read.
+fn dot_ignore_above(top: &Path) -> bool {
+    top.ancestors()
+        .skip(1)
+        .any(|dir| check(&dir.join(".ignore"), None) == Ok(true))
+}
+
 /// The ignore files of one directory that a walk reads.
 #[derive(Debug, Clone, Copy)]
 struct DirReads {
@@ -320,21 +328,23 @@ where
     // level, the same as Git. The `ignore` crate stops `.gitignore` rules at
     // a repository but applies each parent `.ignore` file. An audit walks its
     // base snapshot in the temp dir, where these files belong to whoever can
-    // write the temp dir. The crate gets `parents(false)`, and `ParentRules`
-    // applies the files from the parent of the root up to the top level. The
-    // crate still opens all parent files, so `checked_root_reads` checks them.
-    let in_repository = has_git_entry(&scope);
-    let parent_rules = (in_repository && scope != canonical_root)
-        .then(|| parent_rules::ParentRules::load(root, &canonical_root, &scope, reads))
-        .flatten();
+    // write the temp dir. Without a `.ignore` above the top level, the crate
+    // gives exactly that. With one, the crate gets `parents(false)`. A root
+    // below the top level then also needs the rules between the root and
+    // the top level: the crate applies only the `.ignore` files of the walk,
+    // and `ParentRules` applies the other kinds with the crate precedence.
+    let ignore_above_top = reads.dot_ignore && has_git_entry(&scope) && dot_ignore_above(&scope);
+    let emulated = ignore_above_top && scope != canonical_root;
+    let parent_rules =
+        emulated.then(|| parent_rules::ParentRules::load(root, &canonical_root, &scope, reads));
     let mut builder = WalkBuilder::new(root);
     builder
         .hidden(false)
-        .parents(!in_repository)
+        .parents(!ignore_above_top)
         .ignore(reads.dot_ignore)
-        .git_ignore(reads.sources.git_ignore)
-        .git_global(reads.sources.git_global)
-        .git_exclude(reads.sources.git_exclude)
+        .git_ignore(reads.sources.git_ignore && !emulated)
+        .git_global(reads.sources.git_global && !emulated)
+        .git_exclude(reads.sources.git_exclude && !emulated)
         .filter_entry(move |entry| {
             let is_dir = entry.file_type().is_some_and(|kind| kind.is_dir());
             if entry.depth() > 0

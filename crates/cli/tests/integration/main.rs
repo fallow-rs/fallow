@@ -253,6 +253,7 @@ mod type_aware_scope_tests;
 mod typeorm_datasource_tests;
 mod unresolved_gitignored_target_tests;
 mod unused_export_config_hint_tests;
+mod walk_ignore_precedence_tests;
 mod workspace_config_patterns_tests;
 mod workspace_exclusion_tests;
 mod workspace_missing_entry_tests;
