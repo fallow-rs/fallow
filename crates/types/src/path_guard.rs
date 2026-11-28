@@ -165,9 +165,18 @@ fn step_into(
 /// the target exists, and it is not protected. A target that leaves the base
 /// and comes back through `..` is refused, so the answer does not depend on
 /// entries outside the base.
+///
+/// The walk keeps the letter case of the link target. On a file system that
+/// ignores case, `META` names the Git directory `meta`, so the protected
+/// check runs on the canonical spelling. The walk already proved that each
+/// step stays inside the base, so this resolution reads only entries there.
 fn link_target_in(canonical_base: &Path, parent: &Path, link: &Path) -> Result<PathBuf, Refusal> {
-    let target = crate::link_walk::link_target_below(canonical_base, parent, link)
+    let walked = crate::link_walk::link_target_below(canonical_base, parent, link)
         .map_err(|_| Refusal::LinkOutside)?;
+    let target = std::fs::canonicalize(walked).map_err(|_| Refusal::LinkOutside)?;
+    if !target.starts_with(canonical_base) {
+        return Err(Refusal::LinkOutside);
+    }
     match protected_kind(canonical_base, &target) {
         Some(reason) => Err(reason),
         None => Ok(target),
@@ -907,6 +916,37 @@ mod tests {
         symlink(f.root.join("meta"), f.root.join("m")).expect("link");
         let path = f.root.join("m/config");
         assert_eq!(outside_link(&f.root, &path), Some(f.root.join("m")));
+    }
+
+    /// Whether the file system of `dir` finds a name in another letter case.
+    fn ignores_case(dir: &Path) -> bool {
+        std::fs::write(dir.join("case-probe"), "").expect("probe");
+        dir.join("CASE-PROBE").exists()
+    }
+
+    /// On a file system that ignores letter case, a link target in another
+    /// case still counts as the Git directory, for a `.git` file and for a
+    /// bare repository with worktrees. The test does nothing on a file
+    /// system that keeps case apart.
+    #[test]
+    fn a_link_into_the_git_dir_in_another_letter_case_is_refused() {
+        for (git_dir, spelled) in [("meta", "META"), (".bare", ".BARE")] {
+            let f = fixture();
+            if !ignores_case(&f.root) {
+                return;
+            }
+            std::fs::create_dir_all(f.root.join(git_dir).join("cachedir")).expect("git dir");
+            std::fs::write(f.root.join(".git"), format!("gitdir: ./{git_dir}\n"))
+                .expect("git file");
+            symlink(format!("{spelled}/cachedir"), f.root.join("cachelink")).expect("link");
+            let path = f.root.join("cachelink/cache.bin");
+            assert_eq!(
+                outside_link(&f.root, &path),
+                Some(f.root.join("cachelink")),
+                "{git_dir}"
+            );
+            assert!(ensure_no_outside_link(&f.root, &path).is_err(), "{git_dir}");
+        }
     }
 
     #[test]

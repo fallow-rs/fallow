@@ -5,8 +5,15 @@
 //! `../outside/dir/../../project/file`, resolves only when `outside/dir`
 //! exists, so a check of the end alone answers differently for the same
 //! project on two machines. The walk here applies each component in turn and
-//! stops at the first step that leaves the base, so its answer depends only
-//! on entries inside the base.
+//! stops at the first step that leaves the base. Below the base, its answer
+//! depends only on entries inside the base. An absolute target first resolves
+//! each of its prefixes above the base as a whole, so a host spelling such as
+//! `/tmp` for `/private/tmp` reaches the base. A `..` before the base is
+//! reached counts as a step outside it.
+//!
+//! The walked path keeps the letter case of the link targets. A caller that
+//! compares it with a canonical path must canonicalize it first, because a
+//! file system that ignores case finds `META` for `meta`.
 
 use std::path::{Component, Path, PathBuf};
 
