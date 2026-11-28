@@ -359,7 +359,7 @@ fn evaluate(
         .collect();
     let deleted: Vec<(u32, u32)> = edits
         .iter()
-        .filter(|edit| edit.replacement.is_empty())
+        .filter(|edit| removes_its_range(edit))
         .map(|edit| {
             (
                 u32::try_from(edit.start).unwrap_or(u32::MAX),
@@ -369,6 +369,15 @@ fn evaluate(
         .collect();
     let after = apply_edits(&snapshot.content, snapshot.meta.line_ending, edits);
     before.check(path, &after, &deleted)
+}
+
+/// True when the edit removes the code of its range. The class member fixer
+/// can write an empty `;` class element in place of a removed member, so a
+/// replacement of only `;` and whitespace adds no member or declaration.
+fn removes_its_range(edit: &SourceEdit) -> bool {
+    edit.replacement
+        .bytes()
+        .all(|byte| byte == b';' || byte.is_ascii_whitespace())
 }
 
 /// Check that each export that the edits remove is unused, and that no kept
@@ -500,6 +509,20 @@ mod tests {
     use std::cell::Cell;
 
     use super::*;
+
+    #[test]
+    fn a_replacement_of_only_semicolons_removes_its_range() {
+        let edit = |replacement: &str| SourceEdit {
+            start: 0,
+            end: 1,
+            replacement: replacement.to_string(),
+        };
+        assert!(removes_its_range(&edit("")));
+        assert!(removes_its_range(&edit("  ;")));
+        assert!(removes_its_range(&edit("  ;\r\n")));
+        assert!(!removes_its_range(&edit("export ")));
+        assert!(!removes_its_range(&edit("a;")));
+    }
 
     /// Run the bisect over `count` candidates, where the candidates in `bad`
     /// fail, and return the dropped positions and the number of checks.

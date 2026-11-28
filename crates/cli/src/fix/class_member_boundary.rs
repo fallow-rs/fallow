@@ -111,8 +111,9 @@ fn next_token_start(bytes: &[u8], from: usize) -> Option<usize> {
 }
 
 /// True when the text at the next kept token can continue an expression or a
-/// type on the line before it. Other tokens (an identifier, `#`, a quote, a
-/// digit, `@`, `}`, `;`) cannot, so the line break still ends the field.
+/// type on the line before it. Other tokens (an identifier other than `in`
+/// and `instanceof`, `#`, a quote, a digit, `@`, `}`, `;`) cannot, so the
+/// line break still ends the field.
 fn starts_a_continuation(rest: &str) -> bool {
     let Some(first) = rest.bytes().next() else {
         return false;
@@ -127,18 +128,43 @@ fn starts_a_continuation(rest: &str) -> bool {
         .bytes()
         .take_while(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'$'))
         .count();
-    matches!(&rest[..word_len], "in" | "instanceof" | "as" | "satisfies")
+    // TypeScript does not continue an expression with `as` or `satisfies`
+    // after a line break, so only the operator keywords count.
+    matches!(&rest[..word_len], "in" | "instanceof")
 }
 
-/// True when the last non-whitespace byte before `start` is `;` or the `{`
-/// that opens the class body. A `}` can end a method body or an initializer
-/// such as `function () {}`, so it does not count.
+/// True when the last token before `start` is `;` or the `{` that opens the
+/// class body. A `}` can end a method body or an initializer such as
+/// `function () {}`, so it does not count. Comments are skipped. A `//` in a
+/// string can hide the real last token; the answer is then `false`, and the
+/// extra `;` that follows is still valid.
 fn previous_token_ends_element(bytes: &[u8], start: usize) -> bool {
-    bytes[..start]
-        .iter()
-        .rev()
-        .find(|byte| !byte.is_ascii_whitespace())
-        .is_some_and(|byte| matches!(byte, b';' | b'{'))
+    let mut end = start;
+    loop {
+        let text = &bytes[..end];
+        let Some(last) = text.iter().rposition(|byte| !byte.is_ascii_whitespace()) else {
+            return false;
+        };
+        if last >= 1 && text[last - 1..=last] == *b"*/" {
+            let Some(open) = text[..last - 1].windows(2).rposition(|pair| pair == b"/*") else {
+                return false;
+            };
+            end = open;
+            continue;
+        }
+        let line_start = text[..last]
+            .iter()
+            .rposition(|byte| *byte == b'\n')
+            .map_or(0, |index| index + 1);
+        if let Some(comment) = text[line_start..=last]
+            .windows(2)
+            .position(|pair| pair == b"//")
+        {
+            end = line_start + comment;
+            continue;
+        }
+        return matches!(text[last], b';' | b'{');
+    }
 }
 
 #[cfg(test)]
@@ -182,12 +208,26 @@ mod tests {
     }
 
     #[test]
-    fn treats_an_operator_word_as_a_continuation() {
+    fn treats_only_an_operator_keyword_as_a_continuation() {
         assert!(starts_a_continuation("in(): void {}"));
         assert!(starts_a_continuation("instanceof(): void {}"));
         assert!(!starts_a_continuation("inner(): void {}"));
+        assert!(!starts_a_continuation("as(): void {}"));
+        assert!(!starts_a_continuation("satisfies(): void {}"));
         assert!(!starts_a_continuation("#secret = 1"));
         assert!(!starts_a_continuation("}"));
+    }
+
+    /// A `{` or `;` inside a comment does not end the field before it.
+    #[test]
+    fn reads_the_previous_token_outside_comments() {
+        let ends = |before: &str| previous_token_ends_element(before.as_bytes(), before.len());
+        assert!(!ends("class A {\n  v = 1 // see {\n"));
+        assert!(!ends("class A {\n  v = 1 /* x; */\n"));
+        assert!(!ends("class A {\n  v = 1 /* a */ /* b; */\n"));
+        assert!(ends("class A {\n  v = 1; // note\n"));
+        assert!(ends("class A {\n  v = 1; /* note */\n"));
+        assert!(ends("class A { // body\n"));
     }
 
     #[test]

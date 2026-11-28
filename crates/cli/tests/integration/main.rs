@@ -117,6 +117,7 @@ mod feedback_tests;
 mod file_lines_tests;
 mod finding_id_filter_tests;
 mod finding_id_tests;
+mod fix_class_member_boundary_tests;
 mod fix_export_list_import_tests;
 mod fix_generated_file_tests;
 mod fix_incomplete_analysis_hint_tests;
