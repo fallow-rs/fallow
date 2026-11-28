@@ -299,8 +299,19 @@ pub fn load_rule_packs(
     let mut errors = Vec::new();
     let canonical_root = dunce::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
 
+    let mut seen_paths: FxHashSet<PathBuf> = FxHashSet::default();
+    let mut repeated_paths: FxHashSet<PathBuf> = FxHashSet::default();
     for path_str in pack_paths {
-        load_one_rule_pack(root, path_str, &canonical_root, &mut packs, &mut errors);
+        let path = root.join(path_str);
+        let key = dunce::canonicalize(&path).unwrap_or_else(|_| path.clone());
+        if seen_paths.insert(key.clone()) {
+            load_one_rule_pack(root, path_str, &canonical_root, &mut packs, &mut errors);
+        } else if repeated_paths.insert(key) {
+            errors.push(RulePackError {
+                path,
+                message: "rule pack is listed more than once in `rulePacks`".to_owned(),
+            });
+        }
     }
 
     push_duplicate_pack_name_errors(root, &packs, &mut errors);
@@ -342,6 +353,43 @@ fn expanded_zone_names(mut boundaries: BoundaryConfig, root: &Path) -> Vec<Strin
     boundaries.zones.into_iter().map(|zone| zone.name).collect()
 }
 
+/// The most `unknown zone` errors that one rule gets. One more error gives
+/// the count of the other unknown zones.
+const MAX_UNKNOWN_ZONE_ERRORS: usize = 10;
+
+/// The most bytes of zone names that an `unknown zone` error lists.
+const MAX_ZONE_LIST_BYTES: usize = 512;
+
+/// The sorted names of the configured zones for an error message, with at
+/// most [`MAX_ZONE_LIST_BYTES`] of names and the count of the others.
+fn configured_zone_list(configured_zones: &FxHashSet<&str>) -> String {
+    if configured_zones.is_empty() {
+        return "none".to_owned();
+    }
+    let mut zones: Vec<&str> = configured_zones.iter().copied().collect();
+    zones.sort_unstable();
+    let mut list = String::new();
+    for (index, zone) in zones.iter().enumerate() {
+        if index > 0 && list.len() + zone.len() > MAX_ZONE_LIST_BYTES {
+            list.push_str(" and ");
+            list.push_str(&(zones.len() - index).to_string());
+            list.push_str(" more");
+            break;
+        }
+        if index > 0 {
+            list.push_str(", ");
+        }
+        if zone.len() > MAX_ZONE_LIST_BYTES {
+            let end = zone.floor_char_boundary(MAX_ZONE_LIST_BYTES);
+            list.push_str(&zone[..end]);
+            list.push_str("...");
+        } else {
+            list.push_str(zone);
+        }
+    }
+    list
+}
+
 fn zone_reference_errors(
     root: &Path,
     pack_paths: &[String],
@@ -349,13 +397,7 @@ fn zone_reference_errors(
     zone_names: &[String],
 ) -> Vec<RulePackError> {
     let configured_zones: FxHashSet<&str> = zone_names.iter().map(String::as_str).collect();
-    let configured_zone_list = if configured_zones.is_empty() {
-        "none".to_owned()
-    } else {
-        let mut zones: Vec<&str> = configured_zones.iter().copied().collect();
-        zones.sort_unstable();
-        zones.join(", ")
-    };
+    let configured_zone_list = configured_zone_list(&configured_zones);
 
     let mut errors = Vec::new();
     for (pack_index, pack) in packs.iter().enumerate() {
@@ -376,16 +418,31 @@ fn zone_reference_errors(
                 });
                 continue;
             }
+            let mut unknown: Vec<&str> = Vec::new();
+            let mut seen_unknown: FxHashSet<&str> = FxHashSet::default();
             for zone in &rule.zones {
-                if !configured_zones.contains(zone.as_str()) {
-                    errors.push(RulePackError {
-                        path: path.clone(),
-                        message: format!(
-                            "rule '{}': unknown zone '{}' in `zones`; configured zones: {}",
-                            rule.id, zone, configured_zone_list
-                        ),
-                    });
+                if !configured_zones.contains(zone.as_str()) && seen_unknown.insert(zone) {
+                    unknown.push(zone);
                 }
+            }
+            for zone in unknown.iter().take(MAX_UNKNOWN_ZONE_ERRORS) {
+                errors.push(RulePackError {
+                    path: path.clone(),
+                    message: format!(
+                        "rule '{}': unknown zone '{}' in `zones`; configured zones: {}",
+                        rule.id, zone, configured_zone_list
+                    ),
+                });
+            }
+            if unknown.len() > MAX_UNKNOWN_ZONE_ERRORS {
+                errors.push(RulePackError {
+                    path: path.clone(),
+                    message: format!(
+                        "rule '{}': {} more unknown zones in `zones`",
+                        rule.id,
+                        unknown.len() - MAX_UNKNOWN_ZONE_ERRORS
+                    ),
+                });
             }
         }
     }
@@ -1557,3 +1614,7 @@ mod tests {
         assert_eq!(pack.version, 1);
     }
 }
+
+#[cfg(test)]
+#[path = "rule_pack_budget_tests.rs"]
+mod budget_tests;
