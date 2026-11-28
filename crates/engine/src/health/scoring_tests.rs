@@ -3452,6 +3452,56 @@ fn load_istanbul_coverage_resolves_relative_path_against_project_root() {
     );
 }
 
+/// A recorded path with `..` matches the source file whether or not the
+/// directory before the `..` exists, with and without a coverage root.
+#[test]
+fn load_istanbul_coverage_applies_parent_steps_before_the_lookup() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let project = temp.path().join("project");
+    let source_path = project.join("src/index.ts");
+    std::fs::create_dir_all(source_path.parent().unwrap()).unwrap();
+    std::fs::write(&source_path, "export function f(){}").unwrap();
+    let fn_map = serde_json::json!({
+        "0": {
+            "name": "f",
+            "decl": { "start": { "line": 1, "column": 0 }, "end": { "line": 1, "column": 21 } },
+            "loc":  { "start": { "line": 1, "column": 0 }, "end": { "line": 1, "column": 21 } }
+        }
+    });
+    let canonical_source = dunce::canonicalize(&source_path).unwrap();
+    let coverage_path = temp.path().join("coverage-final.json");
+
+    let recorded = temp.path().join("missing-dir/../project/src/index.ts");
+    write_single_file_istanbul_fixture(
+        &coverage_path,
+        &recorded,
+        &fn_map,
+        &serde_json::json!({ "0": 1 }),
+    );
+    let coverage = load_istanbul_coverage(&coverage_path, None, Some(&project), false).unwrap();
+    assert!(
+        coverage.get(&canonical_source).is_some(),
+        "{:?}",
+        coverage.files.keys()
+    );
+
+    let build = temp.path().join("build");
+    let recorded = build.join("other/../src/index.ts");
+    write_single_file_istanbul_fixture(
+        &coverage_path,
+        &recorded,
+        &fn_map,
+        &serde_json::json!({ "0": 1 }),
+    );
+    let coverage =
+        load_istanbul_coverage(&coverage_path, Some(&build), Some(&project), false).unwrap();
+    assert!(
+        coverage.get(&canonical_source).is_some(),
+        "{:?}",
+        coverage.files.keys()
+    );
+}
+
 #[test]
 fn load_istanbul_coverage_falls_back_to_decl_line_for_missing_fn_line() {
     let temp = tempfile::TempDir::new().unwrap();

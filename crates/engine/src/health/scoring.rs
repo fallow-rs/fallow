@@ -1753,11 +1753,11 @@ fn build_istanbul_coverage(
     } = *sources;
     let mut files = rustc_hash::FxHashMap::default();
     for file_cov in raw.values() {
-        // A producer may record project-relative keys. They are relative to
-        // the project, not to wherever the process happens to run, and
-        // resolving them against the current directory fails the whole map at
-        // once with every unit silently falling back to its estimate.
-        let raw_path = resolve_relative_to_root(std::path::Path::new(&file_cov.path), project_root);
+        // Project-relative keys resolve against the project, not the process
+        // directory, or the whole map misses. A `..` applies by text, because
+        // the file system applies it only when the directory before it exists.
+        let joined = resolve_relative_to_root(std::path::Path::new(&file_cov.path), project_root);
+        let raw_path = fallow_types::path_guard::lexically_normalized(&joined);
         let file_path = if let (Some(cov_root), Some(proj_root)) = (coverage_root, project_root) {
             rebase_coverage_path(raw_path, cov_root, proj_root)
         } else {
