@@ -1840,7 +1840,7 @@ fn legacy_in_repo_store_is_shown_on_load_and_saved_on_first_write() {
     std::fs::write(legacy_store_path(root), legacy).unwrap();
 
     let store = load(root);
-    assert!(store.enabled);
+    assert!(!store.enabled, "the opt-in does not import");
     assert_eq!(store.schema_version, STORE_SCHEMA_VERSION);
     assert_eq!(store.records.len(), 1);
     assert_eq!(store.resolved_total, 2);
@@ -2253,8 +2253,6 @@ fn legacy_into_store_with_empty_frontiers_does_not_insert_worktree_key() {
     // When a legacy store has no frontier or clone_frontier entries, the
     // resulting v4 store must not insert empty sub-maps for the worktree key.
     let legacy = LegacyFlatStore {
-        enabled: true,
-        explicit_decision: true,
         first_recorded: Some("t0".to_owned()),
         records: vec![],
         project_records: vec![],
@@ -2265,8 +2263,6 @@ fn legacy_into_store_with_empty_frontiers_does_not_insert_worktree_key() {
         resolved_total: 0,
         suppressed_total: 0,
         recent_resolved: vec![],
-        onboarding_declined: false,
-        last_digest_epoch: None,
     };
     let store = legacy.into_store("wt-key");
     assert!(
@@ -3177,6 +3173,76 @@ fn legacy_store_link_out_of_the_root_is_not_read() {
     assert!(!load_statusline(&root).is_ok_and(|store| store.enabled));
 }
 
+const LEGACY_STORE_WITH_DECISIONS: &str = r#"{"schema_version":3,"enabled":true,
+        "onboarding_declined":true,"explicit_decision":true,"last_digest_epoch":4102444800,
+        "records":[{"timestamp":"t0","version":"2.0.0","verdict":"warn",
+        "counts":{"total_issues":1,"dead_code":1,"complexity":0,"duplication":0}}],
+        "resolved_total":3,"suppressed_total":1}"#;
+
+/// The legacy store is a file in the checkout. Its counters import, but the
+/// opt-in and the other user decisions stay unset until the user makes them.
+#[test]
+#[cfg_attr(miri, ignore)]
+fn legacy_store_imports_counters_but_not_decisions() {
+    let (_config, dir) = test_env();
+    let root = dir.path();
+    std::fs::create_dir_all(root.join(".fallow")).unwrap();
+    std::fs::write(legacy_store_path(root), LEGACY_STORE_WITH_DECISIONS).unwrap();
+
+    let assert_imported = |store: &ImpactStore| {
+        assert!(!store.enabled);
+        assert!(!store.onboarding_declined);
+        assert!(!store.explicit_decision);
+        assert_eq!(store.last_digest_epoch, None);
+        assert_eq!(store.records.len(), 1);
+        assert_eq!(store.resolved_total, 3);
+        assert_eq!(store.suppressed_total, 1);
+    };
+    assert_imported(&load(root));
+    assert_imported(&load_statusline(root).expect("legacy statusline store reads"));
+    assert!(!build_report(&load(root)).enabled);
+
+    decline_onboarding(root).unwrap();
+    assert!(store_path(root).unwrap().exists());
+    let saved = load(root);
+    assert!(!saved.enabled);
+    assert!(!saved.explicit_decision);
+    assert_eq!(saved.last_digest_epoch, None);
+    assert_eq!(saved.records.len(), 1);
+    assert_eq!(saved.resolved_total, 3);
+}
+
+/// A legacy store that Git tracks came with the checkout, not from an earlier
+/// local run, so no part of it imports.
+#[test]
+#[cfg_attr(miri, ignore)]
+fn legacy_store_tracked_by_git_is_not_imported() {
+    use fallow_engine::git_fixture::fixture_git;
+    let (_config, dir) = test_env();
+    let root = dir.path();
+    fixture_git(root, &["init", "-q"]);
+    std::fs::create_dir_all(root.join(".fallow")).unwrap();
+    std::fs::write(legacy_store_path(root), LEGACY_STORE_WITH_DECISIONS).unwrap();
+    assert_eq!(
+        load(root).records.len(),
+        1,
+        "an untracked legacy store imports"
+    );
+    fixture_git(root, &["add", "--", ".fallow/impact.json"]);
+
+    let store = load(root);
+    assert!(store.records.is_empty());
+    assert_eq!(store.resolved_total, 0);
+    assert!(load_statusline(root).is_ok_and(|store| store.records.is_empty()));
+
+    decline_onboarding(root).unwrap();
+    assert!(
+        !migration_marker_path(&store_path(root).unwrap()).exists(),
+        "a skipped legacy store is not marked as imported"
+    );
+    assert!(load(root).records.is_empty());
+}
+
 #[test]
 #[cfg_attr(miri, ignore)]
 fn statusline_loader_reads_legacy_store_without_migrating_it() {
@@ -3205,7 +3271,7 @@ fn statusline_loader_reads_legacy_store_without_migrating_it() {
     let user_store = store_path(root).unwrap();
     assert!(!user_store.exists());
     let store = load_statusline(root).expect("legacy statusline store reads");
-    assert!(store.enabled);
+    assert!(!store.enabled);
     assert_eq!(store.records.len(), 1);
     assert!(
         !user_store.exists(),

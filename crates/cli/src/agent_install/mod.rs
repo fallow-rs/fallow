@@ -23,6 +23,7 @@ use serde::Serialize;
 use crate::exit_codes::exit_invalid_input;
 pub use crate::setup_hooks::Mode;
 
+pub use mcp::git_tracks_any;
 pub use status::run_agent_status;
 
 /// Marker grammar version. Bump when the marker format changes so `status`

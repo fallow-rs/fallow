@@ -228,10 +228,12 @@ pub struct ImpactStore {
 /// `frontier` / `clone_frontier` were FLAT (not worktree-namespaced). Used once
 /// during migration to import a legacy `.fallow/impact.json` into the user
 /// store. Every field carries `#[serde(default)]` so any of v1/v2/v3 reads.
+///
+/// The view keeps the counters and the history only. The opt-in, the
+/// onboarding answer and the digest cadence are user decisions, and a file in
+/// the checkout cannot make them, so the import leaves them unset.
 #[derive(Debug, Default, Deserialize)]
 struct LegacyFlatStore {
-    #[serde(default)]
-    enabled: bool,
     #[serde(default)]
     first_recorded: Option<String>,
     #[serde(default)]
@@ -252,12 +254,6 @@ struct LegacyFlatStore {
     suppressed_total: usize,
     #[serde(default)]
     recent_resolved: Vec<ResolutionEvent>,
-    #[serde(default)]
-    onboarding_declined: bool,
-    #[serde(default)]
-    explicit_decision: bool,
-    #[serde(default)]
-    last_digest_epoch: Option<u64>,
 }
 
 impl LegacyFlatStore {
@@ -274,7 +270,7 @@ impl LegacyFlatStore {
         }
         ImpactStore {
             schema_version: STORE_SCHEMA_VERSION,
-            enabled: self.enabled,
+            enabled: false,
             first_recorded: self.first_recorded,
             records: self.records,
             project_records: self.project_records,
@@ -297,9 +293,9 @@ impl LegacyFlatStore {
                     worktree: Some(worktree_key.to_owned()),
                 })
                 .collect(),
-            onboarding_declined: self.onboarding_declined,
-            explicit_decision: self.explicit_decision,
-            last_digest_epoch: self.last_digest_epoch,
+            onboarding_declined: false,
+            explicit_decision: false,
+            last_digest_epoch: None,
             // Legacy stores carry no label; the next recorded run backfills it.
             label: None,
             analysis_identity: fallow_types::semantic::SemanticAnalysisIdentity::default(),
