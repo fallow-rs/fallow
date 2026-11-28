@@ -131,6 +131,20 @@ fn accepted_mdx_source(source: &str) -> (MdxScan<'_>, ExtractionResult) {
     (scan, extraction)
 }
 
+/// Most parser probes for one statement block. A block that has no complete
+/// statement after this many probes takes lines until the next top-level
+/// statement, and the final check of the block then classifies it.
+const MAX_STATEMENT_PROBES: usize = 256;
+
+#[cfg(test)]
+thread_local! {
+    static PROBE_BYTES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(all(test, not(miri)))]
+#[path = "mdx_probe_tests.rs"]
+mod probe_tests;
+
 #[derive(Default)]
 struct MdxStatementScanner<'a> {
     blocks: Vec<StatementBlock<'a>>,
@@ -138,6 +152,8 @@ struct MdxStatementScanner<'a> {
     code_lines: Vec<&'a str>,
     collecting_statement: bool,
     boundary: StatementBoundary,
+    /// Parser probes of the current block, see [`MAX_STATEMENT_PROBES`].
+    probes: usize,
     code_fence: Option<CodeFence>,
 }
 
@@ -202,6 +218,7 @@ impl<'a> MdxStatementScanner<'a> {
         self.blocks.push(vec![(line_start, line)]);
         self.boundary = StatementBoundary::default();
         self.boundary.push(line);
+        self.probes = 0;
         self.collecting_statement =
             !self.boundary.may_complete() || !parses_as_typescript(statement);
     }
@@ -212,7 +229,11 @@ impl<'a> MdxStatementScanner<'a> {
             self.boundary.push(line);
             // Whitespace cannot complete a rejected prefix, including in the
             // parser fallback for JSX and regex literals.
-            if !line.trim().is_empty() && self.boundary.may_complete() {
+            if !line.trim().is_empty()
+                && self.boundary.may_complete()
+                && self.probes < MAX_STATEMENT_PROBES
+            {
+                self.probes += 1;
                 self.collecting_statement = !statement_block_is_accepted(block);
             }
         }
@@ -594,6 +615,8 @@ fn statement_block_is_accepted(block: &[(usize, &str)]) -> bool {
     for &(_, line) in block {
         body.push_str(line);
     }
+    #[cfg(test)]
+    PROBE_BYTES.with(|bytes| bytes.set(bytes.get() + body.len()));
     parses_as_typescript(&body)
 }
 
