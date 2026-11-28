@@ -19,7 +19,7 @@
 
 use std::borrow::Cow;
 use std::fmt;
-use std::path::{Component, Path};
+use std::path::{Component, Path, PathBuf};
 
 use globset::{Glob, GlobBuilder, GlobMatcher};
 
@@ -768,10 +768,35 @@ pub fn disk_glob_pattern(pattern: &str) -> Cow<'_, str> {
     clippy::disallowed_methods,
     reason = "the one wrapper that calls glob::glob, after the root escape and the dot rewrite"
 )]
-pub fn expand_disk_glob(root: &Path, pattern: &str) -> Option<glob::Paths> {
+pub fn expand_disk_glob(
+    root: &Path,
+    pattern: &str,
+) -> Option<impl Iterator<Item = glob::GlobResult> + use<>> {
     let pattern = pattern_below_root(pattern)?;
+    if pattern.split(['/', '\\']).any(|segment| segment == "**") {
+        let matches = disk_walk::walk_recursive_glob(root, &pattern)?;
+        return Some(DiskGlobPaths::Walk(matches.into_iter()));
+    }
     let full = format!("{}/{}", escaped_root(root), disk_glob_pattern(&pattern));
-    glob::glob(&full).ok()
+    glob::glob(&full).ok().map(DiskGlobPaths::Glob)
+}
+
+/// The matches of [`expand_disk_glob`]: from the `glob` crate, or from the
+/// bounded walk for a pattern with a `**` segment.
+enum DiskGlobPaths {
+    Glob(glob::Paths),
+    Walk(std::vec::IntoIter<PathBuf>),
+}
+
+impl Iterator for DiskGlobPaths {
+    type Item = glob::GlobResult;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            Self::Glob(paths) => paths.next(),
+            Self::Walk(paths) => paths.next().map(Ok),
+        }
+    }
 }
 
 /// `pattern` with each `..` segment applied to the literal segment before
@@ -867,6 +892,9 @@ pub fn validate_user_paths(
         }
     }
 }
+
+#[path = "disk_glob_walk.rs"]
+mod disk_walk;
 
 #[cfg(test)]
 mod tests {
@@ -1522,3 +1550,7 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "disk_glob_walk_tests.rs"]
+mod disk_walk_tests;
