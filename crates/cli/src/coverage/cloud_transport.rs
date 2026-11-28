@@ -45,6 +45,11 @@ pub const AGENT_SOURCE_HEADER: &str = "x-fallow-agent-source";
 const MAX_WIRE_BODY_BYTES: u64 = 64 * 1024 * 1024;
 /// Upper limit on the bytes of a response body after gzip decoding.
 const MAX_DECODED_BODY_BYTES: u64 = 256 * 1024 * 1024;
+/// Upper limit on the JSON values in one response body. A parse into
+/// `serde_json::Value` uses about 190 bytes per value, so a small body of many
+/// tiny values would otherwise fill the memory. A real answer is paged and
+/// holds far fewer values.
+const MAX_JSON_VALUES: usize = 2_000_000;
 /// Number of attempts for a status that [`is_retryable_status`] accepts.
 const MAX_ATTEMPTS: u8 = 2;
 /// Upper limit on the delay before the second attempt.
@@ -322,22 +327,62 @@ fn header_value(response: &ureq::http::Response<ureq::Body>, name: &str) -> Opti
         .map(str::to_owned)
 }
 
-/// Decode a response body. A gzip body is decoded with an upper size limit, so
-/// a malformed or hostile answer cannot fill the memory.
+/// Decode a response body. A gzip body is decoded with an upper size limit,
+/// and a body with more than [`MAX_JSON_VALUES`] JSON values is refused, so a
+/// malformed or hostile answer cannot fill the memory.
 fn decode_body(bytes: &[u8], gzip: bool, operation: &str) -> Result<String, CloudError> {
-    if !gzip {
-        return String::from_utf8(bytes.to_vec()).map_err(|err| {
+    let decoded = if gzip {
+        let mut decoded = String::new();
+        GzDecoder::new(bytes)
+            .take(MAX_DECODED_BODY_BYTES)
+            .read_to_string(&mut decoded)
+            .map_err(|err| {
+                CloudError::Server(format!("{operation} response has a bad gzip body: {err}"))
+            })?;
+        decoded
+    } else {
+        String::from_utf8(bytes.to_vec()).map_err(|err| {
             CloudError::Server(format!("{operation} response is not UTF-8: {err}"))
-        });
+        })?
+    };
+    if json_value_count_exceeds(&decoded, MAX_JSON_VALUES) {
+        return Err(CloudError::Server(format!(
+            "{operation} response has more than {MAX_JSON_VALUES} JSON values"
+        )));
     }
-    let mut decoded = String::new();
-    GzDecoder::new(bytes)
-        .take(MAX_DECODED_BODY_BYTES)
-        .read_to_string(&mut decoded)
-        .map_err(|err| {
-            CloudError::Server(format!("{operation} response has a bad gzip body: {err}"))
-        })?;
     Ok(decoded)
+}
+
+/// Whether `text` has more than `max` JSON values. The count is an upper
+/// bound: each value except the first follows a `[`, `{`, `,` or `:` outside
+/// a string. Text that is not JSON gets a count too, and the caller reports
+/// its parse error.
+fn json_value_count_exceeds(text: &str, max: usize) -> bool {
+    let mut count = 1usize;
+    let mut in_string = false;
+    let mut escaped = false;
+    for byte in text.bytes() {
+        if in_string {
+            match byte {
+                _ if escaped => escaped = false,
+                b'\\' => escaped = true,
+                b'"' => in_string = false,
+                _ => {}
+            }
+            continue;
+        }
+        match byte {
+            b'"' => in_string = true,
+            b'[' | b'{' | b',' | b':' => {
+                count += 1;
+                if count > max {
+                    return true;
+                }
+            }
+            _ => {}
+        }
+    }
+    false
 }
 
 /// Classify a transport error as a timeout, an interrupted call or a network
@@ -650,5 +695,36 @@ mod tests {
             decode_body(b"not gzip", true, "test"),
             Err(CloudError::Server(_))
         ));
+    }
+
+    #[test]
+    fn decode_body_refuses_an_answer_with_too_many_json_values() {
+        use flate2::Compression;
+        use flate2::write::GzEncoder;
+        use std::io::Write;
+
+        // Each `[0]` item is two JSON values in 4 bytes of text. A parse
+        // into `serde_json::Value` needs about 190 bytes per value.
+        let items = MAX_JSON_VALUES / 2 + 1;
+        let mut text = String::with_capacity(items * 4 + 10);
+        text.push_str("{\"data\":[");
+        text.push_str(&"[0],".repeat(items));
+        text.push_str("[0]]}");
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::fast());
+        encoder.write_all(text.as_bytes()).expect("write gzip");
+        let compressed = encoder.finish().expect("finish gzip");
+
+        for (bytes, gzip) in [(text.as_bytes(), false), (compressed.as_slice(), true)] {
+            let Err(CloudError::Server(message)) = decode_body(bytes, gzip, "test") else {
+                panic!("an answer with too many JSON values must be refused");
+            };
+            assert!(message.contains("JSON values"), "{message}");
+        }
+
+        let strings = format!("[\"{}\",\"[0],[0]\"]", "[0],".repeat(items));
+        assert_eq!(
+            decode_body(strings.as_bytes(), false, "test").expect("strings count once"),
+            strings
+        );
     }
 }
