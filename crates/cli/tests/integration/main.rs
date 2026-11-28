@@ -41,6 +41,7 @@ mod audit_quiet_tests;
 mod audit_review_attribution_tests;
 mod audit_scope_line_tests;
 mod audit_shallow_clone_tests;
+mod audit_snapshot_lookup_tests;
 mod audit_staged_tests;
 mod audit_test_file_gate_tests;
 mod audit_test_reach_tests;

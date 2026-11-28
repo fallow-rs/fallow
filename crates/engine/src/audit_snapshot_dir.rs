@@ -8,11 +8,6 @@
 
 use std::path::{Path, PathBuf};
 
-/// The name prefix of the private snapshot directory. The effective user id
-/// follows it, so users that share a temp dir each have their own directory.
-#[cfg(unix)]
-const PRIVATE_DIR_PREFIX: &str = "fallow-audit-snapshots-";
-
 /// The directory for the audit snapshots of this user. This function does
 /// not create or check the directory: use [`ensure_audit_snapshot_dir`]
 /// before a snapshot is written.
@@ -21,12 +16,11 @@ pub fn audit_snapshot_dir() -> PathBuf {
     audit_snapshot_dir_in(&std::env::temp_dir())
 }
 
+/// The name carries the effective user id, so users that share a temp dir
+/// each have their own directory.
 #[cfg(unix)]
 fn audit_snapshot_dir_in(temp: &Path) -> PathBuf {
-    temp.join(format!(
-        "{PRIVATE_DIR_PREFIX}{}",
-        rustix::process::geteuid().as_raw()
-    ))
+    temp.join(fallow_types::audit_snapshot::snapshot_dir_name())
 }
 
 #[cfg(not(unix))]

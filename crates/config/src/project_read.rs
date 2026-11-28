@@ -133,8 +133,7 @@ fn uncached_scope_base(root: &Path) -> PathBuf {
 /// the owner of the root owns, gives `None` too (see
 /// [`fallow_types::read_scope`]).
 pub fn project_checkout_top(root: &Path) -> Option<&Path> {
-    let top = root
-        .ancestors()
+    let top = fallow_types::audit_snapshot::lookup_ancestors(root)
         .take_while(|dir| test_ceiling::allows(dir))
         .find(|dir| dir.join(".git").symlink_metadata().is_ok())?;
     (top == root
@@ -147,7 +146,7 @@ pub fn project_checkout_top(root: &Path) -> Option<&Path> {
 /// system root. A workspace root that all users can write, or that neither
 /// the current user nor the owner of the root owns, does not count.
 fn workspace_root_above(root: &Path) -> Option<PathBuf> {
-    root.ancestors()
+    fallow_types::audit_snapshot::lookup_ancestors(root)
         .skip(1)
         .take_while(|dir| !is_home_or_above(dir) && test_ceiling::allows(dir))
         .find(|dir| {

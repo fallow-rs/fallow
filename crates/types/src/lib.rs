@@ -20,6 +20,8 @@
 pub mod atomic_file;
 /// Typed audit cache-key inputs.
 pub mod audit_cache;
+/// The base snapshots of `fallow audit` and the lookups above a project.
+pub mod audit_snapshot;
 /// Why a persisted cache was refused, shared by the extraction cache, the
 /// graph cache, the perf table, and `fallow doctor`.
 pub mod cache_rejection;

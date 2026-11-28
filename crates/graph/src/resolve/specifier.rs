@@ -55,11 +55,10 @@ pub(super) fn create_resolver(
     active_plugins: &[String],
     extra_conditions: &[String],
 ) -> Resolver {
-    Resolver::new(build_resolve_options(
+    crate::read_trace::resolver_for_root(
         root,
-        active_plugins,
-        extra_conditions,
-    ))
+        build_resolve_options(root, active_plugins, extra_conditions),
+    )
 }
 
 /// Derive script extension inference while sharing filesystem and PnP caches.
@@ -163,7 +162,7 @@ const YARN_PNP_MANIFEST: &str = ".pnp.cjs";
 /// packages/app`, an editor workspace folder) still finds it. A directory
 /// named like the manifest is not an install, hence `is_file`.
 fn find_yarn_pnp_manifest_dir(root: &Path) -> Option<PathBuf> {
-    root.ancestors()
+    fallow_types::audit_snapshot::lookup_ancestors(root)
         .find(|dir| dir.join(YARN_PNP_MANIFEST).traced_is_file())
         .map(Path::to_path_buf)
 }

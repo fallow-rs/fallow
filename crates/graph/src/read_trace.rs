@@ -154,17 +154,38 @@ pub(crate) fn realpath_calls() -> u64 {
     REALPATH_CALLS.with(std::cell::Cell::get)
 }
 
+/// The resolver of a project at `root`. For a root in an audit snapshot, the
+/// resolver finds no `node_modules`, `package.json`, `tsconfig.json` or Yarn
+/// PnP file above the snapshot root (see [`fallow_types::audit_snapshot`]).
+pub(crate) fn resolver_for_root(root: &Path, options: oxc_resolver::ResolveOptions) -> Resolver {
+    let ceiling = fallow_types::audit_snapshot::snapshot_root(root).map(Path::to_path_buf);
+    let fs = ProbeFs(FileSystemOs::new(options.yarn_pnp), ceiling);
+    Resolver::new_with_file_system(fs, options)
+}
+
 /// The operating system file system of the resolver. Each call that finds
 /// no path reports it as a missed probe, and each call goes to the read
-/// trace.
-pub(crate) struct ProbeFs(FileSystemOs);
+/// trace. With a snapshot root, a lookup above that root finds nothing.
+pub(crate) struct ProbeFs(FileSystemOs, Option<PathBuf>);
+
+impl ProbeFs {
+    fn refuse(&self, path: &Path) -> io::Result<()> {
+        match &self.1 {
+            Some(ceiling) if fallow_types::audit_snapshot::is_lookup_above(ceiling, path) => {
+                Err(io::Error::from(io::ErrorKind::NotFound))
+            }
+            _ => Ok(()),
+        }
+    }
+}
 
 impl FileSystem for ProbeFs {
     fn new(yarn_pnp: bool) -> Self {
-        Self(FileSystemOs::new(yarn_pnp))
+        Self(FileSystemOs::new(yarn_pnp), None)
     }
 
     fn read(&self, path: &Path) -> io::Result<Vec<u8>> {
+        self.refuse(path)?;
         let result = self.0.read(path);
         missed_probes::note_read(path, &result);
         note(path, content_kind(result.is_ok()));
@@ -172,6 +193,7 @@ impl FileSystem for ProbeFs {
     }
 
     fn read_to_string(&self, path: &Path) -> io::Result<String> {
+        self.refuse(path)?;
         let result = self.0.read_to_string(path);
         missed_probes::note_read(path, &result);
         note(path, content_kind(result.is_ok()));
@@ -180,6 +202,7 @@ impl FileSystem for ProbeFs {
 
     fn metadata(&self, path: &Path) -> io::Result<FileMetadata> {
         note(path, ReadKind::File);
+        self.refuse(path)?;
         let result = self.0.metadata(path);
         missed_probes::note_if_missing(path, &result);
         result
@@ -187,6 +210,7 @@ impl FileSystem for ProbeFs {
 
     fn symlink_metadata(&self, path: &Path) -> io::Result<FileMetadata> {
         note(path, ReadKind::File);
+        self.refuse(path)?;
         let result = self.0.symlink_metadata(path);
         missed_probes::note_if_missing(path, &result);
         result
@@ -199,6 +223,7 @@ impl FileSystem for ProbeFs {
 
     fn canonicalize(&self, path: &Path) -> io::Result<PathBuf> {
         note(path, ReadKind::File);
+        self.refuse(path)?;
         let result = self.0.canonicalize(path);
         missed_probes::note_if_missing(path, &result);
         result

@@ -1329,8 +1329,7 @@ fn facts(module: &ModuleInfo) -> Option<&FunctionContractFacts> {
 /// a `link:` or `file:` dependency, from the nearest `node_modules` above
 /// `from`.
 fn linked_package_dir(from: &Path, package: &str) -> Option<PathBuf> {
-    let installed = from
-        .ancestors()
+    let installed = fallow_types::audit_snapshot::lookup_ancestors(from)
         .skip(1)
         .map(|dir| dir.join("node_modules").join(package))
         .find(|candidate| candidate.exists())?;

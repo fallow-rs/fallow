@@ -119,7 +119,7 @@ fn owner_dir(manifest: &str) -> &str {
 /// workspace keeps one lockfile at the repository root and can install a
 /// package into the `node_modules` of a workspace package.
 fn has_bun_lockfile(dir: &Path) -> bool {
-    dir.ancestors()
+    fallow_types::audit_snapshot::lookup_ancestors(dir)
         .any(|dir| BUN_LOCKFILES.iter().any(|name| dir.join(name).is_file()))
 }
 

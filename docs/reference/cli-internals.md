@@ -1487,6 +1487,14 @@ Shared invariants (`crates/cli/src/base_worktree.rs`):
   root's cache counts as that root's own entry.
 - The `.sha` and `.last-used` sidecars are read only when they are regular
   files of the effective user (`sidecar_metadata_is_trusted`).
+- An analysis of a snapshot reads nothing above the snapshot root.
+  `fallow_types::audit_snapshot::snapshot_root` finds the root by its
+  location: a `fallow-audit-base-*` directory in the snapshot directory.
+  The upward lookups use `lookup_ancestors`, and the resolver file system
+  (`resolver_for_root` in `crates/graph/src/read_trace.rs`) finds no lookup
+  name above the root. The source walk applies no ignore file above the
+  repository top level, which the `.git` stub of the snapshot marks
+  (`crates/config/src/ignore_parent_rules.rs`).
 
 - Both prune modes and the per-audit sweep share one decision code path
   (`sweep_reusable_caches_with_report`), so prune can never drift from what

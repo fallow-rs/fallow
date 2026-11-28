@@ -175,7 +175,7 @@ fn node_modules_states(root: &Path, workspaces: &[WorkspaceInfo]) -> Vec<(String
 fn bun_install_listings(root: &Path, workspaces: &[WorkspaceInfo]) -> Vec<(String, Vec<String>)> {
     let dirs: FxHashSet<&Path> = std::iter::once(root)
         .chain(workspaces.iter().map(|ws| ws.root.as_path()))
-        .chain(root.ancestors().skip(1))
+        .chain(fallow_types::audit_snapshot::lookup_ancestors(root).skip(1))
         .collect();
     dirs.into_iter()
         .filter(|dir| BUN_LOCKFILES.iter().any(|name| dir.join(name).is_file()))
@@ -198,7 +198,7 @@ fn bun_install_listings(root: &Path, workspaces: &[WorkspaceInfo]) -> Vec<(Strin
 fn deno_store_listings(root: &Path, workspaces: &[WorkspaceInfo]) -> Vec<(String, Vec<String>)> {
     let dirs: FxHashSet<&Path> = std::iter::once(root)
         .chain(workspaces.iter().map(|ws| ws.root.as_path()))
-        .chain(root.ancestors().skip(1))
+        .chain(fallow_types::audit_snapshot::lookup_ancestors(root).skip(1))
         .collect();
     dirs.into_iter()
         .filter_map(|dir| {
@@ -347,7 +347,7 @@ fn collect_input_files(
 
     // The resolver also reads `node_modules` above the root, for example in a
     // monorepo where the project root is one package of the repository.
-    for dir in root.ancestors().skip(1) {
+    for dir in fallow_types::audit_snapshot::lookup_ancestors(root).skip(1) {
         for name in INSTALL_STATE_FILES {
             insert_if_file(&mut inputs, dir.join(name));
         }
@@ -380,7 +380,9 @@ fn insert_if_file(inputs: &mut FxHashSet<PathBuf>, path: PathBuf) {
 /// project root, and each ancestor of the project root itself. Automatic
 /// tsconfig discovery and nearest-`package.json` lookup walk the same chain.
 fn source_dirs_and_ancestors(root: &Path, files: &[DiscoveredFile]) -> FxHashSet<PathBuf> {
-    let mut dirs: FxHashSet<PathBuf> = root.ancestors().map(Path::to_path_buf).collect();
+    let mut dirs: FxHashSet<PathBuf> = fallow_types::audit_snapshot::lookup_ancestors(root)
+        .map(Path::to_path_buf)
+        .collect();
     for file in files {
         let mut dir = file.path.parent();
         while let Some(current) = dir {
