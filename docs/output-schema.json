@@ -35513,6 +35513,10 @@
           "type": "integer",
           "description": "The second runs of survived and timed-out mutants."
         },
+        "retry_wide_worker_ms": {
+          "type": "integer",
+          "description": "Summed worker time, not wall time. It covers the survivor retries\nthat ran each passing test of their test files, not only the\ncovering tests. It can be larger than `retry_ms` when more than one\nworker runs retries. A retry that ran as parts on more workers\ncounts its wall time. Zero when no such retry ran."
+        },
         "typecheck_ms": {
           "type": "integer",
           "description": "The type check of the survivors. Zero when the run did not check\nthem."
@@ -35524,9 +35528,10 @@
         "dry_run_ms",
         "mutants_ms",
         "retry_ms",
+        "retry_wide_worker_ms",
         "typecheck_ms"
       ],
-      "description": "The wall time of each phase, in milliseconds."
+      "description": "The wall time of each phase, and the summed worker time of the wide\nsurvivor retries, in milliseconds."
     },
     "MutationPlanFile": {
       "type": "object",

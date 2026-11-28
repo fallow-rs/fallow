@@ -1354,6 +1354,7 @@ fn run_timings(
             dry_run_ms: millis(outcome.timings.dry_run),
             mutants_ms: millis(outcome.timings.mutants),
             retry_ms: millis(outcome.timings.retry),
+            retry_wide_worker_ms: millis(outcome.timings.retry_wide_worker),
             typecheck_ms,
         },
     )

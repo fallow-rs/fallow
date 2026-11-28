@@ -824,7 +824,8 @@ pub struct MutationRunIssue {
     pub stderr_tail: Option<String>,
 }
 
-/// The wall time of each phase, in milliseconds.
+/// The wall time of each phase, and the summed worker time of the wide
+/// survivor retries, in milliseconds.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct MutationTimings {
@@ -839,6 +840,12 @@ pub struct MutationTimings {
     pub mutants_ms: u64,
     /// The second runs of survived and timed-out mutants.
     pub retry_ms: u64,
+    /// Summed worker time, not wall time. It covers the survivor retries
+    /// that ran each passing test of their test files, not only the
+    /// covering tests. It can be larger than `retry_ms` when more than one
+    /// worker runs retries. A retry that ran as parts on more workers
+    /// counts its wall time. Zero when no such retry ran.
+    pub retry_wide_worker_ms: u64,
     /// The type check of the survivors. Zero when the run did not check
     /// them.
     pub typecheck_ms: u64,

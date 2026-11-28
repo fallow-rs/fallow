@@ -23236,7 +23236,8 @@ mutant_id?: (string | null)
 stderr_tail?: (string | null)
 }
 /**
- * The wall time of each phase, in milliseconds.
+ * The wall time of each phase, and the summed worker time of the wide
+ * survivor retries, in milliseconds.
  */
 export interface MutationTimings {
 /**
@@ -23260,6 +23261,14 @@ mutants_ms: number
  * The second runs of survived and timed-out mutants.
  */
 retry_ms: number
+/**
+ * Summed worker time, not wall time. It covers the survivor retries
+ * that ran each passing test of their test files, not only the
+ * covering tests. It can be larger than `retry_ms` when more than one
+ * worker runs retries. A retry that ran as parts on more workers
+ * counts its wall time. Zero when no such retry ran.
+ */
+retry_wide_worker_ms: number
 /**
  * The type check of the survivors. Zero when the run did not check
  * them.
