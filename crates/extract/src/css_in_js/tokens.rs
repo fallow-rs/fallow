@@ -1759,10 +1759,8 @@ fn is_static_stylex_bigint_value_with_context<'a>(
             if declaration_start >= context.before {
                 return false;
             }
-            // A parameter name shadows the constant, so the memo holds only
-            // results without parameters.
-            let memoizable = context.parameters.is_empty();
-            if memoizable && let Some(&is_bigint) = visiting.bigint.get(name) {
+            let with_parameters = !context.parameters.is_empty();
+            if let Some(is_bigint) = visiting.bigint_memo(name, with_parameters) {
                 return is_bigint;
             }
             if !visiting.insert(name) {
@@ -1776,9 +1774,7 @@ fn is_static_stylex_bigint_value_with_context<'a>(
             let is_bigint =
                 is_static_stylex_bigint_value_with_context(value, &nested_context, visiting);
             visiting.remove(name);
-            if visiting.finish_check(outer_capped) && memoizable {
-                visiting.bigint.insert(name, is_bigint);
-            }
+            visiting.memoize_bigint(name, with_parameters, outer_capped, is_bigint);
             is_bigint
         }
         Expression::UnaryExpression(unary)

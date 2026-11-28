@@ -38,8 +38,8 @@ pub(super) struct StaticVisit<'a> {
     /// The current check reached a limit. Clones share the flag.
     capped: std::rc::Rc<std::cell::Cell<bool>>,
     primitive: FxHashMap<&'a str, bool>,
-    pub(super) bigint: FxHashMap<&'a str, bool>,
-    pub(super) theme_override: FxHashMap<&'a str, bool>,
+    bigint: FxHashMap<&'a str, bool>,
+    theme_override: FxHashMap<&'a str, bool>,
 }
 
 impl<'a> StaticVisit<'a> {
@@ -66,7 +66,7 @@ impl<'a> StaticVisit<'a> {
 
     /// Finish the check that [`Self::start_check`] started. Returns `true`
     /// when the check reached no limit, so its result can go in a memo.
-    pub(super) fn finish_check(&self, outer_capped: bool) -> bool {
+    fn finish_check(&self, outer_capped: bool) -> bool {
         let capped = self.capped.get();
         self.capped.set(outer_capped || capped);
         !capped
@@ -74,6 +74,29 @@ impl<'a> StaticVisit<'a> {
 
     pub(super) fn remove(&mut self, name: &str) {
         self.active.remove(name);
+    }
+
+    /// The memoized BigInt check of `name`. A function parameter can shadow
+    /// the constant, so a check with parameters in scope has no memo.
+    pub(super) fn bigint_memo(&self, name: &str, with_parameters: bool) -> Option<bool> {
+        if with_parameters {
+            return None;
+        }
+        self.bigint.get(name).copied()
+    }
+
+    /// Finish the BigInt check of `name` that [`Self::start_check`] started,
+    /// and memoize its result when the memo can hold it.
+    pub(super) fn memoize_bigint(
+        &mut self,
+        name: &'a str,
+        with_parameters: bool,
+        outer_capped: bool,
+        is_bigint: bool,
+    ) {
+        if self.finish_check(outer_capped) && !with_parameters {
+            self.bigint.insert(name, is_bigint);
+        }
     }
 }
 
