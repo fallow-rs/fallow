@@ -1227,6 +1227,7 @@ dependencies = [
  "toml_edit",
  "toml_parser",
  "tracing",
+ "tracing-subscriber",
  "ureq",
  "xxhash-rust",
 ]

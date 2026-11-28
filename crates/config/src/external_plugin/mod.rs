@@ -1224,15 +1224,30 @@ impl PluginSeen {
         }
         if self.files.len() >= MAX_EXTERNAL_PLUGIN_FILES {
             if !self.warned_file_limit {
-                tracing::warn!(
-                    "more than {MAX_EXTERNAL_PLUGIN_FILES} external plugin files, skipping the rest"
-                );
+                warn_plugin_file_limit(path);
                 self.warned_file_limit = true;
             }
             return false;
         }
         self.files.insert(real)
     }
+}
+
+/// Warn once per process for each first skipped plugin file. Bare `fallow`,
+/// watch and the LSP discover the plugins more than once.
+fn warn_plugin_file_limit(first_skipped: &Path) {
+    static WARNED: OnceLock<Mutex<FxHashSet<PathBuf>>> = OnceLock::new();
+    let warned = WARNED.get_or_init(|| Mutex::new(FxHashSet::default()));
+    if let Ok(mut set) = warned.lock()
+        && !set.insert(first_skipped.to_path_buf())
+    {
+        return;
+    }
+    tracing::warn!(
+        "more than {MAX_EXTERNAL_PLUGIN_FILES} external plugin files: skipped {} and the plugin \
+         files after it",
+        first_skipped.display()
+    );
 }
 
 fn load_plugin_file(
