@@ -23,7 +23,7 @@ Every file or block carries a `<!-- fallow:agent-install v1 ... -->` marker. Re-
 | `--without <guide\|skill\|mcp\|hooks>` | `install` | Skip a step; repeatable |
 | `--dry-run` | `install`, `uninstall` | Print the plan without touching the filesystem |
 | `--force` | `install`, `uninstall` | Replace or remove skills, hook scripts, or config files fallow did not write |
-| `--approve` | `install` | Pre-approve the project MCP server for yourself in `.claude/settings.local.json`; refused when that file is tracked by git |
+| `--approve` | `install` | Pre-approve the project MCP server for yourself in `.claude/settings.local.json`; refused when that file is tracked by git, and skipped when `.mcp.json` has no fallow-managed `fallow` entry |
 | `--user` | `install`, `uninstall` | Skill, MCP config, and gate under `$HOME` (`~/.claude/skills`, `~/.agents/skills`, `~/.codex/config.toml`, `~/.cursor/mcp.json`, `~/.claude/hooks`, `~/.codex/hooks.json`); the guide step and the `AGENTS.md` routing block are skipped, and Claude Code prints the `claude mcp add --scope user` command instead of editing `~/.claude.json` |
 | `--gitignore-claude` | `install` | Append `.claude/` to `.gitignore` |
 

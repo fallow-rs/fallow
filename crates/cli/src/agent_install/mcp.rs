@@ -410,10 +410,9 @@ fn install_for(
             if skills_on_disk {
                 entry["env"] = skills_off_env();
             }
-            vec![
-                json_step(ctx, harness, &path, Scope::Shared, Some(&entry)),
-                approval_step(ctx, Mode::Install),
-            ]
+            let json = json_step(ctx, harness, &path, Scope::Shared, Some(&entry));
+            let approval = approval_after(ctx, &json);
+            vec![json, approval]
         }
         Harness::Cursor => {
             let mut entry = serde_json::json!({
@@ -546,6 +545,30 @@ fn json_step(
     }
     let outcome = merge_json_server(path, "mcpServers", entry, ctx.dry_run, ctx.force);
     outcome_report(base, outcome, ctx, path, Reason::InvalidJson)
+}
+
+/// Pre-approve the project server only when the `.mcp.json` step left a
+/// fallow-managed entry. An approval names the server key, not the command,
+/// so approving after a refused or failed write would approve whatever
+/// command the existing `fallow` entry runs.
+fn approval_after(ctx: &Ctx, json: &StepReport) -> StepReport {
+    let managed = matches!(json.status, StepStatus::Written | StepStatus::Unchanged);
+    if managed || !ctx.approve {
+        return approval_step(ctx, Mode::Install);
+    }
+    let path = ctx.root.join(CLAUDE_LOCAL_SETTINGS);
+    let mut skipped = StepReport::new(
+        Some(Harness::Claude),
+        Step::Mcp,
+        StepStatus::Skipped,
+        Scope::Local,
+    )
+    .path(ctx, &path)
+    .detail(format!(
+        "not approved: {CLAUDE_PROJECT_FILE} has no fallow-managed entry; fix that step first"
+    ));
+    skipped.reason = json.reason;
+    skipped
 }
 
 /// Opt-in pre-approval of the project-scoped server for this user.

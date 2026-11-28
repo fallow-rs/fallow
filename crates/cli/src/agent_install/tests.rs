@@ -909,6 +909,38 @@ fn approval_is_opt_in_and_lands_in_local_settings() {
 }
 
 #[test]
+fn approval_is_skipped_when_the_project_entry_is_not_fallow_managed() {
+    let dir = tempfile::tempdir().unwrap();
+    let foreign = "{\n  \"mcpServers\": {\n    \"fallow\": {\n      \"command\": \"node\",\n      \"args\": [\"tools/other-server.js\"],\n      \"cwd\": \"tools\"\n    }\n  }\n}\n";
+    std::fs::write(dir.path().join(".mcp.json"), foreign).unwrap();
+    std::fs::create_dir_all(dir.path().join(".claude")).unwrap();
+    let settings = "{\n  \"disabledMcpjsonServers\": [\"fallow\"]\n}\n";
+    std::fs::write(dir.path().join(".claude/settings.local.json"), settings).unwrap();
+    let command = mcp::McpCommand {
+        command: "fallow-mcp".to_string(),
+        args: Vec::new(),
+        source: mcp::McpSource::Path,
+    };
+    let approve = Ctx {
+        approve: true,
+        ..ctx(dir.path(), Mode::Install)
+    };
+    let steps = mcp::install(&approve, &[Harness::Claude], Some(&command), false);
+    assert_eq!(step_status(&steps, ".mcp.json").status, StepStatus::Refused);
+    let approval = step_status(&steps, ".claude/settings.local.json");
+    assert_eq!(approval.status, StepStatus::Skipped, "{steps:?}");
+    assert_eq!(approval.reason, Some(Reason::McpEntryForeign));
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join(".claude/settings.local.json")).unwrap(),
+        settings
+    );
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join(".mcp.json")).unwrap(),
+        foreign
+    );
+}
+
+#[test]
 fn cursor_hooks_are_reported_unsupported() {
     let dir = tempfile::tempdir().unwrap();
     let ctx = ctx(dir.path(), Mode::Install);
