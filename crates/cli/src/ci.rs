@@ -7,7 +7,7 @@ use fallow_output::ReviewId;
 use serde::Serialize;
 use serde_json::Value;
 
-use crate::api::{ResponseBodyReader, sanitize_network_error, try_api_agent};
+use crate::api::{ResponseBodyReader, SendCompactJson, sanitize_network_error, try_api_agent};
 use crate::coverage::upload_common::url_encode_path_segment;
 use crate::error::{emit_coded_error_with_style, emit_input_error_with_style};
 use crate::exit_codes::NETWORK_FAILURE;
@@ -1906,7 +1906,7 @@ fn github_post_json(
             .header("Accept", "application/vnd.github+json")
             .header("X-GitHub-Api-Version", "2022-11-28")
             .header("User-Agent", "fallow-cli")
-            .send_json(payload)
+            .send_compact_json(payload)
     })
 }
 
@@ -1929,7 +1929,7 @@ fn github_create_json(
                 .header("Accept", "application/vnd.github+json")
                 .header("X-GitHub-Api-Version", "2022-11-28")
                 .header("User-Agent", "fallow-cli")
-                .send_json(payload)
+                .send_compact_json(payload)
         },
     )
 }
@@ -1947,7 +1947,7 @@ fn github_patch_json(
             .header("Accept", "application/vnd.github+json")
             .header("X-GitHub-Api-Version", "2022-11-28")
             .header("User-Agent", "fallow-cli")
-            .send_json(payload)
+            .send_compact_json(payload)
     })
 }
 
@@ -2010,7 +2010,7 @@ fn gitlab_create_json(
                 .header("Authorization", &format!("Bearer {token}"))
                 .header("Content-Type", "application/json")
                 .header("User-Agent", "fallow-cli")
-                .send_json(payload)
+                .send_compact_json(payload)
         },
     )
 }
@@ -2027,7 +2027,7 @@ fn gitlab_put_json(
             .header("Authorization", &format!("Bearer {token}"))
             .header("Content-Type", "application/json")
             .header("User-Agent", "fallow-cli")
-            .send_json(payload)
+            .send_compact_json(payload)
     })
 }
 

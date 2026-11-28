@@ -94,6 +94,23 @@ fn capture_upload(command: &mut Command, endpoint_flag: &str) -> (Output, String
     );
     assert!(!String::from_utf8_lossy(&output.stderr).contains(TEST_TOKEN));
     let (head, body) = request.split_once("\r\n\r\n").unwrap();
+    // Compact JSON escapes every newline inside a string, so a raw newline
+    // proves pretty output. Pretty output grows a large inventory past the
+    // request size cap of the API (#5453).
+    assert!(
+        !body.contains('\n'),
+        "upload body must be compact JSON: {body}"
+    );
+    let content_types: Vec<String> = head
+        .lines()
+        .map(str::to_ascii_lowercase)
+        .filter(|line| line.starts_with("content-type:"))
+        .collect();
+    assert_eq!(
+        content_types,
+        ["content-type: application/json; charset=utf-8"],
+        "upload must declare one JSON body: {head}"
+    );
     (output, head.to_owned(), serde_json::from_str(body).unwrap())
 }
 
