@@ -366,7 +366,9 @@ fn glob_matches(pattern: &str, value: &str, literal_separator: bool) -> bool {
     globset::GlobBuilder::new(pattern)
         .literal_separator(literal_separator)
         .build()
-        .is_ok_and(|glob| glob.compile_matcher().is_match(value))
+        .is_ok_and(|glob| {
+            fallow_config::try_compile_matcher(&glob).is_ok_and(|matcher| matcher.is_match(value))
+        })
 }
 
 /// Join `path` to `base` and normalize `.` and `..` segments. Return `None`
@@ -417,6 +419,14 @@ pub fn relative_dir(from: &str, to: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A `--filter` glob whose regex nests too deep selects nothing.
+    #[test]
+    fn a_filter_glob_that_does_not_compile_matches_nothing() {
+        let nested = format!("{}b{}", "a{".repeat(130), "}".repeat(130));
+        assert!(!glob_matches(&nested, "ab", true));
+        assert!(!glob_matches(&nested, "ab", false));
+    }
 
     fn packages() -> WorkspacePackages {
         let mut packages = WorkspacePackages::default();

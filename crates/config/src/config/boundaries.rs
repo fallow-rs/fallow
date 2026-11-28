@@ -3,7 +3,7 @@
 use std::fmt;
 use std::path::{Path, PathBuf};
 
-use super::glob_validation::{compile_path_glob, literal_dir_glob};
+use super::glob_validation::{compile_config_matcher, literal_dir_glob};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -277,7 +277,7 @@ impl BoundaryPreset {
     fn zone(name: &str, source_root: &str) -> BoundaryZone {
         BoundaryZone {
             name: name.to_owned(),
-            patterns: vec![format!("{source_root}/{name}/**")],
+            patterns: vec![literal_dir_glob(source_root, &format!("{name}/**"))],
             auto_discover: vec![],
             root: None,
             public_files: vec![],
@@ -354,11 +354,14 @@ impl BoundaryPreset {
     fn feature_sliced_public_files(layer: &str, source_root: &str) -> Vec<String> {
         match layer {
             "pages" | "widgets" | "features" => {
-                vec![format!("{source_root}/{layer}/*/{INDEX_FILE_GLOB}")]
+                vec![literal_dir_glob(
+                    source_root,
+                    &format!("{layer}/*/{INDEX_FILE_GLOB}"),
+                )]
             }
             "entities" => vec![
-                format!("{source_root}/{layer}/*/{INDEX_FILE_GLOB}"),
-                format!("{source_root}/{layer}/*/@x/*"),
+                literal_dir_glob(source_root, &format!("{layer}/*/{INDEX_FILE_GLOB}")),
+                literal_dir_glob(source_root, &format!("{layer}/*/@x/*")),
             ],
             _ => Vec::new(),
         }
@@ -372,7 +375,7 @@ impl BoundaryPreset {
             Self::zone("app", source_root),
             BoundaryZone {
                 name: "features".to_owned(),
-                patterns: vec![format!("{source_root}/features/**")],
+                patterns: vec![literal_dir_glob(source_root, "features/**")],
                 auto_discover: vec![format!("{source_root}/features")],
                 public_files: if public_files {
                     vec![INDEX_FILE_GLOB.to_owned()]
@@ -396,7 +399,7 @@ impl BoundaryPreset {
                     "i18n",
                 ]
                 .iter()
-                .map(|dir| format!("{source_root}/{dir}/**"))
+                .map(|dir| literal_dir_glob(source_root, &format!("{dir}/**")))
                 .collect(),
                 ..BoundaryZone::default()
             },
@@ -433,14 +436,14 @@ impl BoundaryPreset {
         let zones = vec![
             BoundaryZone {
                 name: "modules".to_owned(),
-                patterns: vec![format!("{module_root}/**")],
+                patterns: vec![literal_dir_glob(module_root, "**")],
                 auto_discover: vec![module_root.to_owned()],
                 public_files: vec![INDEX_FILE_GLOB.to_owned()],
                 ..BoundaryZone::default()
             },
             BoundaryZone {
                 name: "app".to_owned(),
-                patterns: vec![format!("{source_root}/**")],
+                patterns: vec![literal_dir_glob(source_root, "**")],
                 ..BoundaryZone::default()
             },
             BoundaryZone {
@@ -1418,10 +1421,6 @@ impl BoundaryConfig {
     }
 
     /// Compile each zone's membership patterns into glob matchers.
-    #[expect(
-        clippy::expect_used,
-        reason = "boundary glob patterns are validated before config resolution"
-    )]
     fn resolve_zones(&self) -> Vec<ResolvedZone> {
         self.zones
             .iter()
@@ -1429,21 +1428,15 @@ impl BoundaryConfig {
                 let matchers = zone
                     .patterns
                     .iter()
-                    .map(|pattern| {
-                        compile_path_glob(pattern)
-                            .expect("boundaries.zones[].patterns was validated at config load time")
-                            .compile_matcher()
+                    .filter_map(|pattern| {
+                        compile_config_matcher(pattern, "boundaries.zones[].patterns")
                     })
                     .collect();
                 let public_file_matchers = zone
                     .public_files
                     .iter()
-                    .map(|pattern| {
-                        compile_path_glob(pattern)
-                            .expect(
-                                "boundaries.zones[].publicFiles was validated at config load time",
-                            )
-                            .compile_matcher()
+                    .filter_map(|pattern| {
+                        compile_config_matcher(pattern, "boundaries.zones[].publicFiles")
                     })
                     .collect();
                 let root = zone.root.as_deref().map(normalize_zone_root);
@@ -1460,10 +1453,6 @@ impl BoundaryConfig {
     }
 
     /// Compile the coverage `allowUnmatched` patterns into glob matchers.
-    #[expect(
-        clippy::expect_used,
-        reason = "boundary glob patterns are validated before config resolution"
-    )]
     fn resolve_coverage(&self) -> ResolvedBoundaryCoverageConfig {
         ResolvedBoundaryCoverageConfig {
             require_all_files: self.coverage.require_all_files,
@@ -1471,12 +1460,8 @@ impl BoundaryConfig {
                 .coverage
                 .allow_unmatched
                 .iter()
-                .map(|pattern| {
-                    compile_path_glob(pattern)
-                        .expect(
-                            "boundaries.coverage.allowUnmatched was validated at config load time",
-                        )
-                        .compile_matcher()
+                .filter_map(|pattern| {
+                    compile_config_matcher(pattern, "boundaries.coverage.allowUnmatched")
                 })
                 .collect(),
         }

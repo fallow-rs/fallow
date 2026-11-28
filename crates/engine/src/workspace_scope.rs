@@ -284,11 +284,13 @@ fn find_workspace_matches(
         return Ok(vec![index]);
     }
 
-    let glob = Glob::new(pattern).map_err(|err| WorkspaceScopeError::InvalidPattern {
+    let invalid = |message: String| WorkspaceScopeError::InvalidPattern {
         pattern: pattern.to_owned(),
-        message: err.to_string(),
-    })?;
-    let matcher = glob.compile_matcher();
+        message,
+    };
+    let glob = Glob::new(pattern).map_err(|err| invalid(err.to_string()))?;
+    let matcher =
+        fallow_config::try_compile_matcher(&glob).map_err(|err| invalid(err.to_string()))?;
     Ok(workspaces
         .iter()
         .enumerate()
@@ -379,6 +381,16 @@ fn format_available_workspaces(workspaces: &[WorkspaceInfo]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_workspace_pattern_that_does_not_compile_is_an_error() {
+        let nested = format!("{}b{}", "a{".repeat(130), "}".repeat(130));
+        let result = find_workspace_matches(&nested, &[], &[]);
+        assert!(matches!(
+            result,
+            Err(WorkspaceScopeError::InvalidPattern { .. })
+        ));
+    }
 
     fn ws(name: &str, rel: &str) -> WorkspaceInfo {
         WorkspaceInfo {

@@ -78,7 +78,7 @@ fn compile_scope_globs(patterns: &[String]) -> Vec<globset::GlobMatcher> {
     patterns
         .iter()
         .filter_map(|pattern| fallow_config::compile_path_glob(pattern).ok())
-        .map(|glob| glob.compile_matcher())
+        .filter_map(|glob| fallow_config::try_compile_matcher(&glob).ok())
         .collect()
 }
 

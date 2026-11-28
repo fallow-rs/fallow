@@ -2082,8 +2082,7 @@ fn deserialize_preset_bulletproof_json() {
 }
 
 #[test]
-#[should_panic(expected = "validated at config load time")]
-fn resolve_panics_on_unvalidated_invalid_zone_glob() {
+fn resolve_skips_an_unvalidated_invalid_zone_glob() {
     let config = BoundaryConfig {
         coverage: BoundaryCoverageConfig::default(),
         calls: BoundaryCallsConfig::default(),
@@ -2096,7 +2095,7 @@ fn resolve_panics_on_unvalidated_invalid_zone_glob() {
         }],
         rules: vec![],
     };
-    let _ = config.resolve();
+    assert!(config.resolve().zones[0].matchers.is_empty());
 }
 
 fn zone_with(name: &str, pattern: &str, public_files: &[&str]) -> BoundaryZone {
@@ -2183,7 +2182,7 @@ fn auto_discover_escapes_child_directory_names() {
     };
     let matches = |patterns: &[String], path: &str| {
         patterns.iter().any(|pattern| {
-            compile_path_glob(pattern)
+            crate::compile_path_glob(pattern)
                 .unwrap()
                 .compile_matcher()
                 .is_match(path)

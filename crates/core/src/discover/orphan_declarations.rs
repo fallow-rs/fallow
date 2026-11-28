@@ -506,7 +506,7 @@ fn relative_glob(base: &Path, pattern: &str, literal_separator: bool) -> Option<
         .literal_separator(literal_separator)
         .build()
         .ok()
-        .map(|glob| glob.compile_matcher())
+        .and_then(|glob| fallow_config::try_compile_matcher(&glob).ok())
 }
 
 /// A path spelled with forward slashes, the form the globs match.

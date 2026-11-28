@@ -1419,8 +1419,7 @@ fn resolve_passes_through_no_cache_flag() {
 }
 
 #[test]
-#[should_panic(expected = "validated at config load time")]
-fn resolve_panics_on_unvalidated_invalid_override_glob() {
+fn resolve_skips_an_unvalidated_invalid_override_glob() {
     let mut config = make_config(false);
     config.overrides = vec![ConfigOverride {
         files: vec!["[invalid".to_string()],
@@ -1429,7 +1428,7 @@ fn resolve_panics_on_unvalidated_invalid_override_glob() {
             ..Default::default()
         },
     }];
-    let _ = config.resolve(
+    let resolved = config.resolve(
         PathBuf::from("/project"),
         OutputFormat::Human,
         1,
@@ -1437,6 +1436,7 @@ fn resolve_panics_on_unvalidated_invalid_override_glob() {
         true,
         None,
     );
+    assert!(resolved.overrides.is_empty());
 }
 
 #[test]

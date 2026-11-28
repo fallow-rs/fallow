@@ -172,7 +172,7 @@ fn compile(patterns: &[String]) -> Vec<Option<GlobMatcher>> {
         .map(|pattern| {
             crate::compile_path_glob(pattern)
                 .ok()
-                .map(|glob| glob.compile_matcher())
+                .and_then(|glob| crate::try_compile_matcher(&glob).ok())
         })
         .collect()
 }

@@ -110,7 +110,13 @@ fn expand_with_limit(base: &Path, pattern: &str, root: &Path, max_visited: usize
     else {
         return expansion;
     };
-    let matcher = glob.compile_matcher();
+    let Ok(matcher) = fallow_config::try_compile_matcher(&glob) else {
+        tracing::warn!(
+            "the glob '{pattern}' in {} does not compile; it matches no file",
+            base.display()
+        );
+        return expansion;
+    };
     let max_depth = (!rest.contains(&"**")).then_some(rest.len());
 
     let mut builder = fallow_config::source_walk_builder(&walk_root, move |entry| {

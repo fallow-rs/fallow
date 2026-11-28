@@ -94,12 +94,14 @@ pub struct ExtglobMatcher {
 impl ExtglobMatcher {
     /// Compile `pattern` with the exclude patterns `excludes`. The `*` of the
     /// include glob also matches `/`. Returns `None` when `pattern` is not a
-    /// valid glob. An exclude pattern that is not valid, or that has no safe
+    /// valid glob or its matcher does not compile. An exclude pattern that is not valid, or that has no safe
     /// rewrite, removes no path.
     #[must_use]
     pub fn new(pattern: &str, excludes: &[&str]) -> Option<Self> {
         let rewritten = rewrite_include(pattern);
-        let include = build_glob(&rewritten.include, false)?.compile_matcher();
+        let include =
+            crate::glob_validation::try_compile_matcher(&build_glob(&rewritten.include, false)?)
+                .ok()?;
         let mut exclude_set = GlobSetBuilder::new();
         for exclude in &rewritten.excludes {
             exclude_set.add(build_glob(exclude, true)?);
@@ -267,6 +269,18 @@ fn optional(alternatives: Vec<String>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_include_glob_that_does_not_compile_gives_no_matcher() {
+        let nested = format!("./pages/{}b{}.js", "{a,".repeat(126), "}".repeat(126));
+        assert!(ExtglobMatcher::new(&nested, &[]).is_none());
+    }
+
+    #[test]
+    fn an_extglob_group_that_does_not_compile_gives_no_matcher() {
+        let extglob = format!("./{}b{}.js", "@(a|".repeat(126), ")".repeat(126));
+        assert!(ExtglobMatcher::new(&extglob, &[]).is_none());
+    }
 
     fn matches(pattern: &str, path: &str) -> bool {
         matches_with_excludes(pattern, &[], path)

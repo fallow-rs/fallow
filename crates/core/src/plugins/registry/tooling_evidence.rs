@@ -275,7 +275,7 @@ impl ExtraRootProbe {
                 name: OsString::from(name),
             });
         }
-        let matcher = globset::Glob::new(name).ok()?.compile_matcher();
+        let matcher = fallow_config::try_compile_matcher(&globset::Glob::new(name).ok()?).ok()?;
         Some(Self::IndexedGlob { dir, matcher })
     }
 

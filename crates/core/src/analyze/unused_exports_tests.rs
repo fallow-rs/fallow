@@ -1725,12 +1725,12 @@ fn unused_exports_ignore_multiple_patterns() {
 }
 
 #[test]
-#[should_panic(expected = "validated at config load time")]
-fn unused_exports_panics_on_unvalidated_invalid_ignore_glob() {
-    let _ = test_config_with_ignore_exports(vec![fallow_config::IgnoreExportRule {
+fn unused_exports_skips_an_unvalidated_invalid_ignore_glob() {
+    let config = test_config_with_ignore_exports(vec![fallow_config::IgnoreExportRule {
         file: "[invalid".to_string(),
         exports: vec!["*".to_string()],
     }]);
+    assert!(config.compiled_ignore_exports.is_empty());
 }
 
 #[test]

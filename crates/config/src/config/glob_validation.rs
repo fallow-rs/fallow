@@ -21,7 +21,7 @@ use std::borrow::Cow;
 use std::fmt;
 use std::path::{Component, Path};
 
-use globset::{Glob, GlobBuilder};
+use globset::{Glob, GlobBuilder, GlobMatcher};
 
 use super::finding_ignore::FindingIgnoreMatcher;
 
@@ -105,6 +105,16 @@ pub enum GlobValidationError {
         /// The offending pattern as written in the config.
         pattern: String,
     },
+    /// Pattern parses, but its matcher cannot be compiled, for example
+    /// because its brace groups nest too deep.
+    Uncompilable {
+        /// Config field the pattern came from, named in the error.
+        field: &'static str,
+        /// The offending pattern as written in the config.
+        pattern: String,
+        /// Underlying regex compile error.
+        source: regex::Error,
+    },
     /// Individually valid patterns cannot be compiled into one matcher.
     PatternSetCompilation {
         /// Config field whose pattern set failed to build, named in the error.
@@ -183,6 +193,11 @@ impl fmt::Display for GlobValidationError {
                 "{field}: the brace groups of '{pattern}' are not closed or expand to more \
                  than {MAX_BRACE_EXPANSIONS} patterns; split the pattern into simpler patterns"
             ),
+            Self::Uncompilable { field, pattern, .. } => write!(
+                f,
+                "{field}: glob '{pattern}' cannot be compiled: its brace groups nest too deep \
+                 or it is too large; split the pattern into simpler patterns"
+            ),
             Self::PatternSetCompilation { field, source } => write!(
                 f,
                 "{field}: glob patterns cannot be compiled together: {source}; simplify the pattern set"
@@ -197,6 +212,7 @@ impl std::error::Error for GlobValidationError {
             Self::InvalidSyntax { source, .. } | Self::PatternSetCompilation { source, .. } => {
                 Some(source)
             }
+            Self::Uncompilable { source, .. } => Some(source),
             Self::AbsolutePath { .. }
             | Self::TraversalSegment { .. }
             | Self::EmptyNegation { .. }
@@ -302,6 +318,67 @@ pub fn compile_path_glob(pattern: &str) -> Result<Glob, globset::Error> {
         .build()
 }
 
+/// The NFA size limit that `globset` sets for the regex of one glob.
+const GLOB_REGEX_SIZE_LIMIT: usize = 10 * (1 << 20);
+
+/// Compile the matcher of `glob` without a panic.
+///
+/// `Glob::compile_matcher` panics when the regex of the glob does not
+/// compile: brace groups that nest past the nesting limit of the regex
+/// parser, or a regex past the size limit. This function compiles the regex
+/// first, with the settings of `globset`, and returns that failure as an
+/// error. Only a brace group makes nested regex groups, so a glob without
+/// `{` that is not longer than [`MAX_GLOB_BYTES`] skips the check.
+///
+/// # Errors
+///
+/// Returns the regex error when the regex of the glob does not compile.
+pub fn try_compile_matcher(glob: &Glob) -> Result<GlobMatcher, regex::Error> {
+    let text = glob.glob();
+    if text.contains('{') || text.len() > MAX_GLOB_BYTES {
+        regex::bytes::RegexBuilder::new(glob.regex())
+            .dot_matches_new_line(true)
+            .size_limit(GLOB_REGEX_SIZE_LIMIT)
+            .build()?;
+    }
+    Ok(glob.compile_matcher())
+}
+
+/// Compile the matcher of a config path glob. Config validation refuses a
+/// glob that does not parse or compile, so this gives `None` only for a glob
+/// that the code built after the validation. That glob matches no path, and
+/// a warning names it.
+pub(crate) fn compile_config_matcher(pattern: &str, field: &str) -> Option<GlobMatcher> {
+    let compiled = compile_path_glob(pattern)
+        .map_err(|error| error.to_string())
+        .and_then(|glob| try_compile_matcher(&glob).map_err(|error| error.to_string()));
+    match compiled {
+        Ok(matcher) => Some(matcher),
+        Err(error) => {
+            tracing::warn!(
+                "{field}: glob '{pattern}' cannot be compiled and matches no path: {error}"
+            );
+            None
+        }
+    }
+}
+
+/// Check that the matcher of a validated glob compiles.
+fn check_compiles(
+    glob: Glob,
+    pattern: &str,
+    field: &'static str,
+) -> Result<Glob, GlobValidationError> {
+    match try_compile_matcher(&glob) {
+        Ok(_) => Ok(glob),
+        Err(source) => Err(GlobValidationError::Uncompilable {
+            field,
+            pattern: pattern.to_owned(),
+            source,
+        }),
+    }
+}
+
 /// Join a literal directory and a glob tail into one path glob. Each glob
 /// character of `dir` is escaped, so a directory such as `app/[id]`
 /// matches only itself. An empty `dir` gives `tail`.
@@ -329,6 +406,7 @@ pub fn literal_dir_glob(dir: &str, tail: &str) -> String {
 /// - `TraversalSegment` if any path segment of the pattern is `..`
 /// - `InvalidSyntax` if [`compile_path_glob`] rejects the pattern
 /// - `TooLong` if the pattern is longer than [`MAX_GLOB_BYTES`]
+/// - `Uncompilable` if the matcher of the pattern does not compile
 pub fn compile_user_glob(pattern: &str, field: &'static str) -> Result<Glob, GlobValidationError> {
     check_glob_length(pattern, field)?;
     // A brace group such as `{..,x}` can expand to a `..` or `/` segment
@@ -357,11 +435,12 @@ pub fn compile_user_glob(pattern: &str, field: &'static str) -> Result<Glob, Glo
             });
         }
     }
-    compile_path_glob(pattern).map_err(|source| GlobValidationError::InvalidSyntax {
+    let glob = compile_path_glob(pattern).map_err(|source| GlobValidationError::InvalidSyntax {
         field,
         pattern: pattern.to_owned(),
         source,
-    })
+    })?;
+    check_compiles(glob, pattern, field)
 }
 
 /// The most expansions that the brace expansion of one pattern builds.
@@ -442,18 +521,20 @@ fn check_glob_length(pattern: &str, field: &'static str) -> Result<(), GlobValid
 ///
 /// # Errors
 ///
-/// Returns `TooLong` if the pattern is longer than [`MAX_GLOB_BYTES`], and
-/// `InvalidSyntax` if `globset::Glob::new` rejects the pattern.
+/// Returns `TooLong` if the pattern is longer than [`MAX_GLOB_BYTES`],
+/// `InvalidSyntax` if `globset::Glob::new` rejects the pattern, and
+/// `Uncompilable` if the matcher of the pattern does not compile.
 pub fn compile_user_specifier_glob(
     pattern: &str,
     field: &'static str,
 ) -> Result<Glob, GlobValidationError> {
     check_glob_length(pattern, field)?;
-    Glob::new(pattern).map_err(|source| GlobValidationError::InvalidSyntax {
+    let glob = Glob::new(pattern).map_err(|source| GlobValidationError::InvalidSyntax {
         field,
         pattern: pattern.to_owned(),
         source,
-    })
+    })?;
+    check_compiles(glob, pattern, field)
 }
 
 /// Validate a slice of import-specifier patterns, accumulating syntax errors.
@@ -471,18 +552,31 @@ pub fn validate_user_specifier_globs(
 
 /// Validate the glob entries of `ignoreDependencies`, accumulating syntax
 /// errors. Entries without glob metacharacters are exact package names and
-/// are not validated as globs.
+/// are not validated as globs. When each glob is valid, the glob set of all
+/// of them must also compile.
 pub fn validate_user_dependency_globs(
     entries: &[String],
     field: &'static str,
     errors: &mut Vec<GlobValidationError>,
 ) {
-    for entry in entries {
-        if super::is_dependency_glob(entry)
-            && let Err(e) = compile_user_specifier_glob(entry, field)
-        {
-            errors.push(e);
+    let mut set = globset::GlobSetBuilder::new();
+    let mut valid = true;
+    for entry in entries
+        .iter()
+        .filter(|entry| super::is_dependency_glob(entry))
+    {
+        match compile_user_specifier_glob(entry, field) {
+            Ok(glob) => {
+                set.add(glob);
+            }
+            Err(error) => {
+                errors.push(error);
+                valid = false;
+            }
         }
+    }
+    if valid && let Err(source) = set.build() {
+        errors.push(GlobValidationError::PatternSetCompilation { field, source });
     }
 }
 
@@ -1263,5 +1357,168 @@ mod tests {
             errors[0],
             GlobValidationError::EmptyNegation { .. }
         ));
+    }
+
+    /// A glob whose brace groups nest deeper than the regex parser allows.
+    /// The glob parses, but its regex does not compile.
+    fn deeply_nested_glob() -> String {
+        format!("{}b{}", "a{".repeat(130), "}".repeat(130))
+    }
+
+    #[test]
+    fn try_compile_matcher_returns_an_error_instead_of_a_panic() {
+        let nested = compile_path_glob(&deeply_nested_glob()).unwrap();
+        assert!(try_compile_matcher(&nested).is_err());
+        let braces = compile_path_glob("src/{a,b}/*.ts").unwrap();
+        assert!(try_compile_matcher(&braces).unwrap().is_match("src/a/x.ts"));
+        let long = compile_path_glob(&"a".repeat(MAX_GLOB_BYTES + 1)).unwrap();
+        assert!(try_compile_matcher(&long).is_ok());
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+    fn a_config_with_a_glob_that_does_not_compile_fails_to_load() {
+        let nested = deeply_nested_glob();
+        let fields = [
+            (
+                "overrides[].files",
+                serde_json::json!({ "overrides": [{ "files": [nested] }] }),
+            ),
+            ("entry", serde_json::json!({ "entry": [nested] })),
+            (
+                "ignoreExports[].file",
+                serde_json::json!({ "ignoreExports": [{ "file": nested, "exports": ["*"] }] }),
+            ),
+            (
+                "ignoreDependencies",
+                serde_json::json!({ "ignoreDependencies": [nested] }),
+            ),
+            (
+                "ignoreUnresolvedImports",
+                serde_json::json!({ "ignoreUnresolvedImports": [nested] }),
+            ),
+            (
+                "boundaries.zones[].patterns",
+                serde_json::json!({ "boundaries": { "zones": [{ "name": "a", "patterns": [nested] }] } }),
+            ),
+        ];
+        for (field, config) in fields {
+            let dir = tempfile::tempdir().unwrap();
+            std::fs::create_dir(dir.path().join(".git")).unwrap();
+            std::fs::write(dir.path().join(".fallowrc.json"), config.to_string()).unwrap();
+            let error = crate::FallowConfig::find_and_load(dir.path())
+                .err()
+                .unwrap_or_else(|| panic!("{field}: the config loaded"));
+            assert!(error.contains(field), "{field}: {error}");
+            assert!(error.contains("cannot be compiled"), "{field}: {error}");
+        }
+    }
+
+    /// Glob texts from tokens that make regex classes, groups, repeats and
+    /// multibyte literals, with a fixed seed.
+    fn generated_globs(count: usize) -> Vec<String> {
+        const TOKENS: &[&str] = &[
+            "a",
+            "/",
+            "*",
+            "**",
+            "**/",
+            "?",
+            "[a-z]",
+            "[!a]",
+            "[[]",
+            "[]]",
+            "[\u{e9}-\u{fc}]",
+            "[\u{65e5}\u{672c}]",
+            "\u{65e5}",
+            "\\*",
+            "@(",
+            "|",
+            ")",
+            "!(",
+            "+(",
+            "-",
+            ".",
+            "[",
+            "]",
+            "[^/]",
+            "\u{1f600}",
+            "[\u{1f600}-\u{1f602}]",
+        ];
+        let mut state: u64 = 0x9E37_79B9_7F4A_7C15;
+        let mut next = move || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            usize::try_from(state % 1024).unwrap_or(0)
+        };
+        let mut globs = Vec::with_capacity(count + 8);
+        for _ in 0..count {
+            let len = next() % 520;
+            let mut text = String::new();
+            while text.len() < len {
+                text.push_str(TOKENS[next() % TOKENS.len()]);
+            }
+            globs.push(text);
+        }
+        globs.extend([
+            "*".repeat(512),
+            "**/".repeat(170),
+            "?".repeat(512),
+            "[a-z]".repeat(102),
+            "[!a]".repeat(128),
+            "\u{65e5}".repeat(170),
+            "[\u{65e5}-\u{672c}]".repeat(56),
+            "\u{1f600}".repeat(128),
+        ]);
+        globs
+    }
+
+    /// `try_compile_matcher` skips the regex check for a glob without `{`
+    /// that is not longer than `MAX_GLOB_BYTES`. The matcher of each such
+    /// glob must build.
+    #[test]
+    #[cfg_attr(miri, ignore = "thousands of regex builds are too slow under Miri")]
+    fn a_glob_without_braces_within_the_limit_always_compiles() {
+        let mut checked = 0;
+        for text in generated_globs(1_000) {
+            if text.contains('{') || text.len() > MAX_GLOB_BYTES {
+                continue;
+            }
+            for literal_separator in [true, false] {
+                let Ok(glob) = GlobBuilder::new(&text)
+                    .literal_separator(literal_separator)
+                    .empty_alternates(true)
+                    .build()
+                else {
+                    continue;
+                };
+                let regex = regex::bytes::RegexBuilder::new(glob.regex())
+                    .dot_matches_new_line(true)
+                    .size_limit(GLOB_REGEX_SIZE_LIMIT)
+                    .build();
+                assert!(regex.is_ok(), "{text}");
+                let _ = glob.compile_matcher();
+                checked += 1;
+            }
+        }
+        assert!(checked > 300, "only {checked} globs parsed");
+    }
+
+    /// The regex check refuses exactly the brace globs whose matcher build
+    /// panics in `globset`.
+    #[test]
+    fn try_compile_matcher_agrees_with_the_matcher_build() {
+        for depth in [120, 124, 125, 126, 130] {
+            for text in [
+                format!("{}b{}", "a{".repeat(depth), "}".repeat(depth)),
+                format!("{}b{}", "{a,".repeat(depth), "}".repeat(depth)),
+            ] {
+                let glob = compile_path_glob(&text).unwrap();
+                let checked = try_compile_matcher(&glob).is_ok();
+                let built = std::panic::catch_unwind(|| glob.compile_matcher()).is_ok();
+                assert_eq!(checked, built, "depth {depth}: {text}");
+            }
+        }
     }
 }

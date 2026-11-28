@@ -472,11 +472,13 @@ fn expand_recursive_workspace_pattern(
     canonical_root: &Path,
 ) -> Vec<(PathBuf, PathBuf)> {
     let pattern = crate::glob_validation::normalize_path_pattern(expanded_pattern);
-    let Ok(glob) = crate::glob_validation::compile_path_glob(pattern) else {
+    let Some(matcher) = crate::glob_validation::compile_path_glob(pattern)
+        .ok()
+        .and_then(|glob| crate::glob_validation::try_compile_matcher(&glob).ok())
+    else {
         tracing::warn!("invalid workspace glob pattern '{raw_pattern}'");
         return Vec::new();
     };
-    let matcher = glob.compile_matcher();
 
     // pnpm reads `**` as zero or more folders, so `pkgs/**` also matches
     // `pkgs` itself. The glob needs at least one folder for a trailing `**`,
@@ -484,7 +486,7 @@ fn expand_recursive_workspace_pattern(
     let zero_depth_matcher = pattern
         .strip_suffix("/**")
         .and_then(|prefix| crate::glob_validation::compile_path_glob(prefix).ok())
-        .map(|glob| glob.compile_matcher());
+        .and_then(|glob| crate::glob_validation::try_compile_matcher(&glob).ok());
 
     let base_dir: PathBuf = root
         .join(literal_dir_prefix(pattern))

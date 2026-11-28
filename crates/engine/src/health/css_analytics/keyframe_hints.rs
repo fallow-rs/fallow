@@ -294,10 +294,8 @@ fn is_less_mixin_head(statement: &str) -> bool {
 fn variable_assignment(statement: &str) -> Option<(&str, &str)> {
     let (name, value) = statement.split_once(':')?;
     let name = name.trim();
-    let sigil = name.bytes().next()?;
-    let ident = &name[1..];
-    let is_variable =
-        matches!(sigil, b'$' | b'@') && !ident.is_empty() && ident.bytes().all(is_ident_continue);
+    let ident = name.strip_prefix(['$', '@'])?;
+    let is_variable = !ident.is_empty() && ident.bytes().all(is_ident_continue);
     is_variable.then_some((name, value))
 }
 
@@ -537,5 +535,17 @@ mod tests {
             preprocessor_keyframe_hints(source),
             KeyframeHints::default()
         );
+    }
+
+    #[test]
+    fn statement_that_starts_with_a_multibyte_char_is_no_variable() {
+        for source in [
+            "\u{feff}$fade: spin;",
+            "\u{e9}t\u{e9}: spin;",
+            "\u{1f600}: x;",
+        ] {
+            let hints = preprocessor_keyframe_hints(source);
+            assert_eq!(hints, KeyframeHints::default(), "{source}");
+        }
     }
 }

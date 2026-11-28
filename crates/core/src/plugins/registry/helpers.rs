@@ -661,7 +661,8 @@ fn match_pattern_in_index(
         None => (root.to_path_buf(), pattern),
     };
 
-    let Ok(matcher) = globset::Glob::new(file_pattern).map(|g| g.compile_matcher()) else {
+    let compiled = globset::Glob::new(file_pattern).ok();
+    let Some(matcher) = compiled.and_then(|g| fallow_config::try_compile_matcher(&g).ok()) else {
         return Vec::new();
     };
     index.glob_matches_in_dir(&dir, &matcher)
@@ -700,7 +701,8 @@ fn scan_dir_for_pattern(root: &Path, dir: &Path, file_pattern: &str) -> Vec<Path
     if !dir.is_dir() {
         return Vec::new();
     }
-    let Ok(matcher) = globset::Glob::new(file_pattern).map(|g| g.compile_matcher()) else {
+    let compiled = globset::Glob::new(file_pattern).ok();
+    let Some(matcher) = compiled.and_then(|g| fallow_config::try_compile_matcher(&g).ok()) else {
         return Vec::new();
     };
     let Some(entries) = crate::discover::project_read::read_project_dir(root, dir) else {
@@ -1022,8 +1024,9 @@ pub fn check_plugin_detection(
     match detection {
         PluginDetection::Dependency { package } => all_deps.iter().any(|d| *d == package),
         PluginDetection::FileExists { pattern } => {
-            if let Ok(matcher) =
-                fallow_config::compile_path_glob(pattern).map(|g| g.compile_matcher())
+            let compiled = fallow_config::compile_path_glob(pattern).ok();
+            if let Some(matcher) =
+                compiled.and_then(|g| fallow_config::try_compile_matcher(&g).ok())
             {
                 for file in discovered_files {
                     let relative = file.strip_prefix(root).unwrap_or(file);

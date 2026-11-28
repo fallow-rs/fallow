@@ -75,9 +75,12 @@ impl IgnoreDependencyMatcher {
                 exact.entry(entry.clone()).or_default().push(index);
             }
         }
-        let globs = builder
-            .build()
-            .expect("ignoreDependencies globs were validated at config load time");
+        // Config validation builds the same set. A set that still does not
+        // build suppresses nothing, so no finding is hidden.
+        let globs = builder.build().unwrap_or_else(|error| {
+            tracing::warn!("ignoreDependencies: the globs cannot be compiled together: {error}");
+            GlobSet::empty()
+        });
         let usage = (!entries.is_empty()).then(|| {
             Arc::new(EntryUsage {
                 matched: entries.iter().map(|_| AtomicBool::new(false)).collect(),
@@ -232,6 +235,38 @@ impl IgnoreDependencyMatcher {
 
 #[cfg(test)]
 mod tests {
+    /// Each glob compiles alone, but the set of all of them passes the size
+    /// limit of the regex set.
+    fn oversized_glob_set() -> Vec<String> {
+        let tail = "[\u{65e5}-\u{672c}]*".repeat(50);
+        (0..2_000)
+            .map(|index| format!("@s{index}/{tail}"))
+            .collect()
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "thousands of regex builds are too slow under Miri")]
+    fn a_glob_set_that_does_not_compile_suppresses_nothing() {
+        let matcher = IgnoreDependencyMatcher::compile(&oversized_glob_set());
+        assert!(!matcher.is_ignored("@s1/x"));
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "thousands of regex builds are too slow under Miri")]
+    fn a_glob_set_that_does_not_compile_is_a_config_error() {
+        let mut errors = Vec::new();
+        crate::glob_validation::validate_user_dependency_globs(
+            &oversized_glob_set(),
+            "ignoreDependencies",
+            &mut errors,
+        );
+        assert_eq!(errors.len(), 1);
+        assert!(
+            errors[0]
+                .to_string()
+                .contains("cannot be compiled together")
+        );
+    }
     use super::*;
 
     fn matcher(entries: &[&str]) -> IgnoreDependencyMatcher {

@@ -15,7 +15,7 @@ use globset::GlobMatcher;
 use rustc_hash::FxHashSet;
 
 use super::dependency_ignore::IgnoreDependencyMatcher;
-use super::glob_validation::compile_path_glob;
+use super::glob_validation::{compile_path_glob, try_compile_matcher};
 use crate::workspace::{WorkspaceInfo, WorkspaceSettings};
 
 /// How a settings key selects workspace roots.
@@ -46,7 +46,7 @@ impl Selector {
         if !normalized.contains(['*', '?', '[', '{']) {
             return Some(Self::Exact(normalized));
         }
-        let matcher = compile_path_glob(&normalized).ok()?.compile_matcher();
+        let matcher = try_compile_matcher(&compile_path_glob(&normalized).ok()?).ok()?;
         let literal_segments = normalized
             .split('/')
             .filter(|segment| !segment.contains(['*', '?', '[', '{']))
@@ -386,6 +386,23 @@ mod tests {
                 is_internal_dependency: false,
             })
             .collect()
+    }
+
+    /// A key with escaped braces passes validation on Unix. The `\\` to `/`
+    /// fold turns the escapes into nested brace groups, whose matcher does not
+    /// compile. The key then selects no workspace. Validation on Windows reads
+    /// `\\` as a separator and refuses the key, so the selector never builds.
+    #[test]
+    fn a_key_whose_matcher_does_not_compile_selects_nothing() {
+        let key = format!("a{}b*{}", "\\{".repeat(126), "\\}".repeat(126));
+        let validated =
+            crate::glob_validation::compile_user_glob(&key, "workspaces.settings (key)").is_ok();
+        assert_eq!(validated, !cfg!(windows));
+        if validated {
+            assert!(Selector::new(&key).is_none());
+            let s = settings(&[(key.as_str(), &["lodash"], None)]);
+            assert!(!s.suppresses_dependency_at(Path::new("/p/a/index.ts"), "lodash"));
+        }
     }
 
     #[test]

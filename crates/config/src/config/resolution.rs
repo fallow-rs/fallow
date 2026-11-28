@@ -11,7 +11,7 @@ use super::duplicates_config::DuplicatesConfig;
 use super::entry_effect::EntryEffectRecord;
 use super::flags::FlagsConfig;
 use super::format::OutputFormat;
-use super::glob_validation::compile_path_glob;
+use super::glob_validation::{compile_config_matcher, try_compile_matcher};
 use super::health::HealthConfig;
 use super::ignore_patterns::compile_ignore_patterns;
 use super::mutation::MutationConfig;
@@ -725,18 +725,21 @@ pub const DEFAULT_IGNORE_PATTERNS: &[&str] = &[
     "fallow-viz.html",
 ];
 
-#[expect(
-    clippy::expect_used,
-    reason = "user glob patterns are validated before config resolution"
-)]
 fn compile_ignore_unresolved_imports(patterns: &[String]) -> Vec<GlobMatcher> {
     patterns
         .iter()
-        .map(|pattern| {
+        .filter_map(|pattern| {
             let normalized = super::glob_validation::normalize_path_pattern(pattern);
-            Glob::new(normalized)
-                .expect("ignoreUnresolvedImports entry was validated at config load time")
-                .compile_matcher()
+            let compiled = Glob::new(normalized)
+                .map_err(|error| error.to_string())
+                .and_then(|glob| try_compile_matcher(&glob).map_err(|error| error.to_string()));
+            compiled
+                .map_err(|error| {
+                    tracing::warn!(
+                        "ignoreUnresolvedImports: glob '{pattern}' cannot be compiled and matches no import: {error}"
+                    );
+                })
+                .ok()
         })
         .collect()
 }
@@ -762,10 +765,6 @@ fn resolve_boundaries(
     resolved
 }
 
-#[expect(
-    clippy::expect_used,
-    reason = "override glob patterns are validated before config resolution"
-)]
 fn compile_overrides(overrides: Vec<ConfigOverride>) -> Vec<ResolvedOverride> {
     overrides
         .into_iter()
@@ -773,11 +772,7 @@ fn compile_overrides(overrides: Vec<ConfigOverride>) -> Vec<ResolvedOverride> {
             let matchers: Vec<globset::GlobMatcher> = override_entry
                 .files
                 .iter()
-                .map(|pattern| {
-                    compile_path_glob(pattern)
-                        .expect("overrides[].files pattern was validated at config load time")
-                        .compile_matcher()
-                })
+                .filter_map(|pattern| compile_config_matcher(pattern, "overrides[].files"))
                 .collect();
             if matchers.is_empty() {
                 None
@@ -793,40 +788,39 @@ fn compile_overrides(overrides: Vec<ConfigOverride>) -> Vec<ResolvedOverride> {
 }
 
 /// Compile `ignoreExports` file globs into matchers paired with export names.
-#[expect(
-    clippy::expect_used,
-    reason = "user glob patterns are validated before config resolution"
-)]
 fn compile_ignore_export_rules(rules: &[IgnoreExportRule]) -> Vec<CompiledIgnoreExportRule> {
     rules
         .iter()
-        .map(|rule| CompiledIgnoreExportRule {
-            matcher: compile_path_glob(&rule.file)
-                .expect("ignoreExports[].file was validated at config load time")
-                .compile_matcher(),
-            exports: rule.exports.clone(),
+        .filter_map(|rule| {
+            Some(CompiledIgnoreExportRule {
+                matcher: compile_config_matcher(&rule.file, "ignoreExports[].file")?,
+                exports: rule.exports.clone(),
+            })
         })
         .collect()
 }
 
 /// Compile `ignoreCatalogReferences` rules, pre-compiling the consumer glob.
-#[expect(
-    clippy::expect_used,
-    reason = "user glob patterns are validated before config resolution"
-)]
+/// A rule whose consumer glob does not compile is left out, so it cannot
+/// widen to every consumer.
 fn compile_ignore_catalog_reference_rules(
     rules: &[IgnoreCatalogReferenceRule],
 ) -> Vec<CompiledIgnoreCatalogReferenceRule> {
     rules
         .iter()
-        .map(|rule| CompiledIgnoreCatalogReferenceRule {
-            package: rule.package.clone(),
-            catalog: rule.catalog.clone(),
-            consumer_matcher: rule.consumer.as_ref().map(|pattern| {
-                compile_path_glob(pattern)
-                    .expect("ignoreCatalogReferences[].consumer was validated at config load time")
-                    .compile_matcher()
-            }),
+        .filter_map(|rule| {
+            let consumer_matcher = match rule.consumer.as_deref() {
+                Some(pattern) => Some(compile_config_matcher(
+                    pattern,
+                    "ignoreCatalogReferences[].consumer",
+                )?),
+                None => None,
+            };
+            Some(CompiledIgnoreCatalogReferenceRule {
+                package: rule.package.clone(),
+                catalog: rule.catalog.clone(),
+                consumer_matcher,
+            })
         })
         .collect()
 }
