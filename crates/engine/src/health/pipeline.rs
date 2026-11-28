@@ -19,8 +19,9 @@ pub struct HealthPipelineInputs {
     pub config: ResolvedConfig,
     /// Discovered files for the analysis scope.
     pub files: Vec<fallow_types::discover::DiscoveredFile>,
-    /// Parsed modules for the discovered files.
-    pub modules: Vec<fallow_types::extract::ModuleInfo>,
+    /// Parsed modules for the discovered files. The pipeline only reads them,
+    /// so a caller can share the modules of an earlier pass without a copy.
+    pub modules: Arc<[fallow_types::extract::ModuleInfo]>,
     /// Config resolution wall time in milliseconds.
     pub config_ms: f64,
     /// File discovery wall time in milliseconds.
@@ -66,7 +67,7 @@ pub(super) struct HealthPipelineRunInputs<M> {
 }
 
 impl From<HealthPipelineInputs>
-    for HealthPipelineRunInputs<Vec<fallow_types::extract::ModuleInfo>>
+    for HealthPipelineRunInputs<Arc<[fallow_types::extract::ModuleInfo]>>
 {
     fn from(input: HealthPipelineInputs) -> Self {
         Self {

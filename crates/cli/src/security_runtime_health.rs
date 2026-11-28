@@ -36,7 +36,7 @@ pub(super) fn analyze_security_runtime(
         &health_opts,
         fallow_engine::health::HealthSharedParseData {
             files,
-            modules,
+            modules: modules.into(),
             dead_code_results: None,
             workspaces: Vec::new(),
             analysis_output: Some(analysis_output),

@@ -832,3 +832,14 @@ fn type_aware_summary_names_the_constant_parameter_evidence() {
             .ends_with("; 5 constant-parameter candidates checked, 1 finding with type evidence")
     );
 }
+
+#[test]
+fn check_shares_parsed_modules_with_health() {
+    let check = include_str!("mod.rs");
+    assert!(
+        check.contains(".analyze_dead_code_with_shared_artifacts(true, true)")
+            && !check.contains(".analyze_dead_code_with_artifacts(true, true)"),
+        "check must hand the parsed modules of the session to health without a copy: an owned \
+         copy holds every module twice and raises the peak memory of a combined run"
+    );
+}

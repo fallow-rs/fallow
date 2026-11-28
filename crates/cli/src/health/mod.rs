@@ -397,7 +397,7 @@ fn execute_health_with_config_and_seams(
         HealthPipelineInputs {
             config,
             files,
-            modules,
+            modules: modules.into(),
             config_ms,
             discover_ms,
             parse_ms,
