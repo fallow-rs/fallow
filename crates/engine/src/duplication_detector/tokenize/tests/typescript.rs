@@ -254,3 +254,41 @@ fn tokenize_ts_optional_call_type_arguments() {
         assert!(has_ident(&tokenize(source), "First"), "{source}");
     }
 }
+
+/// Variable declarations that differ only in their type annotation are
+/// different code (#5435).
+#[test]
+fn tokenize_ts_variable_type_annotation() {
+    let a = tokenize("let value: Alpha<One>;");
+    let b = tokenize("let value: Beta<Two>;");
+    let has_colon_before_alpha = a.windows(2).any(|w| {
+        matches!(w[0].kind, TokenKind::Punctuation(PunctuationType::Colon))
+            && matches!(&w[1].kind, TokenKind::Identifier(n) if n == "Alpha")
+    });
+    assert!(
+        has_colon_before_alpha,
+        "variable type annotation should emit `:` before the type"
+    );
+    assert!(
+        has_ident(&a, "One"),
+        "nested type argument in variable annotation should be tokenized"
+    );
+    assert_ne!(kinds(&a), kinds(&b));
+
+    let init_a = tokenize("const value: Alpha<One> = make();");
+    let init_b = tokenize("const value: Beta<Two> = make();");
+    assert!(has_ident(&init_a, "Alpha"));
+    assert_ne!(kinds(&init_a), kinds(&init_b));
+
+    let destructured = tokenize("const { item }: Pair<First, Second> = pair();");
+    assert!(has_ident(&destructured, "Pair"));
+    assert!(has_ident(&destructured, "First"));
+}
+
+#[test]
+fn strip_types_drops_variable_type_annotation() {
+    let stripped =
+        tokenize_cross_language("let value: Alpha<One>; const x: Record<string, Alpha> = obj;");
+    let plain = tokenize_cross_language("let value; const x = obj;");
+    assert_eq!(kinds(&stripped), kinds(&plain));
+}

@@ -1142,6 +1142,9 @@ impl<'a> Visit<'a> for TokenExtractor<'_> {
 
     fn visit_variable_declarator(&mut self, decl: &VariableDeclarator<'a>) {
         self.visit_binding_pattern(&decl.id);
+        if let Some(type_annotation) = &decl.type_annotation {
+            self.visit_ts_type_annotation(type_annotation);
+        }
         if let Some(init) = &decl.init {
             self.push_op(OperatorType::Assign, self.prev_text(init.span().start, "="));
             self.visit_expression(init);
