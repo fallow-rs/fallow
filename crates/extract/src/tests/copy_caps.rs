@@ -149,3 +149,20 @@ fn css_in_js_token_chain_stays_bounded() {
     });
     assert_bytes_below("css-in-js token chain", work, 12 * MIB);
 }
+
+/// A string-keyed call with a long callee and many callback arguments. The
+/// complexity context name of each callback holds the callee text.
+#[test]
+fn complexity_context_name_of_a_long_callee_stays_bounded() {
+    let callee = format!("a{}", ".bbbbbbbbbb".repeat(900));
+    let callbacks = (0..1_000)
+        .map(|index| format!("() => {index}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let source = format!("{callee}(\"route\", {callbacks});\n");
+    assert_bytes_below(
+        "complexity context name",
+        extraction_work("a.ts", source),
+        16 * MIB,
+    );
+}
