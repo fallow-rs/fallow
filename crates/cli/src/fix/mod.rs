@@ -1181,7 +1181,7 @@ fn residual_skip_warnings(input: &HumanSummaryInput<'_>) -> [SkipWarning; 9] {
             prefix: "Skipped ",
             singular: "file",
             plural: "files",
-            suffix: " with mixed CRLF/LF line endings. Normalize each file (`dos2unix <path>` or `git config core.autocrlf input` + re-checkout) before re-running.",
+            suffix: " with mixed CRLF/LF line endings or a bare CR line ending. Normalize each file (`dos2unix <path>` or `git config core.autocrlf input` + re-checkout) before re-running.",
         },
         SkipWarning {
             count: input.low_confidence_count,

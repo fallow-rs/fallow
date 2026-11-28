@@ -33,7 +33,7 @@ enum ExpectedTargetState {
 pub(super) enum SkipReason {
     /// The file changed after analysis, so the offsets are stale.
     ContentChanged,
-    /// The file mixes CRLF and LF line endings.
+    /// The file mixes CRLF and LF line endings, or has a bare CR line ending.
     MixedLineEndings,
     /// Conservative skip for files whose consumers may be off-graph.
     LowConfidenceOffGraph,
@@ -137,7 +137,7 @@ impl SkipReason {
                 "Skipping {display}: file content changed since `fallow dead-code` ran. Re-run `fallow fix` to refresh the analysis first.",
             ),
             Self::MixedLineEndings => format!(
-                "Skipping {display}: file has mixed CRLF/LF line endings. Normalize it, then re-run `fallow fix`.",
+                "Skipping {display}: file has mixed CRLF/LF line endings or a bare CR line ending. Normalize it, then re-run `fallow fix`.",
             ),
             Self::LowConfidenceOffGraph => format!(
                 "Kept unused export(s) in {display}: consumer coverage is incomplete, so the export was preserved.",
