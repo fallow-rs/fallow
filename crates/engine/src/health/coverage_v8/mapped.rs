@@ -8,7 +8,7 @@
 //! to a generated position through the source map, and the line lengths turn
 //! that position into the offset that the V8 ranges use.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use oxc_coverage_instrument::{
     FileCoverage, Location, Position, V8CoverageRange, V8FunctionCoverage,
@@ -50,11 +50,13 @@ impl GeneratedScript {
     /// against the directory of the external map, or of the generated script
     /// when the entry names no map. A virtual `webpack://` or `vite://`
     /// source resolves to the first existing file in that directory or one
-    /// of its ancestors. Remote sources are left out.
+    /// of its ancestors, up to the project root `root`. Remote sources are
+    /// left out.
     pub(super) fn source_paths(
         &self,
         script_url: &str,
         source_map_url: Option<&str>,
+        root: Option<&Path>,
     ) -> Vec<(u32, PathBuf)> {
         let base_dir = source_map_base_dir(script_url, source_map_url);
         self.map
@@ -62,7 +64,7 @@ impl GeneratedScript {
             .iter()
             .enumerate()
             .filter_map(|(index, source)| {
-                let path = resolve_original_source(source, base_dir.as_deref())?;
+                let path = resolve_original_source(source, base_dir.as_deref(), root)?;
                 Some((u32::try_from(index).ok()?, path))
             })
             .collect()
@@ -189,8 +191,6 @@ fn smallest_range_count(ranges_by_width: &[V8CoverageRange], offset: u32) -> u32
 
 #[cfg(test)]
 mod tests {
-    use std::path::Path;
-
     use super::*;
 
     #[test]
@@ -222,7 +222,7 @@ mod tests {
         };
         let script = GeneratedScript::parse(&entry).unwrap();
         let bundle = url::Url::from_file_path(dir.path().join("dist/bundle.js")).unwrap();
-        let paths = script.source_paths(bundle.as_str(), None);
+        let paths = script.source_paths(bundle.as_str(), None, Some(dir.path()));
         assert_eq!(paths.len(), 1);
         assert_eq!(paths[0].0, 0);
         assert!(paths[0].1.ends_with(Path::new("src/a.ts")));
@@ -245,7 +245,7 @@ mod tests {
             }),
         };
         let script = GeneratedScript::parse(&entry).unwrap();
-        let paths = script.source_paths(&format!("{dir}bundle.js"), None);
+        let paths = script.source_paths(&format!("{dir}bundle.js"), None, None);
         assert_eq!(paths.len(), 1);
         assert_eq!(paths[0].0, 0);
         assert!(paths[0].1.ends_with(Path::new("dist/../src/a.ts")));

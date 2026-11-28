@@ -83,9 +83,14 @@ pub fn source_map_base_dir(generated_url: &str, source_map_url: Option<&str>) ->
 /// The file path of one source of a map. A `file://` URL and an absolute
 /// path resolve without a base directory. A relative path joins the base
 /// directory. A `webpack://` or `vite://` source resolves to the first
-/// existing file in the base directory or one of its ancestors. Each other
-/// URL gives `None`.
-pub fn resolve_original_source(raw_source: &str, base_dir: Option<&Path>) -> Option<PathBuf> {
+/// existing file in the base directory or one of its ancestors, up to the
+/// project root `root`. The walk does not leave the project root, and a
+/// virtual source without a root gives `None`. Each other URL gives `None`.
+pub fn resolve_original_source(
+    raw_source: &str,
+    base_dir: Option<&Path>,
+    root: Option<&Path>,
+) -> Option<PathBuf> {
     if raw_source.is_empty() {
         return None;
     }
@@ -100,7 +105,7 @@ pub fn resolve_original_source(raw_source: &str, base_dir: Option<&Path>) -> Opt
     if let Ok(url) = Url::parse(raw_source) {
         return match url.scheme() {
             "webpack" | "vite" => {
-                resolve_virtual_candidate(&virtual_source_candidates(&url), base_dir?)
+                resolve_virtual_candidate(&virtual_source_candidates(&url), base_dir?, root?)
             }
             _ => None,
         };
@@ -135,11 +140,27 @@ fn push_candidate(candidates: &mut Vec<PathBuf>, candidate: PathBuf) {
     }
 }
 
-fn resolve_virtual_candidate(candidates: &[PathBuf], base_dir: &Path) -> Option<PathBuf> {
+/// The first candidate that is a file in `base_dir` or one of its
+/// ancestors. A missing directory is skipped. The walk stops at the first
+/// directory that resolves outside `root`, and each candidate is checked
+/// against `root` before the probe, so no probe reaches a path outside the
+/// root.
+fn resolve_virtual_candidate(
+    candidates: &[PathBuf],
+    base_dir: &Path,
+    root: &Path,
+) -> Option<PathBuf> {
+    let read_root = fallow_types::read_guard::ReadRoot::new(root);
     for base in base_dir.ancestors() {
+        if base.symlink_metadata().is_err() {
+            continue;
+        }
+        if !read_root.is_inside(base) {
+            return None;
+        }
         for candidate in candidates {
             let resolved = base.join(candidate);
-            if resolved.is_file() {
+            if read_root.is_inside(&resolved) && resolved.is_file() {
                 return Some(resolved);
             }
         }
@@ -156,7 +177,11 @@ mod tests {
     }
 
     fn resolve(source: &str, generated: &str, map_url: Option<&str>) -> Option<PathBuf> {
-        resolve_original_source(source, source_map_base_dir(generated, map_url).as_deref())
+        resolve_original_source(
+            source,
+            source_map_base_dir(generated, map_url).as_deref(),
+            None,
+        )
     }
 
     /// A tempdir with an empty `dist` directory and each file of `files`.
@@ -172,7 +197,7 @@ mod tests {
     }
 
     fn resolve_virtual(dir: &tempfile::TempDir, source: &str) -> Option<PathBuf> {
-        resolve_original_source(source, Some(&dir.path().join("dist")))
+        resolve_original_source(source, Some(&dir.path().join("dist")), Some(dir.path()))
     }
 
     #[test]
@@ -239,9 +264,36 @@ mod tests {
     fn resolve_original_source_path_resolves_virtual_sources_from_ancestors() {
         let dir = project(&["src/app.ts"]);
         let generated = file_url(&dir.path().join("dist/chunks/app.js"));
+        let base = source_map_base_dir(&generated, None);
         assert_eq!(
-            resolve("webpack://app/src/app.ts", &generated, None),
+            resolve_original_source(
+                "webpack://app/src/app.ts",
+                base.as_deref(),
+                Some(dir.path())
+            ),
             Some(dir.path().join("src/app.ts"))
+        );
+        assert_eq!(resolve("webpack://app/src/app.ts", &generated, None), None);
+    }
+
+    #[test]
+    fn virtual_source_walk_stops_at_the_project_root() {
+        let sandbox = project(&["src/app.ts", "project/dist/chunks/app.js"]);
+        let root = sandbox.path().join("project");
+        let base = root.join("dist/chunks");
+        assert_eq!(
+            resolve_original_source("webpack://app/src/app.ts", Some(&base), Some(&root)),
+            None
+        );
+        assert_eq!(
+            resolve_original_source("webpack://app/../../src/app.ts", Some(&base), Some(&root)),
+            None
+        );
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("src/app.ts"), "").unwrap();
+        assert_eq!(
+            resolve_original_source("webpack://app/src/app.ts", Some(&base), Some(&root)),
+            Some(root.join("src/app.ts"))
         );
     }
 
@@ -262,7 +314,7 @@ mod tests {
     fn resolve_virtual_source_path_ignores_non_virtual_schemes() {
         let dir = tempfile::tempdir().unwrap();
         assert_eq!(
-            resolve_original_source("https://example.com/app.ts", Some(dir.path())),
+            resolve_original_source("https://example.com/app.ts", Some(dir.path()), None),
             None
         );
     }
@@ -301,7 +353,7 @@ mod tests {
         let expected = dir.path().join("dist").join("../maps");
         assert_eq!(base.as_deref(), Some(expected.as_path()));
         assert_eq!(
-            resolve_original_source("../src/a.ts", base.as_deref()),
+            resolve_original_source("../src/a.ts", base.as_deref(), None),
             Some(expected.join("../src/a.ts"))
         );
     }
