@@ -3160,6 +3160,23 @@ fn migrate_legacy_store_corrupt_file_returns_default() {
     assert!(store.records.is_empty());
 }
 
+/// The legacy store is a path in the checkout. A link there to a file
+/// outside the root is not read.
+#[test]
+#[cfg(unix)]
+#[cfg_attr(miri, ignore)]
+fn legacy_store_link_out_of_the_root_is_not_read() {
+    let (_config, dir) = test_env();
+    let root = dir.path().join("project");
+    let outside = dir.path().join("outside.json");
+    std::fs::create_dir_all(root.join(".fallow")).unwrap();
+    std::fs::write(&outside, br#"{"enabled":true}"#).unwrap();
+    std::os::unix::fs::symlink(&outside, legacy_store_path(&root)).unwrap();
+
+    assert!(!load(&root).enabled);
+    assert!(!load_statusline(&root).is_ok_and(|store| store.enabled));
+}
+
 #[test]
 #[cfg_attr(miri, ignore)]
 fn statusline_loader_reads_legacy_store_without_migrating_it() {

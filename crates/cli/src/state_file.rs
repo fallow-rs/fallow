@@ -9,6 +9,7 @@ use std::path::Path;
 
 use fallow_types::read_guard::{
     DEFAULT_MAX_READ_BYTES, ReadRefusal, read_bytes_bounded, read_to_string_bounded,
+    read_to_string_inside,
 };
 
 /// Read `path` as text. A missing file is `Ok(None)`. Each other read
@@ -55,7 +56,29 @@ pub enum Existing<T> {
 /// Read `path` and parse the text. A read path can map `Unreadable` and
 /// `Invalid` to a default. A write path must stop or keep the file.
 pub fn load_existing<T>(path: &Path, parse: impl FnOnce(&str) -> Result<T, String>) -> Existing<T> {
-    match read_optional_text(path) {
+    parse_read(read_optional_text(path), parse)
+}
+
+/// [`load_existing`] for a file that must resolve inside `base`, such as a
+/// state file below `.fallow`. That directory is a path in the checkout, so
+/// a clone can hold a link there. A file that resolves outside `base` is
+/// `Unreadable`, and its content is not read.
+pub fn load_existing_inside<T>(
+    base: &Path,
+    path: &Path,
+    parse: impl FnOnce(&str) -> Result<T, String>,
+) -> Existing<T> {
+    parse_read(
+        optional(read_to_string_inside(base, path, DEFAULT_MAX_READ_BYTES)),
+        parse,
+    )
+}
+
+fn parse_read<T>(
+    read: std::io::Result<Option<String>>,
+    parse: impl FnOnce(&str) -> Result<T, String>,
+) -> Existing<T> {
+    match read {
         Ok(None) => Existing::Absent,
         Ok(Some(text)) => match parse(&text) {
             Ok(value) => Existing::Loaded(value),

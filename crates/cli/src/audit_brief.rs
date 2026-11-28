@@ -1933,7 +1933,7 @@ pub fn print_walkthrough_human_result(
     // markdown render honors `--mark-viewed` the same way the human render does
     // (the two formats agree on the same on-disk state instead of markdown
     // silently ignoring it).
-    let viewed = crate::walkthrough_state::load_viewed_state(cache_dir);
+    let viewed = crate::walkthrough_state::load_viewed_state(root, cache_dir);
 
     if matches!(result.output, OutputFormat::Markdown) {
         let viewed_files = crate::report::walkthrough_viewed_files(&guide, &viewed);

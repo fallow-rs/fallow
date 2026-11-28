@@ -2,7 +2,7 @@
 //! and the write transaction.
 
 use super::*;
-use crate::state_file::{Existing, load_existing};
+use crate::state_file::{Existing, load_existing, load_existing_inside};
 
 /// Path to the per-project store file in the user's private config dir, or
 /// `None` when no config dir is resolvable (e.g. stripped CI env), in which
@@ -281,7 +281,7 @@ fn legacy_view(root: &Path, store: &Path) -> Existing<ImpactStore> {
     if migration_marker_path(store).exists() {
         return Existing::Absent;
     }
-    let parsed = load_existing(&legacy_store_path(root), |content| {
+    let parsed = load_existing_inside(root, &legacy_store_path(root), |content| {
         serde_json::from_str::<LegacyFlatStore>(content).map_err(|err| err.to_string())
     });
     match parsed {
