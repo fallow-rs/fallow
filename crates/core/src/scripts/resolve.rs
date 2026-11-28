@@ -83,35 +83,26 @@ fn installed_package(
 ///
 /// Probes each provided `node_modules/` root, which covers non-hoisted setups.
 /// A dependency name that is not a package directory name (see
-/// [`is_package_directory_name`]) is skipped. Each manifest is read only when
-/// it resolves inside the read scope of its root.
+/// [`is_package_directory_name`]) is skipped. A package can be a link to a
+/// store outside the project, so the manifest read checks only that the file
+/// is a regular file within the size limit.
 #[must_use]
 pub fn build_bin_to_package_map(
     node_modules_roots: &[&Path],
     dep_names: &[String],
 ) -> FxHashMap<String, String> {
     let mut map = FxHashMap::default();
-    // A root that does not resolve has no `node_modules` to read.
-    let roots: Vec<(PathBuf, PathBuf)> = node_modules_roots
-        .iter()
-        .filter_map(|root| {
-            let root = dunce::canonicalize(root).ok()?;
-            let scope = fallow_config::project_scope_base(&root);
-            Some((root, scope))
-        })
-        .collect();
 
     for dep_name in dep_names
         .iter()
         .filter(|name| is_package_directory_name(name))
     {
-        let bin = roots.iter().find_map(|(root, scope)| {
+        let bin = node_modules_roots.iter().find_map(|root| {
             let pkg_path = root
                 .join("node_modules")
                 .join(dep_name)
                 .join("package.json");
-            let content = fallow_types::read_guard::read_to_string_inside(
-                scope,
+            let content = fallow_types::read_guard::read_to_string_bounded(
                 &pkg_path,
                 fallow_types::read_guard::DEFAULT_MAX_READ_BYTES,
             )
@@ -1012,22 +1003,22 @@ mod tests {
 
     #[test]
     #[cfg(unix)]
-    fn bin_map_skips_a_package_link_out_of_the_project() {
+    fn bin_map_resolves_a_package_linked_from_outside_the_project() {
         let base = tempfile::tempdir().unwrap();
         let root = base.path().join("project");
         std::fs::create_dir_all(root.join("node_modules")).unwrap();
-        let other = base.path().join("other");
-        std::fs::create_dir_all(&other).unwrap();
+        let store = base.path().join("store/linked");
+        std::fs::create_dir_all(&store).unwrap();
         std::fs::write(
-            other.join("package.json"),
-            r#"{"name": "linked", "bin": {"othertool": "./cli.js"}}"#,
+            store.join("package.json"),
+            r#"{"name": "linked", "bin": {"linkedtool": "./cli.js"}}"#,
         )
         .unwrap();
-        std::os::unix::fs::symlink(&other, root.join("node_modules/linked")).unwrap();
+        std::os::unix::fs::symlink(&store, root.join("node_modules/linked")).unwrap();
 
         let map = build_bin_to_package_map(&[root.as_path()], &["linked".to_string()]);
 
-        assert!(map.is_empty(), "{map:?}");
+        assert_eq!(map.get("linkedtool").map(String::as_str), Some("linked"));
     }
 
     fn workspace_package(json: &str) -> fallow_config::PackageJson {
