@@ -7,6 +7,6 @@
   - A Nuxt layer counts only when its config resolves inside the project. A layer in the same repository or workspace still counts.
   - A `webpack://` or `vite://` source of a V8 source map resolves only to a file inside the project root.
   - A lockfile that is a link out of the project no longer selects the package manager.
-  - A workspace glob match that resolves outside the project gives no `glob-matched-no-package-json` diagnostic and no recovered nested package.
+  - A workspace glob match that resolves outside the project gives no `glob-matched-no-package-json` diagnostic and no recovered nested package. A workspace pattern directory behind a link out of the project does not count as missing, so it gives no `workspace-pattern-dir-missing` diagnostic.
   - `fallow rule-pack init`, `fallow init`, `fallow init --agents` and `fallow migrate` refuse a path that links out of the project before they check whether the file exists. `fallow init` and `fallow migrate` check each of the four config names.
   - `fallow hooks install` and `fallow hooks uninstall` refuse a `.husky`, `.lefthook`, `lefthook.yml` or `lefthook.json` path that links out of the project before they probe it.
