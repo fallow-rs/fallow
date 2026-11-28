@@ -56,6 +56,7 @@ pub mod file_context;
 mod generated_line_starts;
 pub mod login;
 mod partial_capture;
+pub mod risk_band;
 mod setup_cli;
 pub mod setup_cloud;
 mod setup_recipe;

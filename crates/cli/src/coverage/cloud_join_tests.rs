@@ -69,13 +69,12 @@ fn cloud_rows_take_local_structure_when_the_cloud_has_none() {
         ..static_info("src/api.ts", "handler", 10, 22)
     };
     let stable_id = info.stable_id.clone();
-    let static_index = static_index_with(vec![info]);
+    let (static_index, mut snapshot) = with_importer_traffic(info, 700);
     let mut function = cloud_function("src/api.ts", "handler", Some(10), Some(10), Some(22));
     function.tracking_state = CloudTrackingState::Called;
     function.hit_count = Some(20_000);
     function.stable_id = Some(stable_id.clone());
-    let mut snapshot = cloud_context(1, 0);
-    snapshot.functions = vec![function];
+    snapshot.functions.push(function);
     snapshot.blast_radius = vec![
         crate::coverage::cloud_client::CloudRuntimeBlastRadiusEntry {
             id: "fallow:blast:cloud0001".to_owned(),
@@ -110,7 +109,9 @@ fn cloud_rows_take_local_structure_when_the_cloud_has_none() {
     let blast = &report.blast_radius[0];
     assert_eq!(blast.id, "fallow:blast:cloud0001");
     assert_eq!(blast.caller_count, 8);
-    assert_eq!(blast.caller_count_weighted_by_traffic, 160_000);
+    // The traffic in the importer file, as the cloud measures it, not the
+    // own invocations times the callers (fallow-cloud#1642).
+    assert_eq!(blast.caller_count_weighted_by_traffic, Some(700));
     assert_eq!(blast.risk_band, RuntimeCoverageRiskBand::Medium);
     let importance = &report.importance[0];
     assert_eq!(importance.cyclomatic, 12);
@@ -244,7 +245,11 @@ fn cloud_rows_keep_a_cloud_caller_graph() {
     let report = merge_cloud_snapshot(&snapshot, &static_index, 100).report;
 
     assert_eq!(report.blast_radius[0].caller_count, 3);
-    assert_eq!(report.blast_radius[0].caller_count_weighted_by_traffic, 0);
+    // The cloud sent null: no importer file ran. Null stays null.
+    assert_eq!(
+        report.blast_radius[0].caller_count_weighted_by_traffic,
+        None
+    );
     assert_eq!(
         report.blast_radius[0].risk_band,
         RuntimeCoverageRiskBand::Low
@@ -361,4 +366,139 @@ fn cloud_join_ids_count_same_name_functions_that_did_not_run() {
         hex
     });
     assert_eq!(report.hot_paths[0].id, format!("fallow:hot:{expected}"));
+}
+
+/// A local index where `src/routes.ts` imports `src/api.ts`, and a snapshot
+/// whose `src/routes.ts` function ran `routes_hits` times.
+fn with_importer_traffic(
+    info: StaticFunctionInfo,
+    routes_hits: u64,
+) -> (StaticIndex, CloudRuntimeContext) {
+    let mut static_index =
+        static_index_with(vec![info, static_info("src/routes.ts", "route", 1, 9)]);
+    static_index
+        .importers
+        .insert("src/api.ts".to_owned(), vec!["src/routes.ts".to_owned()]);
+    let mut route = cloud_function("src/routes.ts", "route", Some(1), Some(1), Some(9));
+    route.tracking_state = CloudTrackingState::Called;
+    route.hit_count = Some(routes_hits);
+    let mut snapshot = cloud_context(2, 0);
+    snapshot.functions = vec![route];
+    (static_index, snapshot)
+}
+
+/// A function with few importers stays `low`, also when the importer files
+/// run five million times. Traffic does not move the band (fallow-cloud#1642).
+#[test]
+fn cloud_join_band_ignores_traffic() {
+    let info = StaticFunctionInfo {
+        caller_count: 2,
+        ..static_info("src/api.ts", "handler", 10, 22)
+    };
+    let (static_index, mut snapshot) = with_importer_traffic(info, 5_000_000);
+    let mut function = cloud_function("src/api.ts", "handler", Some(10), Some(10), Some(22));
+    function.tracking_state = CloudTrackingState::Called;
+    function.hit_count = Some(900_000);
+    snapshot.functions.push(function);
+
+    let report = merge_cloud_snapshot(&snapshot, &static_index, 1).report;
+
+    let blast = report
+        .blast_radius
+        .iter()
+        .find(|row| row.function == "handler")
+        .expect("handler row");
+    assert_eq!(blast.caller_count_weighted_by_traffic, Some(5_000_000));
+    assert_eq!(blast.risk_band, RuntimeCoverageRiskBand::Low);
+}
+
+/// No importer file of the function has runtime data, so the weighted
+/// value is not measured and stays null, not 0.
+#[test]
+fn cloud_join_weighted_is_null_without_observed_importers() {
+    let info = StaticFunctionInfo {
+        caller_count: 1,
+        ..static_info("src/api.ts", "handler", 10, 22)
+    };
+    let static_index = static_index_with(vec![info]);
+    let mut function = cloud_function("src/api.ts", "handler", Some(10), Some(10), Some(22));
+    function.tracking_state = CloudTrackingState::Called;
+    function.hit_count = Some(50);
+    let mut snapshot = cloud_context(1, 0);
+    snapshot.functions = vec![function];
+
+    let report = merge_cloud_snapshot(&snapshot, &static_index, 1).report;
+
+    assert_eq!(
+        report.blast_radius[0].caller_count_weighted_by_traffic,
+        None
+    );
+    let json = serde_json::to_value(&report.blast_radius[0]).expect("serialize");
+    assert!(json["caller_count_weighted_by_traffic"].is_null());
+}
+
+/// The cloud row is `unknown` and the local AST has no match for it, so the
+/// band stays `unknown` instead of a guessed `low`.
+#[test]
+fn cloud_rows_keep_unknown_without_local_structure() {
+    let (static_index, snapshot) = called_handler_snapshot(cloud_blast_row(
+        None,
+        None,
+        crate::coverage::cloud_client::CloudRuntimeRiskBand::Unknown,
+    ));
+    let mut snapshot = snapshot;
+    snapshot.blast_radius[0].file = "src/elsewhere.ts".to_owned();
+    snapshot.blast_radius[0].function = "other".to_owned();
+
+    let report = merge_cloud_snapshot(&snapshot, &static_index, 100).report;
+
+    assert_eq!(
+        report.blast_radius[0].risk_band,
+        RuntimeCoverageRiskBand::Unknown
+    );
+    assert_eq!(
+        report.blast_radius[0].caller_count_weighted_by_traffic,
+        None
+    );
+    // Not known, documented as 0 next to the `unknown` band.
+    assert_eq!(report.blast_radius[0].caller_count, 0);
+}
+
+/// The only function of the importer file has no local match (an anonymous
+/// callback that the AST names otherwise). Its hits still count for that
+/// file, as in the cloud sum, instead of a null traffic value.
+#[test]
+fn cloud_join_counts_unmatched_hits_in_a_resolved_importer_file() {
+    let info = StaticFunctionInfo {
+        caller_count: 1,
+        ..static_info("src/api.ts", "handler", 10, 22)
+    };
+    let mut static_index =
+        static_index_with(vec![info, static_info("src/routes.ts", "route", 1, 9)]);
+    static_index
+        .importers
+        .insert("src/api.ts".to_owned(), vec!["src/routes.ts".to_owned()]);
+    let mut callback = cloud_function(
+        "/app/src/routes.ts",
+        "(anonymous_3)",
+        Some(40),
+        Some(40),
+        Some(44),
+    );
+    callback.tracking_state = CloudTrackingState::Called;
+    callback.hit_count = Some(10_000);
+    let mut function = cloud_function("src/api.ts", "handler", Some(10), Some(10), Some(22));
+    function.tracking_state = CloudTrackingState::Called;
+    function.hit_count = Some(50);
+    let mut snapshot = cloud_context(2, 0);
+    snapshot.functions = vec![callback, function];
+
+    let report = merge_cloud_snapshot(&snapshot, &static_index, 1).report;
+
+    let blast = report
+        .blast_radius
+        .iter()
+        .find(|row| row.function == "handler")
+        .expect("handler row");
+    assert_eq!(blast.caller_count_weighted_by_traffic, Some(10_000));
 }

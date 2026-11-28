@@ -3005,9 +3005,14 @@
           "type": "string",
           "const": "high",
           "description": "Wide caller footprint; changes ripple far."
+        },
+        {
+          "type": "string",
+          "const": "unknown",
+          "description": "The caller count is not known: Fallow Cloud has no caller graph for\nthe function and the local AST has no match for it."
         }
       ],
-      "description": "Blast-radius risk band. The current thresholds are high at >=20 static\ncallers or >=1,000,000 traffic-weighted caller reach; medium at >=5 callers\nor >=50,000 weighted reach; low otherwise."
+      "description": "Blast-radius risk band from the count of importer files (`caller_count`)\nonly: high at 20 or more, medium at 5 or more, low otherwise. Traffic does\nnot move the band; read `caller_count_weighted_by_traffic` for traffic.\n`unknown` when the caller count is not known. Context only: the band never\nchanges a verdict, a confidence or an action."
     },
     "RuntimeCoverageBlastRadiusEntry": {
       "type": "object",
@@ -3044,11 +3049,14 @@
         },
         "caller_count": {
           "type": "integer",
-          "description": "Static caller count from the module graph."
+          "description": "Count of the files that import the function's file. `0` when\n`risk_band` is `unknown`: the count is then not known."
         },
         "caller_count_weighted_by_traffic": {
-          "type": "integer",
-          "description": "Caller reach weighted by observed runtime traffic."
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "Production runtime hits in the importer files of the function: the sum\nof the hits of the functions in the files that import it. `null` when\nit is not measured: no importer file has runtime data, or a local run\n(`health --runtime-coverage`), which has no measure for it."
         },
         "deploys_touched": {
           "type": [
@@ -3058,7 +3066,7 @@
           "description": "Distinct deploy SHAs that touched the function in the observation\nwindow. Cloud mode only; omitted in local mode."
         },
         "risk_band": {
-          "description": "Risk band derived from caller counts and traffic-weighted reach.",
+          "description": "Risk band from the count of importer files. See `RuntimeCoverageRiskBand`.",
           "$ref": "#/definitions/RuntimeCoverageRiskBand"
         },
         "cloud_context": {
