@@ -8,7 +8,12 @@ use super::FallowConfig;
 
 #[path = "parsing_extends.rs"]
 mod extends_entry;
-use extends_entry::{ExtendsTarget, LocalExtendsEntry, extends_target, outside_extends_error};
+#[cfg(test)]
+use extends_entry::MAX_EXTENDS_ENTRIES;
+use extends_entry::{
+    ExtendsTarget, LocalExtendsEntry, check_extends_count, extends_target, extends_target_key,
+    extract_extends, keep_last_entries, outside_extends_error,
+};
 
 pub use fallow_types::config_file_names::{
     CONFIG_FILE_NAMES, UNRECOGNIZED_CONFIG_FILE_NAMES, config_file_name,
@@ -818,22 +823,31 @@ impl<'a, Fetcher: RemoteConfigFetcher> ExtendsResolver<'a, Fetcher> {
             .and_then(serde_json::Value::as_bool)
             .unwrap_or(false);
         let sealed_dir_canonical = sealed_config_dir(config_dir, sealed)?;
-        let mut merged = serde_json::Value::Object(serde_json::Map::new());
-        for entry in &extends {
-            let target = extends_target(LocalExtendsEntry {
-                path,
-                config_dir,
-                entry,
-                sealed,
-                sealed_dir_canonical: sealed_dir_canonical.as_deref(),
+        let outside_error = |error| {
+            if inside {
+                error
+            } else {
+                outside_extends_error(path)
+            }
+        };
+        let extends = keep_last_entries(extends, Clone::clone);
+        let targets = extends
+            .iter()
+            .map(|entry| {
+                extends_target(LocalExtendsEntry {
+                    path,
+                    config_dir,
+                    entry,
+                    sealed,
+                    sealed_dir_canonical: sealed_dir_canonical.as_deref(),
+                })
             })
-            .map_err(|error| {
-                if inside {
-                    error
-                } else {
-                    outside_extends_error(path)
-                }
-            })?;
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(outside_error)?;
+        let targets = keep_last_entries(targets, extends_target_key);
+        check_extends_count(targets.len(), &path.display().to_string()).map_err(outside_error)?;
+        let mut merged = serde_json::Value::Object(serde_json::Map::new());
+        for target in targets {
             let base = match target {
                 ExtendsTarget::Remote(url) => self.resolve_remote(url, depth + 1)?,
                 ExtendsTarget::Local(target) => self.resolve_local(&target, depth + 1)?,
@@ -896,6 +910,14 @@ impl<'a, Fetcher: RemoteConfigFetcher> ExtendsResolver<'a, Fetcher> {
         }
 
         let url_display = remote_config_display(url);
+        let extends = keep_last_entries(extends, |entry| {
+            if starts_with_url_prefix(entry, HTTPS_PREFIX) {
+                normalize_url_for_dedup(entry)
+            } else {
+                entry.clone()
+            }
+        });
+        check_extends_count(extends.len(), &format!("remote config {url_display}"))?;
         let mut merged = serde_json::Value::Object(serde_json::Map::new());
         for entry in &extends {
             let base = if starts_with_url_prefix(entry, HTTPS_PREFIX) {
@@ -929,48 +951,6 @@ impl<'a, Fetcher: RemoteConfigFetcher> ExtendsResolver<'a, Fetcher> {
         }
         deep_merge_json(&mut merged, value);
         Ok(merged)
-    }
-}
-
-/// Extract the `extends` array from a parsed JSON config value.
-///
-/// Fails loud on malformed values: the key is removed before
-/// deserialization, so `FallowConfig`'s `deny_unknown_fields` never sees a
-/// bad `extends` and the base config would otherwise go unmerged silently.
-fn extract_extends(
-    value: &mut serde_json::Value,
-    source: &str,
-) -> Result<Vec<String>, miette::Report> {
-    let Some(extends) = value.as_object_mut().and_then(|obj| obj.remove("extends")) else {
-        return Ok(Vec::new());
-    };
-    match extends {
-        serde_json::Value::String(s) => Ok(vec![s]),
-        serde_json::Value::Array(arr) => arr
-            .into_iter()
-            .map(|entry| match entry {
-                serde_json::Value::String(s) => Ok(s),
-                other => Err(miette::miette!(
-                    "extends entries must be strings, got {} (in {source})",
-                    json_type_name(&other)
-                )),
-            })
-            .collect(),
-        other => Err(miette::miette!(
-            "extends must be a string or an array of strings, got {} (in {source})",
-            json_type_name(&other)
-        )),
-    }
-}
-
-fn json_type_name(value: &serde_json::Value) -> &'static str {
-    match value {
-        serde_json::Value::Null => "null",
-        serde_json::Value::Bool(_) => "a boolean",
-        serde_json::Value::Number(_) => "a number",
-        serde_json::Value::String(_) => "a string",
-        serde_json::Value::Array(_) => "an array",
-        serde_json::Value::Object(_) => "an object",
     }
 }
 
@@ -1983,3 +1963,7 @@ mod tests;
 #[cfg(test)]
 #[path = "parsing_read_tests.rs"]
 mod read_tests;
+
+#[cfg(test)]
+#[path = "parsing_budget_tests.rs"]
+mod budget_tests;
