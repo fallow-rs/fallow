@@ -1,5 +1,6 @@
 mod astro;
 mod component_contracts;
+mod copy_caps;
 mod css;
 mod deep_shapes;
 mod effect;

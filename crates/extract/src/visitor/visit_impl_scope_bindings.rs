@@ -12,6 +12,27 @@ use super::super::helpers::{array_element_type_from_type, map_value_type_from_ty
 use super::super::{ModuleInfoExtractor, SecurityPathSinkBinding};
 use super::{sink_literal_value, static_sink_literal_to_string, unwrap_static_expr};
 
+/// The longest string, in bytes, that a module binding or a folded template
+/// literal keeps as a static sink literal.
+///
+/// Sink checks read short values such as a URL, a hash name or a shell
+/// command. Without a cap, a chain of template literals that each read the
+/// previous binding twice doubles the value at each declaration, and each
+/// read of a binding copies its value again. A longer
+/// value is not a static literal: the binding records no value, and a folded
+/// template literal gives `None`.
+const MAX_STATIC_SINK_LITERAL_BYTES: usize = 16 * 1024;
+
+/// Whether `value` is short enough to keep as a static sink literal.
+fn fits_static_sink_literal(value: &SinkLiteralValue) -> bool {
+    match value {
+        SinkLiteralValue::String(text) => text.len() <= MAX_STATIC_SINK_LITERAL_BYTES,
+        SinkLiteralValue::Integer(_) | SinkLiteralValue::Boolean(_) | SinkLiteralValue::Null => {
+            true
+        }
+    }
+}
+
 #[derive(Default)]
 struct FunctionVarRootCollector {
     roots: FxHashSet<String>,
@@ -464,7 +485,10 @@ impl ModuleInfoExtractor {
         } else {
             self.module_trusted_path_bindings.remove(id.name.as_str());
         }
-        if let Some(value) = self.static_sink_literal_value(init) {
+        if let Some(value) = self
+            .static_sink_literal_value(init)
+            .filter(fits_static_sink_literal)
+        {
             self.module_static_sink_literals
                 .insert(id.name.to_string(), value);
         } else {
@@ -481,6 +505,9 @@ impl ModuleInfoExtractor {
         member_name: &str,
         value: String,
     ) {
+        if value.len() > MAX_STATIC_SINK_LITERAL_BYTES {
+            return;
+        }
         self.module_static_sink_literals
             .entry(static_enum_member_key(enum_name, ""))
             .or_insert(SinkLiteralValue::Null);
@@ -588,6 +615,9 @@ impl ModuleInfoExtractor {
                         value.push_str(&static_sink_literal_to_string(
                             &self.static_sink_literal_value(expression)?,
                         ));
+                    }
+                    if value.len() > MAX_STATIC_SINK_LITERAL_BYTES {
+                        return None;
                     }
                 }
                 Some(SinkLiteralValue::String(value))
