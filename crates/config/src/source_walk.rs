@@ -5,9 +5,11 @@ use std::path::{Path, PathBuf};
 use ignore::{DirEntry, WalkBuilder};
 
 use crate::WorkspaceInfo;
-use crate::ignore_files::{IgnoreFileSources, checked_walk_builder};
+use crate::ignore_files::{IgnoreFileSources, WalkKind, checked_walk_builder};
 
-/// Make a directory walker with the ignore-file settings of source discovery.
+/// Make a directory walker with the ignore-file settings of source discovery,
+/// for [`WalkBuilder::build`]. Use [`parallel_walk_builder`] for
+/// [`WalkBuilder::build_parallel`].
 ///
 /// The walker reads `.gitignore` files at each level, the global gitignore,
 /// `.git/info/exclude` and `.ignore` files. Gitignore rules apply only inside a
@@ -24,13 +26,24 @@ pub fn source_walk_builder<F>(root: &Path, filter: F) -> WalkBuilder
 where
     F: Fn(&DirEntry) -> bool + Send + Sync + 'static,
 {
-    let sources = IgnoreFileSources {
-        git_ignore: true,
-        git_exclude: true,
-        git_global: true,
-    };
-    checked_walk_builder(root, sources, filter)
+    checked_walk_builder(root, SOURCE_WALK_SOURCES, WalkKind::Serial, filter)
 }
+
+/// [`source_walk_builder`] for [`WalkBuilder::build_parallel`].
+#[must_use]
+pub fn parallel_walk_builder<F>(root: &Path, filter: F) -> WalkBuilder
+where
+    F: Fn(&DirEntry) -> bool + Send + Sync + 'static,
+{
+    checked_walk_builder(root, SOURCE_WALK_SOURCES, WalkKind::Parallel, filter)
+}
+
+/// The ignore files that source discovery reads besides `.ignore` files.
+const SOURCE_WALK_SOURCES: IgnoreFileSources = IgnoreFileSources {
+    git_ignore: true,
+    git_exclude: true,
+    git_global: true,
+};
 
 /// The workspaces whose root directory source discovery walks.
 ///
@@ -339,50 +352,51 @@ mod tests {
     /// `src/index.ts` if it applied.
     #[cfg(unix)]
     fn assert_repository_rules_apply(ignore_above_top: bool) {
-        let directory = tempfile::tempdir().expect("temporary directory");
-        if ignore_above_top {
-            write_file(&directory.path().join(".ignore"), "index.ts\n");
-        }
-        let repository = directory.path().join("repo");
-        std::fs::create_dir_all(repository.join(".git/info")).expect("git directory");
-        write_file(&repository.join(".git/info/exclude"), "excluded.ts\n");
-        write_file(&repository.join(".gitignore"), "dist\n*.log\nshadowed.ts\n");
-        write_file(&repository.join(".ignore"), "generated.ts\n!shadowed.ts\n");
-        let root = repository.join("app");
-        write_file(&root.join(".gitignore"), "!keep.log\n");
-        write_file(&root.join("sub/.ignore"), "!generated.ts\n");
-        for file in [
-            "src/index.ts",
-            "dist/out.js",
-            "drop.log",
-            "keep.log",
-            "generated.ts",
-            "sub/generated.ts",
-            "excluded.ts",
-            "shadowed.ts",
-            "vendor/kept.log",
-        ] {
-            write_file(&root.join(file), "");
-        }
-        std::fs::create_dir_all(root.join("vendor/.git")).expect("nested repository");
-
-        let walked =
-            walked_files_within(source_walk_builder(&root, |_| true), &root).expect("walk ends");
-        assert_eq!(
-            walked,
-            [
-                ".gitignore",
-                "keep.log",
-                "shadowed.ts",
+        for directory in base_directories() {
+            if ignore_above_top {
+                write_file(&directory.path().join(".ignore"), "index.ts\n");
+            }
+            let repository = directory.path().join("repo");
+            std::fs::create_dir_all(repository.join(".git/info")).expect("git directory");
+            write_file(&repository.join(".git/info/exclude"), "excluded.ts\n");
+            write_file(&repository.join(".gitignore"), "dist\n*.log\nshadowed.ts\n");
+            write_file(&repository.join(".ignore"), "generated.ts\n!shadowed.ts\n");
+            let root = repository.join("app");
+            write_file(&root.join(".gitignore"), "!keep.log\n");
+            write_file(&root.join("sub/.ignore"), "!generated.ts\n");
+            for file in [
                 "src/index.ts",
-                "sub/.ignore",
+                "dist/out.js",
+                "drop.log",
+                "keep.log",
+                "generated.ts",
                 "sub/generated.ts",
+                "excluded.ts",
+                "shadowed.ts",
                 "vendor/kept.log",
-            ]
-            .map(String::from)
-            .to_vec(),
-            "ignore above the top level: {ignore_above_top}"
-        );
+            ] {
+                write_file(&root.join(file), "");
+            }
+            std::fs::create_dir_all(root.join("vendor/.git")).expect("nested repository");
+
+            let walked = walked_files_within(source_walk_builder(&root, |_| true), &root)
+                .expect("walk ends");
+            assert_eq!(
+                walked,
+                [
+                    ".gitignore",
+                    "keep.log",
+                    "shadowed.ts",
+                    "src/index.ts",
+                    "sub/.ignore",
+                    "sub/generated.ts",
+                    "vendor/kept.log",
+                ]
+                .map(String::from)
+                .to_vec(),
+                "ignore above the top level: {ignore_above_top}"
+            );
+        }
     }
 
     /// Without a `.ignore` above the root, the parent `.gitignore` and
@@ -392,43 +406,79 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn source_walk_below_the_top_level_keeps_parent_git_rules_in_order() {
-        let directory = tempfile::tempdir().expect("temporary directory");
-        let repository = directory.path().join("repo");
-        std::fs::create_dir_all(repository.join(".git/info")).expect("git directory");
-        write_file(&repository.join(".git/info/exclude"), "excluded.ts\n");
-        write_file(&repository.join(".gitignore"), "dist\n*.log\n");
-        let root = repository.join("app");
-        write_file(&root.join(".gitignore"), "!keep.log\n");
-        write_file(&root.join("sub/.ignore"), "!sub.log\n");
-        for file in [
-            "src/index.ts",
-            "dist/out.js",
-            "drop.log",
-            "keep.log",
-            "sub/sub.log",
-            "excluded.ts",
-            "vendor/kept.log",
-        ] {
-            write_file(&root.join(file), "");
-        }
-        std::fs::create_dir_all(root.join("vendor/.git")).expect("nested repository");
-        let expected = [
-            ".gitignore",
-            "keep.log",
-            "src/index.ts",
-            "sub/.ignore",
-            "sub/sub.log",
-            "vendor/kept.log",
-        ]
-        .map(String::from)
-        .to_vec();
+        for directory in base_directories() {
+            let repository = directory.path().join("repo");
+            std::fs::create_dir_all(repository.join(".git/info")).expect("git directory");
+            write_file(&repository.join(".git/info/exclude"), "excluded.ts\n");
+            write_file(&repository.join(".gitignore"), "dist\n*.log\n");
+            let root = repository.join("app");
+            write_file(&root.join(".gitignore"), "!keep.log\n");
+            write_file(&root.join("sub/.ignore"), "!sub.log\n");
+            for file in [
+                "src/index.ts",
+                "dist/out.js",
+                "drop.log",
+                "keep.log",
+                "sub/sub.log",
+                "excluded.ts",
+                "vendor/kept.log",
+            ] {
+                write_file(&root.join(file), "");
+            }
+            std::fs::create_dir_all(root.join("vendor/.git")).expect("nested repository");
+            let expected = [
+                ".gitignore",
+                "keep.log",
+                "src/index.ts",
+                "sub/.ignore",
+                "sub/sub.log",
+                "vendor/kept.log",
+            ]
+            .map(String::from)
+            .to_vec();
 
-        let builder = source_walk_builder(&root, |_| true);
-        assert_eq!(parallel_walked_files(&builder, &root), expected);
-        assert_eq!(
-            walked_files_within(builder, &root).expect("walk ends"),
-            expected
-        );
+            let builder = source_walk_builder(&root, |_| true);
+            assert_eq!(parallel_walked_files(&builder, &root), expected);
+            assert_eq!(
+                walked_files_within(builder, &root).expect("walk ends"),
+                expected
+            );
+        }
+    }
+
+    /// The serial walker of the crate opens the ignore files of a walked
+    /// directory by path, so on a file system that ignores case it reads
+    /// `.GitIgnore`, and its re-include wins over the parent rule. The
+    /// parallel walker reads only the exact name.
+    #[cfg(unix)]
+    #[test]
+    fn each_walker_reads_a_case_variant_ignore_file_the_way_the_crate_does() {
+        for directory in base_directories() {
+            write_file(&directory.path().join("Probe"), "");
+            if !directory.path().join("probe").exists() {
+                continue;
+            }
+            let repository = directory.path().join("repo");
+            std::fs::create_dir_all(repository.join(".git")).expect("git directory");
+            write_file(&repository.join(".gitignore"), "gen.ts\n");
+            let root = repository.join("a");
+            write_file(&root.join(".GitIgnore"), "*.x.ts\n!gen.ts\n");
+            for file in ["gen.ts", "y.x.ts", "k.ts"] {
+                write_file(&root.join(file), "");
+            }
+
+            let serial = walked_files_within(source_walk_builder(&root, |_| true), &root)
+                .expect("walk ends");
+            assert_eq!(
+                serial,
+                [".GitIgnore", "gen.ts", "k.ts"].map(String::from).to_vec()
+            );
+            let parallel = parallel_walked_files(&parallel_walk_builder(&root, |_| true), &root);
+            assert_eq!(
+                parallel,
+                [".GitIgnore", "k.ts", "y.x.ts"].map(String::from).to_vec()
+            );
+        }
     }
 
     /// A parent `.ignore` rule without a re-include wins over a closer
@@ -436,26 +486,27 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn source_walk_below_the_top_level_keeps_parent_ignore_rules_in_order() {
-        let directory = tempfile::tempdir().expect("temporary directory");
-        let repository = directory.path().join("repo");
-        std::fs::create_dir_all(repository.join(".git")).expect("git directory");
-        write_file(&repository.join(".ignore"), "gen.ts\nout.ts\n");
-        let root = repository.join("app");
-        write_file(&root.join(".gitignore"), "!gen.ts\n");
-        write_file(&root.join("keep/.ignore"), "!out.ts\n");
-        for file in ["gen.ts", "out.ts", "keep/out.ts", "src/index.ts"] {
-            write_file(&root.join(file), "");
-        }
-        let expected = [".gitignore", "keep/.ignore", "keep/out.ts", "src/index.ts"]
-            .map(String::from)
-            .to_vec();
+        for directory in base_directories() {
+            let repository = directory.path().join("repo");
+            std::fs::create_dir_all(repository.join(".git")).expect("git directory");
+            write_file(&repository.join(".ignore"), "gen.ts\nout.ts\n");
+            let root = repository.join("app");
+            write_file(&root.join(".gitignore"), "!gen.ts\n");
+            write_file(&root.join("keep/.ignore"), "!out.ts\n");
+            for file in ["gen.ts", "out.ts", "keep/out.ts", "src/index.ts"] {
+                write_file(&root.join(file), "");
+            }
+            let expected = [".gitignore", "keep/.ignore", "keep/out.ts", "src/index.ts"]
+                .map(String::from)
+                .to_vec();
 
-        let builder = source_walk_builder(&root, |_| true);
-        assert_eq!(parallel_walked_files(&builder, &root), expected);
-        assert_eq!(
-            walked_files_within(builder, &root).expect("walk ends"),
-            expected
-        );
+            let builder = source_walk_builder(&root, |_| true);
+            assert_eq!(parallel_walked_files(&builder, &root), expected);
+            assert_eq!(
+                walked_files_within(builder, &root).expect("walk ends"),
+                expected
+            );
+        }
     }
 
     /// The layout of the parent re-include tests: the repository `.ignore`
@@ -492,12 +543,13 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn source_walk_keeps_a_parent_ignore_re_include_over_a_closer_gitignore() {
-        let directory = tempfile::tempdir().expect("temporary directory");
-        let root = parent_re_include_layout(directory.path());
+        for directory in base_directories() {
+            let root = parent_re_include_layout(directory.path());
 
-        let walked =
-            walked_files_within(source_walk_builder(&root, |_| true), &root).expect("walk ends");
-        assert_eq!(walked, PARENT_RE_INCLUDE_KEPT.map(String::from).to_vec());
+            let walked = walked_files_within(source_walk_builder(&root, |_| true), &root)
+                .expect("walk ends");
+            assert_eq!(walked, PARENT_RE_INCLUDE_KEPT.map(String::from).to_vec());
+        }
     }
 
     /// With an `.ignore` above the top level, the walk drops that file and
@@ -521,7 +573,7 @@ mod tests {
     #[test]
     fn source_walk_ignores_a_file_above_the_top_level_that_appears_later() {
         for nested in [false, true] {
-            let directory = tempfile::tempdir().expect("temporary directory");
+            let directory = shared_base_directory();
             let base = directory.path();
             let repository = base.join("repo");
             std::fs::create_dir_all(repository.join(".git")).expect("git directory");
@@ -541,6 +593,27 @@ mod tests {
                 "nested: {nested}"
             );
         }
+    }
+
+    /// A private base directory and one that all users can write. Above the
+    /// top level of a repository, the second makes the walk apply the parent
+    /// rules itself instead of the crate.
+    #[cfg(unix)]
+    fn base_directories() -> [tempfile::TempDir; 2] {
+        [
+            tempfile::tempdir().expect("temporary directory"),
+            shared_base_directory(),
+        ]
+    }
+
+    #[cfg(unix)]
+    fn shared_base_directory() -> tempfile::TempDir {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let directory = tempfile::tempdir().expect("temporary directory");
+        std::fs::set_permissions(directory.path(), std::fs::Permissions::from_mode(0o777))
+            .expect("make the base directory writable by all");
+        directory
     }
 
     /// The root-relative paths of the files that a parallel walk yields.
@@ -571,35 +644,36 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn source_walk_reads_walked_ignore_files_only_under_their_exact_names() {
-        let directory = tempfile::tempdir().expect("temporary directory");
-        let probe = directory.path().join("Probe");
-        write_file(&probe, "");
-        if !directory.path().join("probe").exists() {
-            return;
-        }
-        let repository = directory.path().join("repo");
-        std::fs::create_dir_all(repository.join(".git")).expect("git directory");
-        write_file(&repository.join(".GITIGNORE"), "*.gi.ts\n");
-        write_file(&repository.join("a/.Ignore"), "*.i.ts\n");
-        write_file(&repository.join("a/b/.GitIgnore"), "*.x.ts\n");
-        write_file(&repository.join("a/b/c/.IGNORE"), "v.ri.ts\n");
-        for dir in ["a", "a/b", "a/b/c"] {
-            for name in ["k.ts", "y.gi.ts", "y.i.ts", "y.x.ts", "v.ri.ts"] {
-                write_file(&repository.join(dir).join(name), "");
+        for directory in base_directories() {
+            let probe = directory.path().join("Probe");
+            write_file(&probe, "");
+            if !directory.path().join("probe").exists() {
+                continue;
             }
-        }
-        let root = repository.join("a");
+            let repository = directory.path().join("repo");
+            std::fs::create_dir_all(repository.join(".git")).expect("git directory");
+            write_file(&repository.join(".GITIGNORE"), "*.gi.ts\n");
+            write_file(&repository.join("a/.Ignore"), "*.i.ts\n");
+            write_file(&repository.join("a/b/.GitIgnore"), "*.x.ts\n");
+            write_file(&repository.join("a/b/c/.IGNORE"), "v.ri.ts\n");
+            for dir in ["a", "a/b", "a/b/c"] {
+                for name in ["k.ts", "y.gi.ts", "y.i.ts", "y.x.ts", "v.ri.ts"] {
+                    write_file(&repository.join(dir).join(name), "");
+                }
+            }
+            let root = repository.join("a");
 
-        let walked = parallel_walked_files(&source_walk_builder(&root, |_| true), &root);
-        let mut expected = vec![".Ignore".to_string()];
-        for dir in ["", "b/", "b/c/"] {
-            for name in ["k.ts", "v.ri.ts", "y.i.ts", "y.x.ts"] {
-                expected.push(format!("{dir}{name}"));
+            let walked = parallel_walked_files(&parallel_walk_builder(&root, |_| true), &root);
+            let mut expected = vec![".Ignore".to_string()];
+            for dir in ["", "b/", "b/c/"] {
+                for name in ["k.ts", "v.ri.ts", "y.i.ts", "y.x.ts"] {
+                    expected.push(format!("{dir}{name}"));
+                }
             }
+            expected.extend(["b/.GitIgnore".to_string(), "b/c/.IGNORE".to_string()]);
+            expected.sort();
+            assert_eq!(walked, expected);
         }
-        expected.extend(["b/.GitIgnore".to_string(), "b/c/.IGNORE".to_string()]);
-        expected.sort();
-        assert_eq!(walked, expected);
     }
 
     #[cfg(unix)]

@@ -1494,13 +1494,15 @@ Shared invariants (`crates/cli/src/base_worktree.rs`):
   (`resolver_for_root` in `crates/graph/src/read_trace.rs`) finds no lookup
   name above the root. The source walk applies no `.ignore` file above the
   repository top level, which the `.git` stub of the snapshot marks. The
-  walk sets `parents(false)` without a check of the files above the top
-  level, so a file that appears there during the run cannot apply. For a
-  root below the top level, `crates/config/src/ignore_parent_rules.rs`
-  applies the files between the root and the top level with the
-  precedence of the crate. The crate keeps the rules of the walk unless a
-  parent `.ignore` file re-includes (`!`). It reads the ignore files of a
-  walked directory from its listing, so a name must match exactly.
+  `ignore` crate keeps its own parent rules only when no `.ignore` is above
+  the top level and only the user or root can create a file in each
+  directory there (`fallow_types::read_scope::only_owner_writes`), so no
+  other user can add one between the check and the read. Otherwise the walk
+  sets `parents(false)`, and for a root below the top level
+  `crates/config/src/ignore_parent_rules.rs` applies the files between the
+  root and the top level with the precedence of the crate. It reads the
+  ignore files of a walked directory the way the walker in use reads them:
+  by path for `build`, by exact listing name for `build_parallel`.
 
 - Both prune modes and the per-audit sweep share one decision code path
   (`sweep_reusable_caches_with_report`), so prune can never drift from what

@@ -159,6 +159,17 @@ fn has_git_entry(dir: &Path) -> bool {
     std::fs::symlink_metadata(dir.join(".git")).is_ok()
 }
 
+/// True when the `ignore` crate may apply the parent ignore files of a walk
+/// inside the repository at `top`: no directory above `top` holds a
+/// `.ignore` file, and only the current user or root can create a file in
+/// each of them (see [`fallow_types::read_scope::only_owner_writes`]).
+fn crate_may_read_parents(top: &Path, reads: DirReads) -> bool {
+    top.ancestors().skip(1).all(|dir| {
+        fallow_types::read_scope::only_owner_writes(dir)
+            && !(reads.dot_ignore && std::fs::symlink_metadata(dir.join(".ignore")).is_ok())
+    })
+}
+
 /// The ignore files of one directory that a walk reads.
 #[derive(Debug, Clone, Copy)]
 struct DirReads {
@@ -302,14 +313,34 @@ pub fn checked_global_gitignore() -> ignore::gitignore::Gitignore {
     }
 }
 
+/// The walker that the caller runs on a builder.
+///
+/// The two walkers of the `ignore` crate find the ignore files of a walked
+/// directory in different ways: the serial walker opens them by path, and
+/// the parallel walker takes their names from the directory listing. On a
+/// file system that ignores case the two differ for a name such as
+/// `.GitIgnore`, and the walk follows the walker that runs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WalkKind {
+    /// [`WalkBuilder::build`].
+    Serial,
+    /// [`WalkBuilder::build_parallel`].
+    Parallel,
+}
+
 /// Make a directory walker that checks each ignore file before the `ignore`
-/// crate reads it.
+/// crate reads it. The caller runs it with the walker `kind`.
 ///
 /// `filter` is the entry filter of the caller. Do not call
 /// [`WalkBuilder::filter_entry`] on the result: it replaces the filter that
 /// checks the ignore files of each directory. Hidden entries are not skipped.
 #[must_use]
-pub fn checked_walk_builder<F>(root: &Path, sources: IgnoreFileSources, filter: F) -> WalkBuilder
+pub fn checked_walk_builder<F>(
+    root: &Path,
+    sources: IgnoreFileSources,
+    kind: WalkKind,
+    filter: F,
+) -> WalkBuilder
 where
     F: Fn(&DirEntry) -> bool + Send + Sync + 'static,
 {
@@ -320,21 +351,24 @@ where
     // level, the same as Git. The `ignore` crate stops `.gitignore` rules at
     // a repository but applies each parent `.ignore` file. An audit walks its
     // base snapshot in the temp dir, where these files belong to whoever can
-    // write the temp dir. The choice does not read those files, so a file
-    // that appears there during the run cannot change it. The crate gets
-    // `parents(false)`. A root below the top level also needs the rules
-    // between the root and the top level: `ParentRules` applies them with
-    // the precedence of the crate, and decides which rules the crate keeps.
+    // write the temp dir. The crate keeps its own parent rules only when no
+    // `.ignore` is above the top level and only the user or root can create
+    // one there, so no other user can add one between this check and the
+    // read. Otherwise the crate gets `parents(false)`. A root below the top
+    // level then also needs the rules between the root and the top level:
+    // `ParentRules` applies them with the precedence of the crate, and
+    // decides which rules the crate keeps.
     let in_repository = has_git_entry(&scope);
-    let emulated = in_repository && scope != canonical_root;
+    let crate_parents = !in_repository || crate_may_read_parents(&scope, reads);
+    let emulated = !crate_parents && scope != canonical_root;
     let parent_rules = emulated
-        .then(|| parent_rules::ParentRules::load(root, &canonical_root, &scope, reads))
+        .then(|| parent_rules::ParentRules::load(root, &canonical_root, &scope, reads, kind))
         .flatten();
     let crate_reads_walk = parent_rules.as_ref().is_none_or(|rules| !rules.full());
     let mut builder = WalkBuilder::new(root);
     builder
         .hidden(false)
-        .parents(!in_repository)
+        .parents(crate_parents)
         .ignore(reads.dot_ignore && crate_reads_walk)
         .git_ignore(reads.sources.git_ignore && crate_reads_walk)
         .git_global(reads.sources.git_global && parent_rules.is_none())
@@ -361,6 +395,39 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The crate keeps its parent rules only when no `.ignore` is above the
+    /// top level and only the user or root can add one there.
+    #[cfg(unix)]
+    #[test]
+    fn the_crate_reads_parent_rules_only_below_directories_that_others_cannot_write() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let reads = DirReads {
+            dot_ignore: true,
+            sources: IgnoreFileSources {
+                git_ignore: true,
+                git_exclude: true,
+                git_global: true,
+            },
+        };
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let base = dunce::canonicalize(directory.path()).expect("canonical base");
+        let top = base.join("repo");
+        std::fs::create_dir_all(top.join(".git")).expect("git directory");
+        let private = base
+            .ancestors()
+            .all(fallow_types::read_scope::only_owner_writes);
+        assert_eq!(crate_may_read_parents(&top, reads), private);
+
+        std::fs::write(base.join(".ignore"), "x\n").expect("ignore file");
+        assert!(!crate_may_read_parents(&top, reads));
+        std::fs::remove_file(base.join(".ignore")).expect("remove ignore file");
+
+        std::fs::set_permissions(&base, std::fs::Permissions::from_mode(0o777))
+            .expect("make the base writable by all");
+        assert!(!crate_may_read_parents(&top, reads));
+    }
 
     #[cfg(unix)]
     #[test]

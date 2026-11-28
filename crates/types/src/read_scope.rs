@@ -62,6 +62,40 @@ pub fn may_widen_scope(dir: &Path, root: &Path) -> bool {
     sid_owner_rule_allows(&dir_owner, &root_owner, &user)
 }
 
+/// True when only the current user or root can create a file in the
+/// directory `dir`: one of them owns it, and neither its group nor other
+/// users may write to it. Only an owner can change the owner or the mode, so
+/// another user cannot make the result false later. A metadata error counts
+/// as false.
+#[cfg(unix)]
+#[must_use]
+pub fn only_owner_writes(dir: &Path) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    std::fs::metadata(dir).is_ok_and(|metadata| {
+        private_dir_rule(
+            metadata.uid(),
+            metadata.mode(),
+            rustix::process::geteuid().as_raw(),
+        )
+    })
+}
+
+/// [`only_owner_writes`] on a target without the Unix owner model: the
+/// result is false, so a caller takes its safe path.
+#[cfg(not(unix))]
+#[must_use]
+pub const fn only_owner_writes(_dir: &Path) -> bool {
+    false
+}
+
+/// The rule of [`only_owner_writes`] over the owner `uid` and the `mode` of
+/// a directory, for the effective user `euid`.
+#[cfg(unix)]
+const fn private_dir_rule(uid: u32, mode: u32, euid: u32) -> bool {
+    const WRITABLE_BY_GROUP_OR_ALL: u32 = 0o022;
+    mode & WRITABLE_BY_GROUP_OR_ALL == 0 && (uid == euid || uid == 0)
+}
+
 /// True when the directory `dir` above the analysis root `root` may widen
 /// the read scope. On a target without an owner model the rule does not
 /// apply, and the result is true.
@@ -216,6 +250,15 @@ mod tests {
 
     const PRIVATE_DIR: u32 = 0o040_755;
     const SHARED_DIR: u32 = 0o041_777;
+
+    #[test]
+    fn only_the_owner_writes_to_a_directory_of_the_user_or_root_without_shared_write() {
+        assert!(private_dir_rule(501, PRIVATE_DIR, 501));
+        assert!(private_dir_rule(0, PRIVATE_DIR, 501));
+        assert!(!private_dir_rule(1001, PRIVATE_DIR, 501));
+        assert!(!private_dir_rule(501, SHARED_DIR, 501));
+        assert!(!private_dir_rule(0, 0o040_775, 501));
+    }
 
     #[test]
     fn a_directory_of_the_current_user_widens_the_scope() {

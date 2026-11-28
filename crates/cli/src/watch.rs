@@ -302,13 +302,18 @@ fn discover_project_gitignores(
         git_exclude: false,
         git_global: false,
     };
-    let walk_builder = fallow_config::checked_walk_builder(&root, sources, move |entry| {
-        let relative = entry
-            .path()
-            .strip_prefix(&filter_root)
-            .unwrap_or_else(|_| entry.path());
-        !has_disallowed_hidden_dir(relative) && !ignore_patterns.is_match(relative)
-    });
+    let walk_builder = fallow_config::checked_walk_builder(
+        &root,
+        sources,
+        fallow_config::WalkKind::Serial,
+        move |entry| {
+            let relative = entry
+                .path()
+                .strip_prefix(&filter_root)
+                .unwrap_or_else(|_| entry.path());
+            !has_disallowed_hidden_dir(relative) && !ignore_patterns.is_match(relative)
+        },
+    );
 
     let mut paths = Vec::new();
     for entry in walk_builder.build().flatten() {
