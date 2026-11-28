@@ -539,7 +539,7 @@ mod tests {
 
         assert_eq!(steps.len(), 1);
         assert_eq!(steps[0].id, "trace-unused-export");
-        assert_eq!(steps[0].command, "fallow dead-code --trace src/util.ts:foo");
+        assert_eq!(steps[0].command, "fallow dead-code --trace=src/util.ts:foo");
         assert_valid(&steps[0]);
     }
 
@@ -557,7 +557,7 @@ mod tests {
         let a = build_audit_next_steps(Some((&forward, &root)), None);
         let b = build_audit_next_steps(Some((&reverse, &root)), None);
         assert_eq!(a[0].command, b[0].command);
-        assert_eq!(a[0].command, "fallow dead-code --trace src/a.ts:alpha");
+        assert_eq!(a[0].command, "fallow dead-code --trace=src/a.ts:alpha");
     }
 
     #[test]
@@ -695,7 +695,7 @@ mod tests {
         let ids: Vec<&str> = steps.iter().map(|s| s.id.as_str()).collect();
 
         assert_eq!(ids, ["setup", "impact-report", "trace-unused-export"]);
-        assert_eq!(steps[2].command, "fallow dead-code --trace src/a.ts:alpha");
+        assert_eq!(steps[2].command, "fallow dead-code --trace=src/a.ts:alpha");
         for step in &steps {
             assert_valid(step);
         }
@@ -714,7 +714,7 @@ mod tests {
         let ids: Vec<&str> = steps.iter().map(|s| s.id.as_str()).collect();
 
         assert_eq!(ids, ["trace-unused-export", "complexity-breakdown"]);
-        assert_eq!(steps[0].command, "fallow dead-code --trace src/a.ts:alpha");
+        assert_eq!(steps[0].command, "fallow dead-code --trace=src/a.ts:alpha");
         for step in &steps {
             assert_valid(step);
         }

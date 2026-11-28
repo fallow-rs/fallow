@@ -747,25 +747,14 @@ fn inspect_line(view: &MutationCiView) -> Option<String> {
         .as_deref()
         .map(|root| single_line(root, INLINE_VALUE_MAX_CHARS))
         .filter(|root| !root.is_empty() && root != ".");
-    if let Some(root) = root {
+    if let Some(root) = root.as_deref().and_then(crate::shell_word) {
         command.push_str(" --root ");
-        command.push_str(&shell_quote(&root));
+        command.push_str(&root);
     }
     Some(format!(
         "To inspect a mutant, run {} with the report that this job writes.",
         markdown_code_span(&command)
     ))
-}
-
-fn shell_quote(value: &str) -> String {
-    let plain = value
-        .chars()
-        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '.' | '/' | '-' | '@' | '+'));
-    if plain {
-        value.to_owned()
-    } else {
-        format!("'{}'", value.replace('\'', r"'\''"))
-    }
 }
 
 fn decision_outcome(view: &MutationCiView) -> (PrDecisionConclusion, String) {

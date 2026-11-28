@@ -372,7 +372,8 @@ pub fn build_audit_next_steps_input(
 }
 
 /// The `--trace` argument `path:export` as one shell word, or `None` when the
-/// path or the name cannot stay on one command line.
+/// path or the name cannot stay on one command line. The caller writes it as
+/// `--trace=<word>`, so a value that starts with `-` stays the flag value.
 fn trace_target(path: &str, export_name: &str) -> Option<String> {
     shell_word(&format!("{path}:{export_name}")).map(Cow::into_owned)
 }
@@ -428,7 +429,7 @@ fn trace_deprecated_export(results: &AnalysisResults, root: &Path) -> Option<Nex
         .min()?;
     Some(next_step(
         "trace-deprecated-export",
-        format!("fallow dead-code --trace {}", target.3),
+        format!("fallow dead-code --trace={}", target.3),
         "list every consumer of a deprecated export before you migrate it",
     ))
 }
@@ -442,7 +443,7 @@ fn trace_unused_export_from_input(target: Option<&TraceUnusedExportInput>) -> Op
     Some(next_step(
         "trace-unused-export",
         format!(
-            "fallow dead-code --trace {}",
+            "fallow dead-code --trace={}",
             trace_target(&target.path, &target.export_name)?
         ),
         "verify an export is truly unused before deleting",
@@ -522,12 +523,12 @@ fn recheck_baseline(input: Option<BaselineRecheckInput<'_>>) -> Option<NextStep>
     } else {
         ""
     };
+    let path = shell_word(input.path)?;
     Some(next_step(
         "recheck-baseline",
         format!(
-            "fallow {} --baseline {}{}{package_map}",
+            "fallow {} --baseline {path}{}{package_map}",
             input.command,
-            input.path,
             input.saved_mode.flags()
         ),
         &if narrowing.is_empty() {
@@ -800,7 +801,7 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert_eq!(ids, ["trace-unused-export", "complexity-breakdown"]);
-        assert_eq!(steps[0].command, "fallow dead-code --trace src/a.ts:alpha");
+        assert_eq!(steps[0].command, "fallow dead-code --trace=src/a.ts:alpha");
         for step in &steps {
             assert_valid(step);
         }
@@ -886,7 +887,7 @@ mod tests {
         let steps = build_dead_code_next_steps(dead_code_input(&results));
 
         assert_eq!(steps[0].id, "trace-deprecated-export");
-        assert_eq!(steps[0].command, "fallow dead-code --trace src/b.ts:many");
+        assert_eq!(steps[0].command, "fallow dead-code --trace=src/b.ts:many");
         assert_valid(&steps[0]);
     }
 
@@ -903,7 +904,7 @@ mod tests {
         let steps = build_dead_code_next_steps(dead_code_input(&results));
 
         assert_eq!(steps[0].id, "trace-unused-export");
-        assert_eq!(steps[0].command, "fallow dead-code --trace src/a.ts:alpha");
+        assert_eq!(steps[0].command, "fallow dead-code --trace=src/a.ts:alpha");
         assert_valid(&steps[0]);
     }
 
@@ -952,12 +953,24 @@ mod tests {
 
         assert_eq!(
             command("trace-deprecated-export"),
-            Some("fallow dead-code --trace 'src/(auth)/a.ts:old'")
+            Some("fallow dead-code --trace='src/(auth)/a.ts:old'")
         );
         assert_eq!(
             command("trace-unused-export"),
-            Some("fallow dead-code --trace 'src/a b.ts:x; touch f #'")
+            Some("fallow dead-code --trace='src/a b.ts:x; touch f #'")
         );
+    }
+
+    #[test]
+    fn trace_steps_keep_a_target_that_starts_with_a_dash() {
+        let results = AnalysisResults {
+            unused_exports: vec![unused_export("/project/-y.js", "q")],
+            ..AnalysisResults::default()
+        };
+
+        let steps = build_dead_code_next_steps(dead_code_input(&results));
+
+        assert_eq!(steps[0].command, "fallow dead-code --trace=-y.js:q");
     }
 
     #[test]
@@ -977,7 +990,7 @@ mod tests {
             .map(|step| step.command.as_str())
             .collect::<Vec<_>>();
 
-        assert_eq!(commands, ["fallow dead-code --trace src/b.ts:beta"]);
+        assert_eq!(commands, ["fallow dead-code --trace=src/b.ts:beta"]);
     }
 
     #[test]
@@ -1278,6 +1291,29 @@ mod tests {
                 .with(ScopeReason::Scope),
             saved_mode: BaselineMode::default(),
         }
+    }
+
+    #[test]
+    fn the_recheck_quotes_a_baseline_path_and_skips_one_with_a_line_break() {
+        let results = AnalysisResults::default();
+        let command = |path: &'static str| {
+            build_dead_code_next_steps(DeadCodeNextStepsInput {
+                baseline_recheck: Some(BaselineRecheckInput {
+                    path,
+                    ..narrowed_baseline("dead-code")
+                }),
+                ..dead_code_input(&results)
+            })
+            .into_iter()
+            .find(|step| step.id == "recheck-baseline")
+            .map(|step| step.command)
+        };
+
+        assert_eq!(
+            command("my base.json").as_deref(),
+            Some("fallow dead-code --baseline 'my base.json'")
+        );
+        assert_eq!(command("a\n.json"), None);
     }
 
     /// A same-mode run with a diff has the reason `diff` only. Without the flag,

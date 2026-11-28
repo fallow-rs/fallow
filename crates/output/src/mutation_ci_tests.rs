@@ -457,6 +457,23 @@ fn inspect_command_adds_a_quoted_root_only_when_the_root_is_not_dot() {
     );
 }
 
+/// The inspect command and the `next_steps` commands quote a value with the
+/// same rule, so a root with a colon or an equals sign stays plain.
+#[test]
+fn inspect_command_quotes_the_root_like_the_next_steps_commands() {
+    for (root, flag) in [
+        ("packages/web:app", "--root packages/web:app`"),
+        ("it's", r"--root 'it'\''s'`"),
+    ] {
+        let view = MutationCiView {
+            root_flag: Some(root.to_owned()),
+            ..non_dot_root()
+        };
+        let section = render_mutation_section(&view, MutationHeading::Comment);
+        assert!(section.contains(flag), "{root}: {section}");
+    }
+}
+
 #[test]
 fn long_message_is_cut_at_the_cap_and_marked() {
     let out = render_mutation_section(&failed(&"x".repeat(5000), None), MutationHeading::Comment);

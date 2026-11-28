@@ -1,6 +1,6 @@
 ---
 source: crates/cli/tests/integration/snapshot_tests.rs
-assertion_line: 849
+assertion_line: 566
 expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"CARGO_PKG_VERSION\")),\n\"\\\"version\\\": \\\"[VERSION]\\\"\",)"
 ---
 {
@@ -123,7 +123,7 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
   "next_steps": [
     {
       "id": "trace-unused-export",
-      "command": "fallow dead-code --trace src/index.ts:reExportedFn",
+      "command": "fallow dead-code --trace=src/index.ts:reExportedFn",
       "reason": "verify an export is truly unused before deleting"
     }
   ]
