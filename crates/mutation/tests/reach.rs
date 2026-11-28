@@ -1,5 +1,7 @@
 //! Entry probes and the outline of a source file (see `reach.rs`).
 
+#![expect(clippy::expect_used, reason = "tests expect to keep the setup short")]
+
 mod common;
 
 use common::{assert_valid, run_node};
@@ -222,6 +224,10 @@ fn a_source_with_the_probe_name_is_refused() {
 /// --ignored` and the variable set to a project folder.
 #[test]
 #[ignore = "needs a corpus folder in FALLOW_PROBE_CORPUS"]
+#[expect(
+    clippy::print_stderr,
+    reason = "the corpus check reports how many files it probed"
+)]
 fn each_corpus_file_gets_valid_probes() {
     let Ok(root) = std::env::var("FALLOW_PROBE_CORPUS") else {
         return;
@@ -365,4 +371,38 @@ fn a_pure_declarator_names_its_span() {
         None,
         "an export is module code"
     );
+}
+
+#[test]
+fn an_import_that_starts_to_load_its_module_changes_the_skeleton() {
+    // The transform removes an import with no value read, so the old file
+    // never loads `./registry`. The new file reads `register` in a function
+    // and loads it, also for a test that never calls the function.
+    let unused = "import { register } from './registry';\nexport function used() { return 1; }\nexport function rare() { return 0; }\n";
+    let typed = "import { register } from './registry';\nexport function used() { const one: typeof register | 1 = 1; return one; }\nexport function rare() { return 0; }\n";
+    let read = "import { register } from './registry';\nexport function used() { return 1; }\nexport function rare() { register('x'); return 0; }\n";
+    assert_eq!(
+        ts_outline(unused).skeleton,
+        ts_outline(typed).skeleton,
+        "a type read loads nothing"
+    );
+    assert_ne!(ts_outline(unused).skeleton, ts_outline(read).skeleton);
+}
+
+#[test]
+fn a_shadowing_local_does_not_count_as_a_read_of_an_import() {
+    let shadowed = "import { register } from './registry';\nexport function f() { const register = 1; return register; }\n";
+    let read = "import { register } from './registry';\nexport function f() { const local = 1; return register(local); }\n";
+    assert_ne!(ts_outline(shadowed).skeleton, ts_outline(read).skeleton);
+}
+
+#[test]
+fn a_directive_or_a_pragma_changes_the_skeleton() {
+    let base = "export function f(x) { return x; }\n";
+    let strict = "'use strict';\nexport function f(x) { return x; }\n";
+    let pragma = "/** @jsxImportSource preact */\nexport function f(x) { return x; }\n";
+    let comment = "/** a note */\nexport function f(x) { return x; }\n";
+    assert_ne!(ts_outline(base).skeleton, ts_outline(strict).skeleton);
+    assert_ne!(ts_outline(base).skeleton, ts_outline(pragma).skeleton);
+    assert_eq!(ts_outline(base).skeleton, ts_outline(comment).skeleton);
 }

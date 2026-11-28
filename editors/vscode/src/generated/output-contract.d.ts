@@ -22730,6 +22730,7 @@ dropped_files: string[]
  * `unknown-loaded-file`,
  * `changed-file-without-probes`, `changed-skeleton`,
  * `changed-entered-function`, `changed-binding`, `mutant-in-loaded-code`,
+ * `loads-mutated-declarator`,
  * `mutant-in-entered-function` and `mutant-in-file-without-probes`.
  */
 kept: {

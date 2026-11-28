@@ -90,6 +90,9 @@ pub enum KeepReason {
     MutantInEnteredFunction,
     /// A mutant is in a file without probes that the test file reaches.
     MutantInFileWithoutProbes,
+    /// The test file is the one kept loader of a mutant in a pure
+    /// declarator that no other kept file is known to run.
+    LoadsMutatedDeclarator,
 }
 
 impl KeepReason {
@@ -108,6 +111,7 @@ impl KeepReason {
             Self::MutantInLoadedCode => "mutant-in-loaded-code",
             Self::MutantInEnteredFunction => "mutant-in-entered-function",
             Self::MutantInFileWithoutProbes => "mutant-in-file-without-probes",
+            Self::LoadsMutatedDeclarator => "loads-mutated-declarator",
         }
     }
 }
@@ -413,11 +417,26 @@ fn group_probes<'a>(
 impl ReachStore {
     /// Decides for `test_file` with the environment part `env` and the
     /// runner config digest `config`.
+    #[cfg(test)]
     pub(super) fn decide(
         &self,
         facts: &ReachFacts,
         test_file: &str,
         (env, config): (&str, &str),
+    ) -> Result<(), KeepReason> {
+        self.decide_with(facts, test_file, (env, config), &mut Vec::new())
+    }
+
+    /// Decides for `test_file` with the environment part `env` and the
+    /// runner config digest `config`, and adds to `unobserved` each mutant in
+    /// a pure declarator of a file that the test file loads but whose value
+    /// it never reads.
+    fn decide_with(
+        &self,
+        facts: &ReachFacts,
+        test_file: &str,
+        (env, config): (&str, &str),
+        unobserved: &mut Vec<(String, (u32, u32))>,
     ) -> Result<(), KeepReason> {
         let entry = self.tests.get(test_file).ok_or(KeepReason::NoRecord)?;
         let snapshot = self
@@ -458,7 +477,7 @@ impl ReachStore {
         }
         for path in files {
             let probes = groups.get(probe_key(path).as_str());
-            self.check_file(facts, snapshot, path, probes)?;
+            self.check_file(facts, snapshot, path, probes, unobserved)?;
         }
         Ok(())
     }
@@ -469,6 +488,7 @@ impl ReachStore {
         snapshot: &Snapshot,
         path: &str,
         probes: Option<&FileProbes>,
+        unobserved: &mut Vec<(String, (u32, u32))>,
     ) -> Result<(), KeepReason> {
         let Some(old) = snapshot.files.get(path) else {
             return Err(KeepReason::NewReachFile);
@@ -516,7 +536,7 @@ impl ReachStore {
                 None if observes_declarator(&outline, &entered, span) => {
                     return Err(KeepReason::MutantInLoadedCode);
                 }
-                None => {}
+                None => unobserved.push((path.to_owned(), span)),
                 Some(ordinal) if entered_keys.contains(outline.bodies[ordinal].key.as_str()) => {
                     return Err(KeepReason::MutantInEnteredFunction);
                 }
@@ -534,13 +554,33 @@ impl ReachStore {
         (env, config): (impl Fn(&str) -> String, &str),
     ) -> ReachSelection {
         let mut selection = ReachSelection::default();
+        // Each mutant in a pure declarator that a dropped file loads, with
+        // the first such file.
+        let mut loaders: BTreeMap<(String, (u32, u32)), String> = BTreeMap::new();
         for test_file in dry_files {
-            match self.decide(facts, test_file, (&env(test_file), config)) {
-                Ok(()) => selection.dropped.push(test_file.clone()),
+            let mut unobserved = Vec::new();
+            match self.decide_with(facts, test_file, (&env(test_file), config), &mut unobserved) {
+                Ok(()) => {
+                    selection.dropped.push(test_file.clone());
+                    for mutant in unobserved {
+                        loaders.entry(mutant).or_insert_with(|| test_file.clone());
+                    }
+                }
                 Err(reason) => {
                     *selection.kept.entry(reason.name().to_owned()).or_default() += 1;
                 }
             }
+        }
+        // A dropped file still runs such a mutant when it loads the module,
+        // so the full run counts it as covered. One loader stays for each,
+        // so the mutant keeps a covering test and its verdict.
+        let keep: BTreeSet<String> = loaders.into_values().collect();
+        if !keep.is_empty() {
+            selection.dropped.retain(|file| !keep.contains(file));
+            *selection
+                .kept
+                .entry(KeepReason::LoadsMutatedDeclarator.name().to_owned())
+                .or_default() += keep.len();
         }
         selection.dropped.sort_unstable();
         selection

@@ -1015,9 +1015,6 @@ fn save_reports(
     saved
 }
 
-/// The `--report` file of a recheck, which the run replaces. The run writes
-/// it after the run, so the worktree check leaves it out, as it does for the
-/// `--output-file`.
 /// The reach selection of the run: the flag, else the config key. The
 /// selection keeps its record in the cache, so `--no-cache` turns the config
 /// key off and refuses the flag.
@@ -1046,6 +1043,9 @@ fn reach_selection(
     Ok(mode)
 }
 
+/// The `--report` file of a recheck, which the run replaces. The run writes
+/// it after the run, so the worktree check leaves it out, as it does for the
+/// `--output-file`.
 fn recheck_report_file<'a>(input: &'a MutationCliInput<'_>) -> Option<&'a Path> {
     input
         .args

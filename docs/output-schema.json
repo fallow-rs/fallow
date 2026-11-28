@@ -41097,7 +41097,7 @@
           "additionalProperties": {
             "type": "integer"
           },
-          "description": "The count of test files that stayed in the dry run, for each reason:\n`no-record`, `environment`, `runner-config-changed`, `new-reach-file`,\n`unknown-loaded-file`,\n`changed-file-without-probes`, `changed-skeleton`,\n`changed-entered-function`, `changed-binding`, `mutant-in-loaded-code`,\n`mutant-in-entered-function` and `mutant-in-file-without-probes`."
+          "description": "The count of test files that stayed in the dry run, for each reason:\n`no-record`, `environment`, `runner-config-changed`, `new-reach-file`,\n`unknown-loaded-file`,\n`changed-file-without-probes`, `changed-skeleton`,\n`changed-entered-function`, `changed-binding`, `mutant-in-loaded-code`,\n`loads-mutated-declarator`,\n`mutant-in-entered-function` and `mutant-in-file-without-probes`."
         },
         "recorded": {
           "type": "integer",

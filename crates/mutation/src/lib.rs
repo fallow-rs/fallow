@@ -409,18 +409,8 @@ fn instrument_text(
     seen_ids: &mut std::collections::BTreeSet<MutantId>,
 ) -> Result<(Instrumented, Option<Outline>), MutationError> {
     let source = input.source;
-    if u32::try_from(source.len()).is_err() {
-        return Err(MutationError::TooLarge);
-    }
     let allocator = oxc_allocator::Allocator::default();
-    let parsed = oxc_parser::Parser::new(&allocator, source, input.kind.source_type()).parse();
-    if parsed.fatal_error || parsed.diagnostics.has_errors() {
-        let messages = parsed.diagnostics.iter().map(ToString::to_string).collect();
-        return Err(MutationError::Parse { messages });
-    }
-    if let Some(name) = reserved_binding(&parsed.program, input.probe.is_some()) {
-        return Err(MutationError::ReservedName { name });
-    }
+    let parsed = parse_input(&allocator, input)?;
     let collected = collect::collect(&parsed.program, source);
     let protected = input
         .role
@@ -434,14 +424,8 @@ fn instrument_text(
     let mut insertions = header_insertions(&parsed.program, source, input.prelude, record);
     if let Some((_, key)) = probed
         && input.prelude
-        && let Some(last) = insertions.last_mut()
     {
-        let at = last
-            .text
-            .strip_suffix('\n')
-            .map_or(last.text.len(), str::len);
-        let probe_prelude = format!("{}{}", reach::PROBE_PRELUDE, reach::module_statement(key));
-        last.text.insert_str(at, &probe_prelude);
+        add_probe_prelude(&mut insertions, key);
     }
     let line_starts = line_starts(source);
 
@@ -526,6 +510,42 @@ fn instrument_text(
     }
     let outline = probed.map(|((_, outline), _)| outline);
     Ok((Instrumented { mutants, code, map }, outline))
+}
+
+/// Parses the text of `input`. A text that is too large or that does not
+/// parse, and a text that declares a name of the prelude, give an error.
+fn parse_input<'a>(
+    allocator: &'a oxc_allocator::Allocator,
+    input: &TextInput<'a>,
+) -> Result<oxc_parser::ParserReturn<'a>, MutationError> {
+    let source = input.source;
+    if u32::try_from(source.len()).is_err() {
+        return Err(MutationError::TooLarge);
+    }
+    let parsed = oxc_parser::Parser::new(allocator, source, input.kind.source_type()).parse();
+    if parsed.fatal_error || parsed.diagnostics.has_errors() {
+        let messages = parsed.diagnostics.iter().map(ToString::to_string).collect();
+        return Err(MutationError::Parse { messages });
+    }
+    if let Some(name) = reserved_binding(&parsed.program, input.probe.is_some()) {
+        return Err(MutationError::ReservedName { name });
+    }
+    Ok(parsed)
+}
+
+/// Adds the probe prelude function and the module probe to the end of the
+/// prelude insertion, before its line break, so the first source line keeps
+/// its columns.
+fn add_probe_prelude(insertions: &mut [emit::Insertion], key: &str) {
+    let Some(last) = insertions.last_mut() else {
+        return;
+    };
+    let at = last
+        .text
+        .strip_suffix('\n')
+        .map_or(last.text.len(), str::len);
+    let probe_prelude = format!("{}{}", reach::PROBE_PRELUDE, reach::module_statement(key));
+    last.text.insert_str(at, &probe_prelude);
 }
 
 /// The first binding in `program` with the name of a prelude function.

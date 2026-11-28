@@ -523,7 +523,9 @@ runs:
         GH_REPO: ${{ github.repository }}
       run: bash "${GITHUB_ACTION_PATH}/action/scripts/scope.sh"
 
-    # The key covers the lockfiles and the runner config files. Each run and
+    # The cache holds the results and the dry-run facts, with the reach record
+    # of `--reach-selection`. The key covers the lockfiles and the runner
+    # config files. Each run and
     # each attempt saves a new entry, and a restore takes the newest entry of
     # the same digest, so a budgeted run continues from the results of the last
     # run.
@@ -531,7 +533,9 @@ runs:
       if: inputs.mutation == 'true'
       uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
       with:
-        path: ${{ inputs.root }}/.fallow/mutation/results.json
+        path: |
+          ${{ inputs.root }}/.fallow/mutation/results.json
+          ${{ inputs.root }}/.fallow/mutation/dry-runs.json
         key: fallow-mutation-${{ runner.os }}-${{ steps.fallow-cache-key.outputs.root_digest }}-${{ steps.fallow-cache-key.outputs.mutation_digest }}-${{ github.run_id }}-${{ github.run_attempt }}
         restore-keys: |
           fallow-mutation-${{ runner.os }}-${{ steps.fallow-cache-key.outputs.root_digest }}-${{ steps.fallow-cache-key.outputs.mutation_digest }}-
@@ -561,7 +565,9 @@ runs:
       if: always() && steps.mutation.outputs.cache_save == 'true'
       uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
       with:
-        path: ${{ inputs.root }}/.fallow/mutation/results.json
+        path: |
+          ${{ inputs.root }}/.fallow/mutation/results.json
+          ${{ inputs.root }}/.fallow/mutation/dry-runs.json
         key: fallow-mutation-${{ runner.os }}-${{ steps.fallow-cache-key.outputs.root_digest }}-${{ steps.fallow-cache-key.outputs.mutation_digest }}-${{ github.run_id }}-${{ github.run_attempt }}
 
     - name: Run analysis

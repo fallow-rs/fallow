@@ -468,3 +468,48 @@ fn a_mutant_in_a_constant_that_module_code_reads_keeps_the_file() {
         Err(KeepReason::MutantInLoadedCode)
     );
 }
+
+#[test]
+fn one_loader_stays_for_a_mutant_in_a_constant_that_no_dropped_file_reads() {
+    let mut run = Run::new();
+    run.edit(B, B_WITH_KINDS);
+    let other = "src/z.test.ts";
+    let files: Vec<String> = run.sources.keys().map(|path| (*path).to_owned()).collect();
+    let facts = |run: &Run| {
+        let probed = run
+            .sources
+            .iter()
+            .map(|(path, source)| ((*path).to_owned(), outline(source, SourceKind::Ts).unwrap()))
+            .collect();
+        let reach = [
+            (TEST.to_owned(), files.clone()),
+            (other.to_owned(), files.clone()),
+        ]
+        .into_iter()
+        .collect();
+        ReachFacts::from_parts(run.dir.path(), probed, reach, run.mutants.clone())
+    };
+    // Both files load the module and enter `b` (ordinal 1) only.
+    let mut probes = share(
+        &[module_probe(&probe_key(B))],
+        &[function_probe(&probe_key(B), 1)],
+    );
+    probes.files.push(other.to_owned());
+    probes.entered.insert(
+        other.to_owned(),
+        std::iter::once(function_probe(&probe_key(B), 1)).collect(),
+    );
+    let mut store = ReachStore::default();
+    store.record(
+        &facts(&run),
+        &[probes],
+        true,
+        (|_: &str| ENV.to_owned(), CONFIG),
+        1,
+    );
+    run.mutant(B, "'bar'");
+    let dry_files = vec![TEST.to_owned(), other.to_owned()];
+    let selection = store.select(&facts(&run), &dry_files, (|_: &str| ENV.to_owned(), CONFIG));
+    assert_eq!(selection.dropped, vec![other.to_owned()]);
+    assert_eq!(selection.kept.get("loads-mutated-declarator"), Some(&1));
+}

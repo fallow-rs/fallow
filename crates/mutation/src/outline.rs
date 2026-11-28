@@ -160,14 +160,26 @@ impl Masker<'_> {
     }
 }
 
+/// The names that the text references. A name in a TypeScript type is not a
+/// value reference: the transform removes it, and an import whose names have
+/// only such references does not load its module.
 #[derive(Default)]
 struct References {
-    names: Vec<(u32, String)>,
+    /// The offset, the name, and true for a value reference.
+    names: Vec<(u32, String, bool)>,
+    types: u32,
 }
 
 impl<'a> Visit<'a> for References {
     fn visit_identifier_reference(&mut self, it: &oxc_ast::ast::IdentifierReference<'a>) {
-        self.names.push((it.span.start, it.name.to_string()));
+        self.names
+            .push((it.span.start, it.name.to_string(), self.types == 0));
+    }
+
+    fn visit_ts_type(&mut self, it: &oxc_ast::ast::TSType<'a>) {
+        self.types += 1;
+        oxc_ast_visit::walk::walk_ts_type(self, it);
+        self.types -= 1;
     }
 }
 
@@ -236,40 +248,12 @@ enum Group {
 
 fn group(statement: &Statement<'_>) -> Group {
     match statement {
-        Statement::TSTypeAliasDeclaration(_) | Statement::TSInterfaceDeclaration(_) => Group::Type,
+        Statement::TSTypeAliasDeclaration(_)
+        | Statement::TSInterfaceDeclaration(_)
+        | Statement::TSGlobalDeclaration(_) => Group::Type,
         Statement::TSExternalModuleDeclaration(module) if module.declare => Group::Type,
         Statement::TSNamespaceDeclaration(module) if module.declare => Group::Type,
-        Statement::TSGlobalDeclaration(_) => Group::Type,
-        Statement::ImportDeclaration(import) => {
-            if import.import_kind.is_type() {
-                return Group::Type;
-            }
-            let Some(specifiers) = &import.specifiers else {
-                // A side-effect import runs the module.
-                return Group::Code { name: None };
-            };
-            let source = import.source.value.as_str().unwrap_or_default().to_owned();
-            let bindings = specifiers
-                .iter()
-                .filter_map(|specifier| match specifier {
-                    ImportDeclarationSpecifier::ImportSpecifier(named) => {
-                        (!named.import_kind.is_type()).then(|| {
-                            (
-                                named.local.name.to_string(),
-                                named.imported.name().to_string(),
-                            )
-                        })
-                    }
-                    ImportDeclarationSpecifier::ImportDefaultSpecifier(default) => {
-                        Some((default.local.name.to_string(), "default".to_owned()))
-                    }
-                    ImportDeclarationSpecifier::ImportNamespaceSpecifier(namespace) => {
-                        Some((namespace.local.name.to_string(), "*".to_owned()))
-                    }
-                })
-                .collect();
-            Group::Import { source, bindings }
-        }
+        Statement::ImportDeclaration(import) => import_group(import),
         Statement::FunctionDeclaration(function) => match (&function.id, &function.body) {
             _ if function.declare => Group::Type,
             (Some(id), Some(_)) => Group::Function {
@@ -277,58 +261,10 @@ fn group(statement: &Statement<'_>) -> Group {
             },
             _ => Group::Code { name: None },
         },
-        Statement::VariableDeclaration(declaration) => {
-            if declaration.declare {
-                return Group::Type;
-            }
-            let declarators: Option<Vec<(String, (u32, u32))>> = declaration
-                .declarations
-                .iter()
-                .map(|declarator| {
-                    let id = declarator.id.get_binding_identifier()?;
-                    let pure = declarator.init.as_ref().is_none_or(is_pure);
-                    pure.then(|| {
-                        (
-                            id.name.to_string(),
-                            (declarator.span.start, declarator.span.end),
-                        )
-                    })
-                })
-                .collect();
-            match declarators {
-                Some(declarators) => Group::Variables {
-                    kind: declaration.kind.as_str(),
-                    declarators,
-                },
-                None => Group::Code {
-                    name: single_variable(declaration),
-                },
-            }
-        }
+        Statement::VariableDeclaration(declaration) => variables_group(declaration),
         Statement::ExportNamedDeclaration(export) if export.export_kind.is_type() => Group::Type,
         Statement::ExportFromDeclaration(export) if export.export_kind.is_type() => Group::Type,
-        Statement::ExportDeclaration(export) => {
-            let name = match &export.declaration {
-                Declaration::TSTypeAliasDeclaration(_) | Declaration::TSInterfaceDeclaration(_) => {
-                    return Group::Type;
-                }
-                Declaration::FunctionDeclaration(function) if function.declare => {
-                    return Group::Type;
-                }
-                Declaration::VariableDeclaration(declaration) if declaration.declare => {
-                    return Group::Type;
-                }
-                Declaration::FunctionDeclaration(function) => {
-                    function.id.as_ref().map(|id| format!("fn:{}", id.name))
-                }
-                Declaration::ClassDeclaration(class) => {
-                    class.id.as_ref().map(|id| format!("class:{}", id.name))
-                }
-                Declaration::VariableDeclaration(declaration) => single_variable(declaration),
-                _ => None,
-            };
-            Group::Code { name }
-        }
+        Statement::ExportDeclaration(export) => export_group(&export.declaration),
         Statement::ExportDefaultDeclaration(_) => Group::Code {
             name: Some("default".to_owned()),
         },
@@ -337,6 +273,86 @@ fn group(statement: &Statement<'_>) -> Group {
         },
         _ => Group::Code { name: None },
     }
+}
+
+fn import_group(import: &oxc_ast::ast::ImportDeclaration<'_>) -> Group {
+    if import.import_kind.is_type() {
+        return Group::Type;
+    }
+    let Some(specifiers) = &import.specifiers else {
+        // A side-effect import runs the module.
+        return Group::Code { name: None };
+    };
+    let source = import.source.value.as_str().unwrap_or_default().to_owned();
+    let bindings = specifiers
+        .iter()
+        .filter_map(|specifier| match specifier {
+            ImportDeclarationSpecifier::ImportSpecifier(named) => (!named.import_kind.is_type())
+                .then(|| {
+                    (
+                        named.local.name.to_string(),
+                        named.imported.name().to_string(),
+                    )
+                }),
+            ImportDeclarationSpecifier::ImportDefaultSpecifier(default) => {
+                Some((default.local.name.to_string(), "default".to_owned()))
+            }
+            ImportDeclarationSpecifier::ImportNamespaceSpecifier(namespace) => {
+                Some((namespace.local.name.to_string(), "*".to_owned()))
+            }
+        })
+        .collect();
+    Group::Import { source, bindings }
+}
+
+fn variables_group(declaration: &oxc_ast::ast::VariableDeclaration<'_>) -> Group {
+    if declaration.declare {
+        return Group::Type;
+    }
+    let declarators: Option<Vec<(String, (u32, u32))>> = declaration
+        .declarations
+        .iter()
+        .map(|declarator| {
+            let id = declarator.id.get_binding_identifier()?;
+            let pure = declarator.init.as_ref().is_none_or(is_pure);
+            pure.then(|| {
+                (
+                    id.name.to_string(),
+                    (declarator.span.start, declarator.span.end),
+                )
+            })
+        })
+        .collect();
+    match declarators {
+        Some(declarators) => Group::Variables {
+            kind: declaration.kind.as_str(),
+            declarators,
+        },
+        None => Group::Code {
+            name: single_variable(declaration),
+        },
+    }
+}
+
+fn export_group(declaration: &Declaration<'_>) -> Group {
+    let name = match declaration {
+        Declaration::TSTypeAliasDeclaration(_) | Declaration::TSInterfaceDeclaration(_) => {
+            return Group::Type;
+        }
+        Declaration::FunctionDeclaration(function) if function.declare => return Group::Type,
+        Declaration::VariableDeclaration(declaration) if declaration.declare => {
+            return Group::Type;
+        }
+        Declaration::FunctionDeclaration(function) => {
+            function.id.as_ref().map(|id| format!("fn:{}", id.name))
+        }
+        Declaration::ClassDeclaration(class) => {
+            class.id.as_ref().map(|id| format!("class:{}", id.name))
+        }
+        Declaration::VariableDeclaration(declaration) => single_variable(declaration),
+        _ => None,
+    };
+    Group::Code { name }
 }
 
 fn single_variable(declaration: &oxc_ast::ast::VariableDeclaration<'_>) -> Option<String> {
@@ -349,145 +365,256 @@ fn single_variable(declaration: &oxc_ast::ast::VariableDeclaration<'_>) -> Optio
     }
 }
 
-/// Gives the outline of `program`, the parsed `source`, with its outer
-/// function `bodies` in source order.
-pub(crate) fn outline(program: &Program<'_>, source: &str, bodies: &[Body]) -> Outline {
-    let masker = Masker {
+/// True for a comment that a transform reads, such as `@jsx` or
+/// `@jsxImportSource`. Such a comment changes the code of the module.
+fn is_pragma(text: &str) -> bool {
+    text.contains("@jsx")
+}
+
+fn masker<'s>(program: &Program<'_>, source: &'s str) -> Masker<'s> {
+    Masker {
         source,
         comments: program
             .comments
             .iter()
-            .map(|comment| {
+            .filter_map(|comment| {
                 let text = source
                     .get(comment.span.start as usize..comment.span.end as usize)
                     .unwrap_or_default();
-                Mask {
+                (!is_pragma(text)).then_some(Mask {
                     span: (comment.span.start, comment.span.end),
                     with: if text.contains(['\n', '\r', '\u{2028}', '\u{2029}']) {
                         b"\n"
                     } else {
                         b" "
                     },
-                }
+                })
             })
             .collect(),
-    };
-    let mut references = References::default();
-    references.visit_program(program);
-    let mut refs = references.names;
-    refs.sort_unstable();
-    let refs_in = |from: u32, to: u32, outside: &[(u32, u32)]| -> BTreeSet<String> {
-        let start = refs.partition_point(|(offset, _)| *offset < from);
-        refs[start..]
+    }
+}
+
+/// The state of [`outline`] while it walks the top-level statements.
+struct Builder<'s, 'b> {
+    masker: Masker<'s>,
+    bodies: &'b [Body],
+    body_spans: Vec<(u32, u32)>,
+    /// The references, sorted by offset.
+    refs: Vec<(u32, String, bool)>,
+    /// The imported names that the file reads as values. The binding
+    /// resolution of the semantic pass decides it, so a local of the same
+    /// name in an inner scope does not count.
+    value_imports: BTreeSet<String>,
+    keys: Vec<Option<String>>,
+    skeleton: Xxh3,
+    skeleton_refs: BTreeSet<String>,
+    bindings: BTreeMap<String, u64>,
+    declarators: Vec<(String, (u32, u32))>,
+}
+
+impl Builder<'_, '_> {
+    /// The names that `from..to` references, outside the `outside` spans.
+    fn refs_in(&self, from: u32, to: u32, outside: &[(u32, u32)]) -> BTreeSet<String> {
+        let start = self.refs.partition_point(|(offset, ..)| *offset < from);
+        self.refs[start..]
             .iter()
-            .take_while(|(offset, _)| *offset < to)
-            .filter(|(offset, _)| {
+            .take_while(|(offset, ..)| *offset < to)
+            .filter(|(offset, ..)| {
                 !outside
                     .iter()
                     .any(|body| body.0 <= *offset && *offset < body.1)
             })
-            .map(|(_, name)| name.clone())
+            .map(|(_, name, _)| name.clone())
             .collect()
-    };
-    let body_spans: Vec<(u32, u32)> = bodies.iter().map(|body| body.span).collect();
-    let mut keys: Vec<Option<String>> = vec![None; bodies.len()];
-    let mut skeleton = Xxh3::new();
-    let mut skeleton_refs = BTreeSet::new();
-    let mut bindings = BTreeMap::new();
-    let mut pure_declarators = Vec::new();
-    for statement in &program.body {
+    }
+
+    /// The range of the outer functions that start in `span`.
+    fn functions_in(&self, span: (u32, u32)) -> std::ops::Range<usize> {
+        let first = self.bodies.partition_point(|body| body.start < span.0);
+        let last = self.bodies.partition_point(|body| body.start < span.1);
+        first..last
+    }
+
+    fn name_functions(&mut self, range: std::ops::Range<usize>, key: impl Fn(usize) -> String) {
+        let first = range.start;
+        for index in range {
+            self.keys[index] = Some(key(index - first));
+        }
+    }
+
+    fn statement(&mut self, statement: &Statement<'_>) {
         let span = statement.span();
-        let first = bodies.partition_point(|body| body.start < span.start);
-        let last = bodies.partition_point(|body| body.start < span.end);
-        let inside = &body_spans[first..last];
+        let span = (span.start, span.end);
+        let functions = self.functions_in(span);
         match group(statement) {
             Group::Type => {}
-            Group::Import {
-                source: from,
-                bindings: imported,
-            } => {
-                skeleton.update(b"import\0");
-                skeleton.update(from.as_bytes());
-                skeleton.update(b"\0");
-                for (local, name) in imported {
-                    let mut hasher = Xxh3::new();
-                    hasher.update(from.as_bytes());
-                    hasher.update(b"\0");
-                    hasher.update(name.as_bytes());
-                    bindings.insert(local, hasher.digest());
-                }
-            }
+            Group::Import { source, bindings } => self.import(&source, bindings),
             Group::Function { name } => {
-                for (index, key) in (first..last).zip(&mut keys[first..last]) {
-                    *key = Some(if index == first {
+                self.name_functions(functions.clone(), |index| {
+                    if index == 0 {
                         format!("fn:{name}")
                     } else {
-                        format!("fn:{name}#{}", index - first)
-                    });
-                }
-                // The binding is the name and the parameters. The body
-                // counts only for a test file that entered it.
-                let header = bodies
-                    .get(first)
-                    .map_or((span.start, span.end), |body| (span.start, body.span.0));
-                bindings.insert(name, masker.digest(header, &[]));
+                        format!("fn:{name}#{index}")
+                    }
+                });
+                // The binding is the name and the parameters. The body counts
+                // only for a test file that entered it.
+                let header = self
+                    .bodies
+                    .get(functions.start)
+                    .map_or(span, |body| (span.0, body.span.0));
+                let digest = self.masker.digest(header, &[]);
+                self.bindings.insert(name, digest);
             }
             Group::Variables { kind, declarators } => {
                 for (name, declarator) in declarators {
-                    let from = bodies.partition_point(|body| body.start < declarator.0);
-                    let to = bodies.partition_point(|body| body.start < declarator.1);
-                    for (index, key) in (from..to).zip(&mut keys[from..to]) {
-                        *key = Some(format!("var:{name}#{}", index - from));
-                    }
+                    let inner = self.functions_in(declarator);
+                    self.name_functions(inner.clone(), |index| format!("var:{name}#{index}"));
                     let mut hasher = Xxh3::new();
                     hasher.update(kind.as_bytes());
                     hasher.update(b"\0");
-                    masker.hash(declarator, &body_spans[from..to], &mut hasher);
-                    bindings.insert(name.clone(), hasher.digest());
-                    pure_declarators.push((name, declarator));
+                    self.masker
+                        .hash(declarator, &self.body_spans[inner], &mut hasher);
+                    self.bindings.insert(name.clone(), hasher.digest());
+                    self.declarators.push((name, declarator));
                 }
             }
             Group::Code { name } => {
-                let digest = masker.digest((span.start, span.end), inside);
-                skeleton.update(b"code\0");
-                skeleton.update(&digest.to_le_bytes());
-                skeleton_refs.extend(refs_in(span.start, span.end, inside));
+                let inside = &self.body_spans[functions.clone()];
+                let digest = self.masker.digest(span, inside);
+                self.skeleton.update(b"code\0");
+                self.skeleton.update(&digest.to_le_bytes());
+                let refs = self.refs_in(span.0, span.1, inside);
+                self.skeleton_refs.extend(refs);
                 let prefix = name.unwrap_or_else(|| format!("s{digest:016x}"));
-                for (index, key) in (first..last).zip(&mut keys[first..last]) {
-                    *key = Some(format!("{prefix}#{}", index - first));
-                }
+                self.name_functions(functions, |index| format!("{prefix}#{index}"));
             }
         }
     }
-    let mut seen: BTreeMap<String, usize> = BTreeMap::new();
-    let outline_bodies = bodies
-        .iter()
-        .zip(keys)
-        .enumerate()
-        .map(|(index, (body, key))| {
-            let base = key.unwrap_or_else(|| format!("at{index}"));
-            let count = seen.entry(base.clone()).or_default();
-            let key = if *count == 0 {
-                base.clone()
-            } else {
-                format!("{base}~{count}")
-            };
-            *count += 1;
-            OutlineBody {
-                span: body.span,
-                hash: masker.digest((body.start, body.span.1), &[]),
-                key,
-                refs: refs_in(body.start, body.span.1, &[]).into_iter().collect(),
-            }
-        })
-        .collect();
-    let all_refs: BTreeSet<String> = refs.into_iter().map(|(_, name)| name).collect();
-    Outline {
-        skeleton: skeleton.digest(),
-        bodies: outline_bodies,
-        bindings,
-        skeleton_refs: skeleton_refs.into_iter().collect(),
-        refs: all_refs.into_iter().collect(),
-        declarators: pure_declarators,
+
+    /// An import is module code by its source and by whether the file reads
+    /// one of its names as a value: a TypeScript transform removes an import
+    /// with no such read, and then the module does not load.
+    fn import(&mut self, source: &str, bindings: Vec<(String, String)>) {
+        self.skeleton.update(b"import\0");
+        self.skeleton.update(source.as_bytes());
+        let loads = bindings
+            .iter()
+            .any(|(local, _)| self.value_imports.contains(local));
+        self.skeleton
+            .update(if loads { b"\0load" } else { b"\0type" });
+        for (local, name) in bindings {
+            let mut hasher = Xxh3::new();
+            hasher.update(source.as_bytes());
+            hasher.update(b"\0");
+            hasher.update(name.as_bytes());
+            self.bindings.insert(local, hasher.digest());
+        }
+        self.skeleton.update(b"\0");
     }
+
+    fn finish(self) -> Outline {
+        let mut seen: BTreeMap<String, usize> = BTreeMap::new();
+        let bodies = self
+            .bodies
+            .iter()
+            .zip(&self.keys)
+            .enumerate()
+            .map(|(index, (body, key))| {
+                let base = key.clone().unwrap_or_else(|| format!("at{index}"));
+                let count = seen.entry(base.clone()).or_default();
+                let key = if *count == 0 {
+                    base
+                } else {
+                    format!("{base}~{count}")
+                };
+                *count += 1;
+                OutlineBody {
+                    span: body.span,
+                    hash: self.masker.digest((body.start, body.span.1), &[]),
+                    key,
+                    refs: self
+                        .refs_in(body.start, body.span.1, &[])
+                        .into_iter()
+                        .collect(),
+                }
+            })
+            .collect();
+        let refs: BTreeSet<String> = self.refs.into_iter().map(|(_, name, _)| name).collect();
+        Outline {
+            skeleton: self.skeleton.digest(),
+            bodies,
+            bindings: self.bindings,
+            skeleton_refs: self.skeleton_refs.into_iter().collect(),
+            refs: refs.into_iter().collect(),
+            declarators: self.declarators,
+        }
+    }
+}
+
+/// The local names of the imports that the program reads as values. A
+/// TypeScript transform removes an import binding with no such read.
+fn value_imports(program: &Program<'_>) -> BTreeSet<String> {
+    let semantic = oxc_semantic::SemanticBuilder::new().build(program).semantic;
+    let scoping = semantic.scoping();
+    program
+        .body
+        .iter()
+        .filter_map(|statement| match statement {
+            Statement::ImportDeclaration(import) => import.specifiers.as_ref(),
+            _ => None,
+        })
+        .flatten()
+        .filter(|specifier| {
+            scoping
+                .get_resolved_references(specifier.symbol_id())
+                .any(|reference| reference.is_value() && !reference.flags().is_value_as_type())
+        })
+        .map(|specifier| specifier.local().name.to_string())
+        .collect()
+}
+
+/// Gives the outline of `program`, the parsed `source`, with its outer
+/// function `bodies` in source order.
+pub fn outline(program: &Program<'_>, source: &str, bodies: &[Body]) -> Outline {
+    let mut references = References::default();
+    references.visit_program(program);
+    let mut refs = references.names;
+    refs.sort_unstable();
+    let value_imports = value_imports(program);
+    let masker = masker(program, source);
+    let mut skeleton = Xxh3::new();
+    // A directive such as "use strict" changes how each function runs, and
+    // a pragma comment changes the code that the transform gives.
+    for directive in &program.directives {
+        skeleton.update(b"directive\0");
+        skeleton.update(
+            masker
+                .text(directive.span.start, directive.span.end)
+                .as_bytes(),
+        );
+    }
+    for comment in &program.comments {
+        let text = masker.text(comment.span.start, comment.span.end);
+        if is_pragma(text) {
+            skeleton.update(b"pragma\0");
+            skeleton.update(text.as_bytes());
+        }
+    }
+    let mut builder = Builder {
+        masker,
+        bodies,
+        body_spans: bodies.iter().map(|body| body.span).collect(),
+        refs,
+        value_imports,
+        keys: vec![None; bodies.len()],
+        skeleton,
+        skeleton_refs: BTreeSet::new(),
+        bindings: BTreeMap::new(),
+        declarators: Vec::new(),
+    };
+    for statement in &program.body {
+        builder.statement(statement);
+    }
+    builder.finish()
 }

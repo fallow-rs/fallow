@@ -41,7 +41,7 @@ pub const PROBE_FUNCTION: &str = "__fallow_m_r";
 
 /// The prelude part of the entry probes. It follows the other prelude
 /// functions, and the module probe follows it.
-pub(crate) const PROBE_PRELUDE: &str =
+pub const PROBE_PRELUDE: &str =
     " function __fallow_m_r(id) { const m = globalThis.__fallowMutation; if (m) m.c(id); }";
 
 /// The probe key of a root-relative path: 16 lowercase hex digits.
@@ -71,7 +71,7 @@ enum ProbeSite {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct Body {
+pub struct Body {
     /// The start of the function node: its parameters and its name start
     /// here or later.
     pub start: u32,
@@ -138,7 +138,7 @@ impl<'a> Visit<'a> for Collector {
     }
 }
 
-pub(crate) fn collect(program: &Program<'_>) -> Vec<Body> {
+pub fn collect(program: &Program<'_>) -> Vec<Body> {
     let mut collector = Collector::default();
     collector.visit_program(program);
     let mut bodies = collector.bodies;
@@ -147,13 +147,13 @@ pub(crate) fn collect(program: &Program<'_>) -> Vec<Body> {
 }
 
 /// The outline of the parsed `program` of `source`.
-pub(crate) fn outline_of(program: &Program<'_>, source: &str) -> Outline {
+pub fn outline_of(program: &Program<'_>, source: &str) -> Outline {
     crate::outline::outline(program, source, &collect(program))
 }
 
 /// One probe text for the emitter.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct Probe {
+pub struct Probe {
     pub offset: u32,
     pub text: String,
     /// For the `)` that ends a comma expression: the index of the probe
@@ -167,7 +167,7 @@ fn guarded_call(id: &str) -> String {
 
 /// The probes of the outer function bodies of `program`, sorted by offset,
 /// and the outline.
-pub(crate) fn probes(program: &Program<'_>, source: &str, key: &str) -> (Vec<Probe>, Outline) {
+pub fn probes(program: &Program<'_>, source: &str, key: &str) -> (Vec<Probe>, Outline) {
     let bodies = collect(program);
     let mut probes = Vec::with_capacity(bodies.len() + 1);
     for (ordinal, body) in bodies.iter().enumerate() {
@@ -226,6 +226,6 @@ pub(crate) fn probes(program: &Program<'_>, source: &str, key: &str) -> (Vec<Pro
 }
 
 /// The module probe statement, which follows the prelude.
-pub(crate) fn module_statement(key: &str) -> String {
+pub fn module_statement(key: &str) -> String {
     format!(" {PROBE_FUNCTION}(\"{}\");", module_probe(key))
 }

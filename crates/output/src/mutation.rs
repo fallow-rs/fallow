@@ -661,6 +661,7 @@ pub struct MutationReachSelectionOutput {
     /// `unknown-loaded-file`,
     /// `changed-file-without-probes`, `changed-skeleton`,
     /// `changed-entered-function`, `changed-binding`, `mutant-in-loaded-code`,
+    /// `loads-mutated-declarator`,
     /// `mutant-in-entered-function` and `mutant-in-file-without-probes`.
     pub kept: std::collections::BTreeMap<String, usize>,
     /// The test files whose reach record this run wrote.

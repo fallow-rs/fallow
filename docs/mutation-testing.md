@@ -2190,7 +2190,10 @@ A test file T stays out of the dry run only when each of these holds:
    mutant in a pure variable declaration counts only when module code or a
    function that T entered names the variable: T runs the declaration when
    it loads the module, but no code of T reads the value. A dropped file then
-   no longer counts as a covering test of that mutant.
+   no longer counts as a covering test of that mutant. For each such mutant,
+   one file that loads the module stays in the dry run
+   (`loads-mutated-declarator`), so the mutant keeps a covering test and the
+   verdict of a run without the selection.
 
 Each other case keeps T. With an equal environment, equal module code of
 each loaded file, equal entered functions and equal values of each name that
@@ -2225,11 +2228,13 @@ file: `no-record`,
 `environment`, `runner-config-changed`, `new-reach-file`, `unknown-loaded-file`,
 `changed-file-without-probes`, `changed-skeleton`,
 `changed-entered-function`, `changed-binding`, `mutant-in-loaded-code`,
+`loads-mutated-declarator`,
 `mutant-in-entered-function`, `mutant-in-file-without-probes`), `recorded`
 (the test files whose record the run wrote), and `violations` (each
 `test_file` and `mutant_id` of a check run where a dropped file covers a
 mutant; for a mutant that runs when its module loads, where a dropped file
-kills it).
+kills it, because each file that loads the module runs such a mutant and
+only a kill shows that the file reads its value).
 
 The human report adds a line, for example `Reach selection: left out the
 dry run of 12 of 40 test files.`
