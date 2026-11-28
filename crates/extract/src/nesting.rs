@@ -98,7 +98,7 @@ thread_local! {
 
 /// Whether a fragment that the extraction parses on its own, such as a
 /// template expression or a script block, is within the nesting limits.
-/// A refusal is recorded for [`take_refused_fragment`], so the parse of the
+/// A refusal is recorded for `take_refused_fragment`, so the parse of the
 /// whole file can be refused too.
 pub fn fragment_within_limits(fragment: &str) -> bool {
     let within = !scan_nesting(fragment, Dialect::Script).exceeds_limits();
@@ -247,7 +247,7 @@ pub fn parse_file_bounded<R: Send>(
 /// The text of an HTML, MDX, Vue, Svelte or Astro file is markup, and its
 /// prose can hold many bare `<`, such as `the width is < 3 px`. The scan of
 /// the whole file reads them as type-argument lists that stay open, so the
-/// [`reread_budget`] does not apply to such a file. Each fragment of it that
+/// `reread_budget` does not apply to such a file. Each fragment of it that
 /// is parsed gets its own scan with the budget: through [`parse_bounded`],
 /// or through [`fragment_within_limits`].
 pub fn parse_bounded_for_file<R: Send>(
