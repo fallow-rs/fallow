@@ -149,7 +149,7 @@ thread_local! {
 }
 
 /// The number of `realpath` calls on this thread.
-#[cfg(test)]
+#[cfg(all(test, unix))]
 pub(crate) fn realpath_calls() -> u64 {
     REALPATH_CALLS.with(std::cell::Cell::get)
 }
