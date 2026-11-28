@@ -994,6 +994,20 @@ mod tests {
                 head.push_str(&line);
                 line.clear();
             }
+            // Read the request body before the reply. A socket that closes
+            // with unread data sends a reset on Windows, and the client then
+            // fails with ConnectionReset instead of reading the reply.
+            let body_len = head
+                .lines()
+                .find_map(|header| {
+                    let (name, value) = header.split_once(':')?;
+                    name.eq_ignore_ascii_case("content-length")
+                        .then(|| value.trim().parse::<usize>().ok())
+                        .flatten()
+                })
+                .unwrap_or(0);
+            let mut body = vec![0; body_len];
+            let _ = std::io::Read::read_exact(&mut reader, &mut body);
             let _ = sender.send(head.to_ascii_lowercase());
             let mut stream = stream;
             let _ = write!(stream, "{reply}");
