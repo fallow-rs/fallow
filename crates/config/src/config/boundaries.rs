@@ -3,7 +3,7 @@
 use std::fmt;
 use std::path::{Path, PathBuf};
 
-use super::glob_validation::{compile_path_glob, literal_dir_glob};
+use super::glob_validation::{compile_config_matcher, literal_dir_glob};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -1421,10 +1421,6 @@ impl BoundaryConfig {
     }
 
     /// Compile each zone's membership patterns into glob matchers.
-    #[expect(
-        clippy::expect_used,
-        reason = "boundary glob patterns are validated before config resolution"
-    )]
     fn resolve_zones(&self) -> Vec<ResolvedZone> {
         self.zones
             .iter()
@@ -1432,21 +1428,15 @@ impl BoundaryConfig {
                 let matchers = zone
                     .patterns
                     .iter()
-                    .map(|pattern| {
-                        compile_path_glob(pattern)
-                            .expect("boundaries.zones[].patterns was validated at config load time")
-                            .compile_matcher()
+                    .filter_map(|pattern| {
+                        compile_config_matcher(pattern, "boundaries.zones[].patterns")
                     })
                     .collect();
                 let public_file_matchers = zone
                     .public_files
                     .iter()
-                    .map(|pattern| {
-                        compile_path_glob(pattern)
-                            .expect(
-                                "boundaries.zones[].publicFiles was validated at config load time",
-                            )
-                            .compile_matcher()
+                    .filter_map(|pattern| {
+                        compile_config_matcher(pattern, "boundaries.zones[].publicFiles")
                     })
                     .collect();
                 let root = zone.root.as_deref().map(normalize_zone_root);
@@ -1463,10 +1453,6 @@ impl BoundaryConfig {
     }
 
     /// Compile the coverage `allowUnmatched` patterns into glob matchers.
-    #[expect(
-        clippy::expect_used,
-        reason = "boundary glob patterns are validated before config resolution"
-    )]
     fn resolve_coverage(&self) -> ResolvedBoundaryCoverageConfig {
         ResolvedBoundaryCoverageConfig {
             require_all_files: self.coverage.require_all_files,
@@ -1474,12 +1460,8 @@ impl BoundaryConfig {
                 .coverage
                 .allow_unmatched
                 .iter()
-                .map(|pattern| {
-                    compile_path_glob(pattern)
-                        .expect(
-                            "boundaries.coverage.allowUnmatched was validated at config load time",
-                        )
-                        .compile_matcher()
+                .filter_map(|pattern| {
+                    compile_config_matcher(pattern, "boundaries.coverage.allowUnmatched")
                 })
                 .collect(),
         }

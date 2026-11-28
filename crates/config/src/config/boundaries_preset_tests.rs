@@ -336,3 +336,24 @@ fn a_root_dir_with_an_unclosed_class_resolves() {
         assert!(!resolved.zones.is_empty(), "{kind:?}");
     }
 }
+
+#[test]
+fn a_zone_glob_that_does_not_compile_matches_no_path() {
+    let nested = format!("{}b{}", "a{".repeat(130), "}".repeat(130));
+    let config = BoundaryConfig {
+        zones: vec![BoundaryZone {
+            name: "a".to_owned(),
+            patterns: vec![nested.clone(), "src/**".to_owned()],
+            public_files: vec![nested.clone()],
+            ..BoundaryZone::default()
+        }],
+        coverage: BoundaryCoverageConfig {
+            allow_unmatched: vec![nested],
+            ..BoundaryCoverageConfig::default()
+        },
+        ..BoundaryConfig::default()
+    };
+    let resolved = config.resolve();
+    assert_eq!(resolved.classify_zone("src/x.ts"), Some("a"));
+    assert!(resolved.coverage.allow_unmatched.is_empty());
+}
