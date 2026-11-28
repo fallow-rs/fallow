@@ -29,7 +29,8 @@
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
-use globset::{GlobBuilder, GlobMatcher};
+use fallow_config::PathMatcher;
+use globset::GlobBuilder;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::extract::ModuleInfo;
@@ -220,7 +221,7 @@ fn directory_chain<'a>(root: &'a Path, path: &'a Path) -> impl Iterator<Item = &
 /// A path a package.json or tsconfig field names: one exact file, or a glob.
 enum PathTarget {
     Exact(PathBuf),
-    Glob(GlobMatcher),
+    Glob(PathMatcher),
 }
 
 impl PathTarget {
@@ -316,8 +317,8 @@ fn package_target(dir: &Path, raw: &str) -> Vec<PathTarget> {
 /// The file set of one tsconfig, after its `extends` chain.
 struct TsconfigScope {
     files: Vec<PathBuf>,
-    include: Vec<GlobMatcher>,
-    exclude: Vec<GlobMatcher>,
+    include: Vec<PathMatcher>,
+    exclude: Vec<PathMatcher>,
     type_roots: Vec<PathBuf>,
 }
 
@@ -455,7 +456,7 @@ fn load_raw_scope(config: &Path, sources: &TsconfigSources) -> Option<RawScope> 
 /// `base`. A pattern whose last segment has no wildcard also matches the
 /// directory subtree it names (`src` matches `src/**/*`), as TypeScript reads
 /// a segment without a file extension as a directory.
-fn pattern_matchers(base: &Path, pattern: &str) -> Vec<GlobMatcher> {
+fn pattern_matchers(base: &Path, pattern: &str) -> Vec<PathMatcher> {
     let last_segment = pattern
         .trim_end_matches('/')
         .rsplit('/')
@@ -481,7 +482,7 @@ fn glob_target(base: &Path, pattern: &str) -> Option<PathTarget> {
 /// forward-slash paths. Leading `.` and `..` segments resolve against `base`
 /// before the glob is built, and the literal base is escaped. With
 /// `literal_separator`, `*` stops at `/` and only `**` crosses directories.
-fn relative_glob(base: &Path, pattern: &str, literal_separator: bool) -> Option<GlobMatcher> {
+fn relative_glob(base: &Path, pattern: &str, literal_separator: bool) -> Option<PathMatcher> {
     let mut literal = normalize_lexically(base);
     let mut rest: Vec<&str> = Vec::new();
     for segment in pattern.split('/').filter(|segment| !segment.is_empty()) {

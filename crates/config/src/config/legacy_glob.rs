@@ -8,7 +8,9 @@
 
 use std::path::Path;
 
-use globset::{Glob, GlobMatcher, GlobSet, GlobSetBuilder};
+use globset::{Glob, GlobSet, GlobSetBuilder};
+
+use crate::PathMatcher;
 
 use super::FallowConfig;
 use super::glob_validation::compile_path_glob;
@@ -356,7 +358,7 @@ struct CompiledGroup<'a> {
     group: &'a LegacyGlobGroup,
     strict: GlobSet,
     /// Index into `group.patterns`, and the old-rule matcher of that pattern.
-    legacy: Vec<(usize, GlobMatcher)>,
+    legacy: Vec<(usize, PathMatcher)>,
     /// The lost files of each `legacy` entry.
     lost: Vec<Vec<String>>,
 }

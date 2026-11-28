@@ -2,7 +2,9 @@ use std::collections::BTreeMap;
 use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 
-use globset::{Glob, GlobMatcher};
+use globset::Glob;
+
+use crate::PathMatcher;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -42,7 +44,7 @@ pub struct IgnoreExportRule {
 #[derive(Debug, Clone)]
 pub struct CompiledIgnoreExportRule {
     /// Pre-compiled matcher for the rule's `file` glob.
-    pub matcher: globset::GlobMatcher,
+    pub matcher: crate::PathMatcher,
     /// Export names to ignore (`*` for all), copied from the raw rule.
     pub exports: Vec<String>,
 }
@@ -70,7 +72,7 @@ pub struct CompiledIgnoreCatalogReferenceRule {
     pub catalog: Option<String>,
     /// Optional pre-compiled glob over the consuming workspace `package.json`
     /// path; `None` matches any consumer.
-    pub consumer_matcher: Option<globset::GlobMatcher>,
+    pub consumer_matcher: Option<crate::PathMatcher>,
 }
 
 impl CompiledIgnoreCatalogReferenceRule {
@@ -149,7 +151,7 @@ pub struct ResolvedOverride {
     pub files: Vec<String>,
     /// Pre-compiled matchers for the entry's `files` globs; the override
     /// applies to a file when any matcher matches.
-    pub matchers: Vec<globset::GlobMatcher>,
+    pub matchers: Vec<crate::PathMatcher>,
     /// Partial severity map applied to matching files.
     pub rules: PartialRulesConfig,
 }
@@ -260,7 +262,7 @@ pub struct ResolvedConfig {
     pub ignore_command_entries: Vec<String>,
     /// Compiled globs matched against raw import specifiers (not filesystem
     /// paths) whose `unresolved-import` findings are suppressed.
-    pub ignore_unresolved_imports: Vec<GlobMatcher>,
+    pub ignore_unresolved_imports: Vec<PathMatcher>,
     /// Raw `ignoreExports` rules as configured, kept alongside the compiled
     /// form for surfaces that need the original glob text (config editing,
     /// diagnostics).
@@ -725,7 +727,7 @@ pub const DEFAULT_IGNORE_PATTERNS: &[&str] = &[
     "fallow-viz.html",
 ];
 
-fn compile_ignore_unresolved_imports(patterns: &[String]) -> Vec<GlobMatcher> {
+fn compile_ignore_unresolved_imports(patterns: &[String]) -> Vec<PathMatcher> {
     patterns
         .iter()
         .filter_map(|pattern| {
@@ -769,7 +771,7 @@ fn compile_overrides(overrides: Vec<ConfigOverride>) -> Vec<ResolvedOverride> {
     overrides
         .into_iter()
         .filter_map(|override_entry| {
-            let matchers: Vec<globset::GlobMatcher> = override_entry
+            let matchers: Vec<crate::PathMatcher> = override_entry
                 .files
                 .iter()
                 .filter_map(|pattern| compile_config_matcher(pattern, "overrides[].files"))
@@ -842,7 +844,7 @@ struct CompiledIgnoreSettings {
     patterns: IgnorePatternSet,
     user_pattern_count: usize,
     findings: FindingIgnoreMatcher,
-    unresolved_imports: Vec<GlobMatcher>,
+    unresolved_imports: Vec<PathMatcher>,
     exports: Vec<CompiledIgnoreExportRule>,
     catalog_references: Vec<CompiledIgnoreCatalogReferenceRule>,
     dependency_overrides: Vec<CompiledIgnoreDependencyOverrideRule>,

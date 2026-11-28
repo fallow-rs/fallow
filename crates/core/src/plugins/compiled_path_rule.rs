@@ -12,7 +12,7 @@ use super::{PathRule, entry_rule_glob};
 /// lists share one compiled copy.
 #[derive(Debug)]
 struct CompiledExcludes {
-    globs: Vec<globset::GlobMatcher>,
+    globs: Vec<fallow_config::PathMatcher>,
     regexes: Vec<Regex>,
     segment_regexes: Vec<Regex>,
 }
@@ -58,7 +58,7 @@ impl ExcludeCache {
 /// rewrite of an extglob `?(m)` group gives one.
 #[derive(Debug, Clone)]
 pub struct CompiledPathRule {
-    include: globset::GlobMatcher,
+    include: fallow_config::PathMatcher,
     excludes: Arc<CompiledExcludes>,
 }
 
@@ -107,7 +107,7 @@ fn compile_excluded_globs(
     patterns: &[String],
     rule_kind: &str,
     rule_pattern: &str,
-) -> Vec<globset::GlobMatcher> {
+) -> Vec<fallow_config::PathMatcher> {
     patterns
         .iter()
         .filter_map(|pattern| {

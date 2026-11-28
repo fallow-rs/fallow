@@ -27,9 +27,9 @@ struct CompiledRule<'a> {
     callee_patterns: Vec<CalleePattern>,
     effects: FxHashSet<EffectKind>,
     zones: FxHashSet<String>,
-    files: Vec<globset::GlobMatcher>,
-    exclude: Vec<globset::GlobMatcher>,
-    allowed_files: Vec<globset::GlobMatcher>,
+    files: Vec<fallow_config::PathMatcher>,
+    exclude: Vec<fallow_config::PathMatcher>,
+    allowed_files: Vec<fallow_config::PathMatcher>,
 }
 
 impl CompiledRule<'_> {
@@ -72,7 +72,7 @@ impl CompiledRule<'_> {
     }
 }
 
-fn compile_scope_globs(patterns: &[String]) -> Vec<globset::GlobMatcher> {
+fn compile_scope_globs(patterns: &[String]) -> Vec<fallow_config::PathMatcher> {
     // Rule-pack loading validates these globs. An unexpected parse failure
     // drops only that pattern, like the callee patterns in `compile_rules`.
     patterns
@@ -83,8 +83,8 @@ fn compile_scope_globs(patterns: &[String]) -> Vec<globset::GlobMatcher> {
 }
 
 fn compiled_scope_applies(
-    files: &[globset::GlobMatcher],
-    exclude: &[globset::GlobMatcher],
+    files: &[fallow_config::PathMatcher],
+    exclude: &[fallow_config::PathMatcher],
     zones: &FxHashSet<String>,
     relative: &str,
     zone: Option<&str>,

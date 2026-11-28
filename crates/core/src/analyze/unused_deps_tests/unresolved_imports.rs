@@ -107,9 +107,10 @@ fn ignore_unresolved_imports_filters_raw_specifier_globs() {
     config.ignore_unresolved_imports = ["@example/icons", "@example/icons/**", "../generated/**"]
         .into_iter()
         .map(|pattern| {
-            globset::Glob::new(pattern)
-                .expect("test glob should compile")
-                .compile_matcher()
+            fallow_config::try_compile_matcher(
+                &globset::Glob::new(pattern).expect("test glob should compile"),
+            )
+            .expect("test glob compiles")
         })
         .collect();
     let suppressions = SuppressionContext::empty();

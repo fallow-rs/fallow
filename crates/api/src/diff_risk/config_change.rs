@@ -16,9 +16,9 @@
 
 use std::path::{Component, Path, PathBuf};
 
+use fallow_config::PathMatcher;
 use fallow_config::Severity;
 use fallow_output::WeakenedTestsKind;
-use globset::GlobMatcher;
 use rustc_hash::{FxHashMap, FxHashSet};
 use serde_json::{Map, Value};
 
@@ -578,7 +578,7 @@ fn list_changes(
 fn object_is_covered(
     object: &Map<String, Value>,
     base: &IgnoreList<'_>,
-    base_matchers: &[GlobMatcher],
+    base_matchers: &[PathMatcher],
 ) -> bool {
     if base.objects.iter().any(|base| object_covers(base, object)) {
         return true;
@@ -646,7 +646,7 @@ fn object_strings(object: &Map<String, Value>) -> Vec<String> {
     strings
 }
 
-fn matchers(globs: &[&str], defaults: &[&str]) -> Vec<GlobMatcher> {
+fn matchers(globs: &[&str], defaults: &[&str]) -> Vec<PathMatcher> {
     globs
         .iter()
         .chain(defaults)
@@ -660,7 +660,7 @@ fn matchers(globs: &[&str], defaults: &[&str]) -> Vec<GlobMatcher> {
 /// segments, and a `*` becomes one sample segment. A glob that matches every
 /// sample covers the entry. The check is a heuristic. An entry with other
 /// glob syntax is never covered, so it reports.
-fn is_covered(entry: &str, globs: &[GlobMatcher]) -> bool {
+fn is_covered(entry: &str, globs: &[PathMatcher]) -> bool {
     if entry.contains(['?', '[', ']', '{', '}', '\\']) {
         return false;
     }

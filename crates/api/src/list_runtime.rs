@@ -701,9 +701,10 @@ mod tests {
             matchers: patterns
                 .iter()
                 .map(|pattern| {
-                    Glob::new(pattern)
-                        .expect("valid test glob")
-                        .compile_matcher()
+                    fallow_config::try_compile_matcher(
+                        &Glob::new(pattern).expect("valid test glob"),
+                    )
+                    .expect("valid test glob")
                 })
                 .collect(),
             root: None,

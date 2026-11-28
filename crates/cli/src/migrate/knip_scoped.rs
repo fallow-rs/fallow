@@ -707,7 +707,7 @@ pub(super) fn plugin_section_warning(
 /// file name. Each `{a,b}` alternative of the value must match one of the
 /// plugin's config globs, in any directory.
 fn config_name_is_read(config: &str, patterns: &[&str]) -> bool {
-    let matchers: Vec<globset::GlobMatcher> = patterns
+    let matchers: Vec<fallow_config::PathMatcher> = patterns
         .iter()
         .flat_map(|pattern| [(*pattern).to_string(), format!("**/{pattern}")])
         .filter_map(|pattern| fallow_config::compile_path_glob(&pattern).ok())
