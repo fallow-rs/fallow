@@ -115,10 +115,9 @@ fn native_gate_probe(
         return None;
     }
     let script = root.join(&status.path);
-    if linked_out_of_root(root, &script) {
-        return None;
-    }
-    let text = read_optional_text(&script).ok().flatten()?;
+    let text = crate::state_file::read_optional_text_in_root(root, &script)
+        .ok()
+        .flatten()?;
     if !text.contains("# Native JSON protocol: fallow-gate-json-v1") {
         return None;
     }
@@ -400,14 +399,11 @@ fn surfaces(root: &Path, home: Option<&Path>) -> Vec<SurfaceStatus> {
     rows
 }
 
-/// The detail of a project surface that status does not read.
-const LINKED_OUT_DETAIL: &str = "not read: it is a link to a location outside the project";
-
-/// True when `path` is below `root` and has a link on its path that
-/// resolves outside `root`. Status does not read such a surface, because a
-/// cloned repository chooses where its links point.
+/// True when `path` is below `root` and resolves outside `root`. Status
+/// does not read such a surface, because a cloned repository chooses where
+/// its links point.
 fn linked_out_of_root(root: &Path, path: &Path) -> bool {
-    path.starts_with(root) && fallow_types::path_guard::outside_link(root, path).is_some()
+    crate::state_file::resolves_outside_root(root, path)
 }
 
 /// The row of a surface that [`linked_out_of_root`] refuses.
@@ -423,7 +419,10 @@ fn linked_out_row(
         step,
         state: SurfaceState::Absent,
         path: display_path(root, home, path),
-        detail: Some(LINKED_OUT_DETAIL.to_string()),
+        detail: Some(format!(
+            "not read: {}",
+            crate::state_file::OUTSIDE_ROOT_REASON
+        )),
         blocker: None,
         user_scope: false,
     }
@@ -1374,6 +1373,34 @@ mod tests {
             "{:?}",
             import.detail
         );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn a_skill_link_into_node_modules_inside_the_root_is_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let package_skill = dir.path().join("node_modules/fallow/skills/fallow");
+        std::fs::create_dir_all(&package_skill).unwrap();
+        std::fs::write(package_skill.join("SKILL.md"), "# Foreign skill\n").unwrap();
+        std::fs::create_dir_all(dir.path().join(".agents/skills")).unwrap();
+        let skill_dir = dir.path().join(".agents/skills/fallow");
+        std::os::unix::fs::symlink("../../node_modules/fallow/skills/fallow", &skill_dir).unwrap();
+
+        let row = skill_row(dir.path(), None, None, "fallow", &skill_dir);
+
+        assert_eq!(row.state, SurfaceState::Foreign, "{:?}", row.detail);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn a_dangling_link_inside_the_root_is_plain_absent() {
+        let dir = tempfile::tempdir().unwrap();
+        std::os::unix::fs::symlink("AGENTS.md", dir.path().join("CLAUDE.md")).unwrap();
+
+        let row = claude_import_row(dir.path(), None, &dir.path().join("CLAUDE.md"));
+
+        assert_eq!(row.state, SurfaceState::Absent);
+        assert_eq!(row.detail, None);
     }
 
     #[test]

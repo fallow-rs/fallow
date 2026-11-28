@@ -21,6 +21,60 @@ pub fn read_optional_text(path: &Path) -> std::io::Result<Option<String>> {
     optional(read_to_string_bounded(path, DEFAULT_MAX_READ_BYTES))
 }
 
+/// The error text of a file that [`read_optional_text_in_root`] refuses.
+pub const OUTSIDE_ROOT_REASON: &str = "it is a link to a location outside the project";
+
+/// [`read_optional_text`] for a status read of a file that a repository can
+/// commit. When `path` is below `root` and resolves to a location outside
+/// the resolved `root`, the file is not read and the result is an error
+/// with [`OUTSIDE_ROOT_REASON`]. A link that resolves inside `root` is read.
+/// A missing file or a dangling link is `Ok(None)`. A `path` that is not
+/// below `root`, such as a file in the home directory, gets only the limits
+/// of [`read_optional_text`].
+pub fn read_optional_text_in_root(root: &Path, path: &Path) -> std::io::Result<Option<String>> {
+    if !path.starts_with(root) {
+        return read_optional_text(path);
+    }
+    match resolve_in_root(root, path)? {
+        InRoot::Missing => Ok(None),
+        InRoot::Outside => Err(std::io::Error::new(
+            ErrorKind::InvalidInput,
+            OUTSIDE_ROOT_REASON,
+        )),
+        InRoot::Inside(resolved) => read_optional_text(&resolved),
+    }
+}
+
+/// True when `path` is below `root` and resolves to a location outside the
+/// resolved `root`, or when that cannot be decided.
+pub fn resolves_outside_root(root: &Path, path: &Path) -> bool {
+    path.starts_with(root)
+        && !matches!(
+            resolve_in_root(root, path),
+            Ok(InRoot::Missing | InRoot::Inside(_))
+        )
+}
+
+enum InRoot {
+    Missing,
+    Outside,
+    Inside(std::path::PathBuf),
+}
+
+fn resolve_in_root(root: &Path, path: &Path) -> std::io::Result<InRoot> {
+    let resolved = match dunce::canonicalize(path) {
+        Ok(resolved) => resolved,
+        Err(err) if err.kind() == ErrorKind::NotFound => return Ok(InRoot::Missing),
+        Err(err) => return Err(err),
+    };
+    let root = dunce::canonicalize(root)?;
+    Ok(if resolved.starts_with(&root) {
+        InRoot::Inside(resolved)
+    } else {
+        InRoot::Outside
+    })
+}
+
 /// Read `path` as bytes. A missing file is `Ok(None)`. The limits of
 /// [`read_optional_text`] apply.
 pub fn read_optional_bytes(path: &Path) -> std::io::Result<Option<Vec<u8>>> {
