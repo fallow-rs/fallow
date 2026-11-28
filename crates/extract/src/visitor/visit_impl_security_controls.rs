@@ -5,6 +5,8 @@ use oxc_span::Span;
 
 use fallow_types::extract::{SecurityControlKind, SecurityControlSite, SinkLiteralValue};
 
+use crate::template_usage::StaticSinkValue;
+
 use super::visit_security_sinks::canonical_call::CallForm;
 use super::{
     ModuleInfoExtractor, callee_leaf_name, expression_has_boundary_validation_keys,
@@ -129,8 +131,8 @@ impl ModuleInfoExtractor {
             return;
         };
         if !matches!(
-            self.static_sink_literal_value(expected),
-            Some(SinkLiteralValue::String(_))
+            self.static_sink_value(expected),
+            Some(StaticSinkValue::Known(SinkLiteralValue::String(_)) | StaticSinkValue::Long)
         ) {
             return;
         }

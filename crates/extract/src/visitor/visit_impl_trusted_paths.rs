@@ -14,6 +14,8 @@ use oxc_ast::ast::*;
 
 use fallow_types::extract::SinkLiteralValue;
 
+use crate::template_usage::StaticSinkValue;
+
 use super::super::super::ModuleInfoExtractor;
 use super::unwrap_static_expr;
 
@@ -74,8 +76,8 @@ impl ModuleInfoExtractor {
     fn path_trust(&self, expr: &Expression<'_>) -> PathTrust {
         crate::cost::walk_step();
         if matches!(
-            self.static_sink_literal_value(expr),
-            Some(SinkLiteralValue::String(_))
+            self.static_sink_value(expr),
+            Some(StaticSinkValue::Known(SinkLiteralValue::String(_)) | StaticSinkValue::Long)
         ) {
             return PathTrust::LiteralOnly;
         }

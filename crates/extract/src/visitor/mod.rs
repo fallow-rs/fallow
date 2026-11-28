@@ -46,6 +46,7 @@ use oxc_ast::ast::{
 use oxc_span::Span;
 use rustc_hash::{FxHashMap, FxHashSet};
 
+use crate::template_usage::StaticSinkValue;
 use crate::{
     AngularTemplateMemberAccessFact, ComputedEnumKeyUseFact, DynamicImportInfo,
     DynamicImportPattern, ExportInfo, ExportName, ExportedObjectInstancePropertyFact,
@@ -61,7 +62,7 @@ use fallow_types::extract::{
     ClassHeritageInfo, CommandInvocation, ComponentFunction, ComponentProp, DiKeySite,
     DispatchedEvent, HookUse, ImportBindingReference, ImportLoadKind, ImportLoadKindOverrideFact,
     ImportedCallSite, LocalTypeDeclaration, MisplacedDirectiveSite, PublicSignatureTypeReference,
-    RenderEdge, SanitizedSinkArg, SanitizerScope, SecurityControlSite, SinkLiteralValue, SinkSite,
+    RenderEdge, SanitizedSinkArg, SanitizerScope, SecurityControlSite, SinkSite,
     SkippedSecurityCalleeSite, TaintedBinding,
 };
 use helpers::LitCustomElementDecorator;
@@ -1220,7 +1221,7 @@ pub(crate) struct ModuleInfoExtractor {
     /// Module-scope literal-backed string allowlists; `false` shadows without trust.
     module_literal_allowlist_bindings: FxHashMap<String, bool>,
     /// Module-scope literal constants for security sink argument classification.
-    module_static_sink_literals: FxHashMap<String, SinkLiteralValue>,
+    module_static_sink_literals: FxHashMap<String, StaticSinkValue>,
     /// Module-scope `const` locals bound to a trusted module-relative path.
     module_trusted_path_bindings: FxHashSet<String>,
     /// Nested lexical literal allowlist bindings.

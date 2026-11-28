@@ -27,7 +27,29 @@ pub struct ScriptBindingContext {
     pub(crate) model_ref_events: FxHashMap<String, Vec<String>>,
     /// Script constants with a literal value (`const cmd = "ls"`). A security
     /// sink in markup reads such an argument as a literal, as in script.
-    pub(crate) static_sink_literals: FxHashMap<String, SinkLiteralValue>,
+    pub(crate) static_sink_literals: FxHashMap<String, StaticSinkValue>,
+}
+
+/// The static value of a binding or an expression for the sink checks.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StaticSinkValue {
+    /// A value with its text.
+    Known(SinkLiteralValue),
+    /// A static string longer than the limit of a static sink literal.
+    /// Extraction does not keep its text, so a check that reads the text
+    /// treats it as unknown, and a check for a dynamic value treats it as
+    /// static.
+    Long,
+}
+
+impl StaticSinkValue {
+    /// The value, when its text is known.
+    pub fn known(self) -> Option<SinkLiteralValue> {
+        match self {
+            Self::Known(value) => Some(value),
+            Self::Long => None,
+        }
+    }
 }
 
 impl ScriptBindingContext {

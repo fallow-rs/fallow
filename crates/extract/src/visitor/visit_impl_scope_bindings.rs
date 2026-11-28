@@ -6,6 +6,7 @@ use oxc_semantic::ScopeFlags;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::js_text::JsText;
+use crate::template_usage::StaticSinkValue;
 use fallow_types::extract::{SanitizerScope, SinkLiteralValue};
 
 use super::super::helpers::{array_element_type_from_type, map_value_type_from_type};
@@ -18,18 +19,18 @@ use super::{sink_literal_value, static_sink_literal_to_string, unwrap_static_exp
 /// Sink checks read short values such as a URL, a hash name or a shell
 /// command. Without a cap, a chain of template literals that each read the
 /// previous binding twice doubles the value at each declaration, and each
-/// read of a binding copies its value again. A longer
-/// value is not a static literal: the binding records no value, and a folded
-/// template literal gives `None`.
+/// read of a binding copies its value again. A longer value is
+/// [`StaticSinkValue::Long`]: it stays static, but its text is not kept.
 const MAX_STATIC_SINK_LITERAL_BYTES: usize = 16 * 1024;
 
-/// Whether `value` is short enough to keep as a static sink literal.
-fn fits_static_sink_literal(value: &SinkLiteralValue) -> bool {
+/// `value`, or [`StaticSinkValue::Long`] when it is a string past
+/// [`MAX_STATIC_SINK_LITERAL_BYTES`].
+fn capped_static_sink_value(value: SinkLiteralValue) -> StaticSinkValue {
     match value {
-        SinkLiteralValue::String(text) => text.len() <= MAX_STATIC_SINK_LITERAL_BYTES,
-        SinkLiteralValue::Integer(_) | SinkLiteralValue::Boolean(_) | SinkLiteralValue::Null => {
-            true
+        SinkLiteralValue::String(text) if text.len() > MAX_STATIC_SINK_LITERAL_BYTES => {
+            StaticSinkValue::Long
         }
+        value => StaticSinkValue::Known(value),
     }
 }
 
@@ -485,10 +486,11 @@ impl ModuleInfoExtractor {
         } else {
             self.module_trusted_path_bindings.remove(id.name.as_str());
         }
-        if let Some(value) = self
-            .static_sink_literal_value(init)
-            .filter(fits_static_sink_literal)
-        {
+        if let Some(value) = self.static_sink_value(init) {
+            let value = match value {
+                StaticSinkValue::Known(value) => capped_static_sink_value(value),
+                StaticSinkValue::Long => StaticSinkValue::Long,
+            };
             self.module_static_sink_literals
                 .insert(id.name.to_string(), value);
         } else {
@@ -505,15 +507,12 @@ impl ModuleInfoExtractor {
         member_name: &str,
         value: String,
     ) {
-        if value.len() > MAX_STATIC_SINK_LITERAL_BYTES {
-            return;
-        }
         self.module_static_sink_literals
             .entry(static_enum_member_key(enum_name, ""))
-            .or_insert(SinkLiteralValue::Null);
+            .or_insert(StaticSinkValue::Known(SinkLiteralValue::Null));
         self.module_static_sink_literals.insert(
             static_enum_member_key(enum_name, member_name),
-            SinkLiteralValue::String(value),
+            capped_static_sink_value(SinkLiteralValue::String(value)),
         );
     }
 
@@ -521,7 +520,7 @@ impl ModuleInfoExtractor {
         &self,
         object: &Expression<'_>,
         member: &str,
-    ) -> Option<SinkLiteralValue> {
+    ) -> Option<StaticSinkValue> {
         let Expression::Identifier(object) = unwrap_static_expr(object) else {
             return None;
         };
@@ -549,12 +548,20 @@ impl ModuleInfoExtractor {
                 .any(|roots| roots.contains(name))
     }
 
+    /// The static value of `expr` with its text, or `None` when `expr` is
+    /// not static or is a static string too long to keep.
     pub(super) fn static_sink_literal_value(
         &self,
         expr: &Expression<'_>,
     ) -> Option<SinkLiteralValue> {
+        self.static_sink_value(expr)?.known()
+    }
+
+    /// The static value of `expr`, also a static string too long to keep, or
+    /// `None` when `expr` is not static.
+    pub(super) fn static_sink_value(&self, expr: &Expression<'_>) -> Option<StaticSinkValue> {
         if let Some(value) = sink_literal_value(expr) {
-            return Some(value);
+            return Some(StaticSinkValue::Known(value));
         }
         match unwrap_static_expr(expr) {
             Expression::Identifier(ident)
@@ -585,11 +592,12 @@ impl ModuleInfoExtractor {
                 else {
                     return None;
                 };
-                if unary.operator == UnaryOperator::UnaryNegation {
-                    value.checked_neg().map(SinkLiteralValue::Integer)
+                let value = if unary.operator == UnaryOperator::UnaryNegation {
+                    value.checked_neg()?
                 } else {
-                    Some(SinkLiteralValue::Integer(value))
-                }
+                    value
+                };
+                Some(StaticSinkValue::Known(SinkLiteralValue::Integer(value)))
             }
             Expression::CallExpression(call) => {
                 let Expression::Identifier(callee) = &call.callee else {
@@ -603,27 +611,48 @@ impl ModuleInfoExtractor {
                     return None;
                 }
                 let arg = call.arguments.first()?.as_expression()?;
-                Some(SinkLiteralValue::String(static_sink_literal_to_string(
-                    &self.static_sink_literal_value(arg)?,
-                )))
+                Some(match self.static_sink_value(arg)? {
+                    StaticSinkValue::Known(value) => StaticSinkValue::Known(
+                        SinkLiteralValue::String(static_sink_literal_to_string(&value)),
+                    ),
+                    StaticSinkValue::Long => StaticSinkValue::Long,
+                })
             }
-            Expression::TemplateLiteral(template) => {
-                let mut value = String::new();
-                for (index, quasi) in template.quasis.iter().enumerate() {
-                    value.push_str(&quasi.value.cooked?.text());
-                    if let Some(expression) = template.expressions.get(index) {
-                        value.push_str(&static_sink_literal_to_string(
-                            &self.static_sink_literal_value(expression)?,
-                        ));
-                    }
-                    if value.len() > MAX_STATIC_SINK_LITERAL_BYTES {
-                        return None;
-                    }
-                }
-                Some(SinkLiteralValue::String(value))
-            }
+            Expression::TemplateLiteral(template) => self.static_template_value(template),
             _ => None,
         }
+    }
+
+    /// The folded value of a template literal. Once the text passes
+    /// [`MAX_STATIC_SINK_LITERAL_BYTES`], the fold stops the copy and only
+    /// checks that the other parts are static.
+    fn static_template_value(&self, template: &TemplateLiteral<'_>) -> Option<StaticSinkValue> {
+        let mut value = String::new();
+        let mut long = false;
+        for (index, quasi) in template.quasis.iter().enumerate() {
+            let cooked = quasi.value.cooked?;
+            if !long {
+                value.push_str(&cooked.text());
+            }
+            if let Some(expression) = template.expressions.get(index) {
+                match self.static_sink_value(expression)? {
+                    StaticSinkValue::Known(part) if !long => {
+                        value.push_str(&static_sink_literal_to_string(&part));
+                    }
+                    StaticSinkValue::Known(_) => {}
+                    StaticSinkValue::Long => long = true,
+                }
+            }
+            if value.len() > MAX_STATIC_SINK_LITERAL_BYTES {
+                long = true;
+                value = String::new();
+            }
+        }
+        Some(if long {
+            StaticSinkValue::Long
+        } else {
+            StaticSinkValue::Known(SinkLiteralValue::String(value))
+        })
     }
 
     pub(super) fn record_risky_regex_binding(&mut self, name: &str, pattern: Option<String>) {

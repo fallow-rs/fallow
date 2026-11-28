@@ -7,6 +7,7 @@ mod effect;
 mod graphql;
 mod js_ts;
 mod linear_cost;
+mod long_static_literals;
 mod markup_events;
 mod markup_parity;
 mod mdx;
