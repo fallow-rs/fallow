@@ -533,14 +533,17 @@ fn enumerate_elementary_cycles(
 
     let out_of_steps = steps_left == 0;
     // A strongly connected group always has a cycle. When the budget ran
-    // out before the search met one, a shortest cycle through the first
-    // file still reports the group.
-    if out_of_steps
-        && seen.is_empty()
-        && let Some(witness) = shortest_cycle_through(sorted_nodes[0], &scc_set, succs)
-        && witness.len() <= MAX_CYCLE_LENGTH
-    {
-        try_record_cycle(&witness, succs.modules, &mut seen, &mut cycles, accept);
+    // out before the search met one, the first short cycle that a
+    // breadth-first search finds from a file, in path order, still reports
+    // the group.
+    if out_of_steps && seen.is_empty() {
+        let mut witness_steps = max_steps;
+        let witness = sorted_nodes
+            .iter()
+            .find_map(|&start| short_cycle_through(start, &scc_set, succs, &mut witness_steps));
+        if let Some(witness) = witness {
+            try_record_cycle(&witness, succs.modules, &mut seen, &mut cycles, accept);
+        }
     }
 
     let capped = out_of_steps || cycles.len() >= max_cycles;
@@ -548,16 +551,23 @@ fn enumerate_elementary_cycles(
 }
 
 /// A shortest cycle through `start` inside the group, by a breadth-first
-/// search. The cycle starts at `start`.
-fn shortest_cycle_through(
+/// search, when it has at most [`MAX_CYCLE_LENGTH`] files. The cycle starts
+/// at `start`. Each followed edge uses one of `steps_left`, and the search
+/// gives `None` when they run out.
+fn short_cycle_through(
     start: usize,
     scc_set: &FxHashSet<usize>,
     succs: &SuccessorMap<'_>,
+    steps_left: &mut usize,
 ) -> Option<Vec<usize>> {
     let mut parent: FxHashMap<usize, usize> = FxHashMap::default();
-    let mut queue = VecDeque::from([start]);
-    while let Some(node) = queue.pop_front() {
+    let mut queue = VecDeque::from([(start, 1usize)]);
+    while let Some((node, files)) = queue.pop_front() {
         for &child in &succs.all_succs[succs.succ_ranges[node].clone()] {
+            if *steps_left == 0 {
+                return None;
+            }
+            *steps_left -= 1;
             if child == start {
                 let mut cycle = vec![node];
                 while let Some(&previous) = parent.get(cycle.last()?) {
@@ -566,9 +576,10 @@ fn shortest_cycle_through(
                 cycle.reverse();
                 return Some(cycle);
             }
-            if scc_set.contains(&child) && !parent.contains_key(&child) {
+            if files < MAX_CYCLE_LENGTH && scc_set.contains(&child) && !parent.contains_key(&child)
+            {
                 parent.insert(child, node);
-                queue.push_back(child);
+                queue.push_back((child, files + 1));
             }
         }
     }
@@ -1831,14 +1842,14 @@ mod tests {
         assert_eq!(offered, 10 + super::MAX_CYCLES_PER_SCC);
     }
 
-    /// A ring of `layers` layers with `width` files each. Each file imports
-    /// every file of the next layer, and the last layer imports the first.
-    /// Every cycle has exactly `layers` files.
+    /// The imports of a ring of `layers` layers with `width` files each. Each
+    /// file imports every file of the next layer, and the last layer imports
+    /// the first. Every cycle has exactly `layers` files.
     #[expect(
         clippy::cast_possible_truncation,
         reason = "test file counts are trivially small"
     )]
-    fn layered_ring(layers: usize, width: usize) -> ModuleGraph {
+    fn layered_ring_edges(layers: usize, width: usize) -> Vec<(u32, u32)> {
         let mut edges = Vec::new();
         for layer in 0..layers {
             let next = (layer + 1) % layers;
@@ -1848,7 +1859,11 @@ mod tests {
                 }
             }
         }
-        build_cycle_graph(layers * width, &edges)
+        edges
+    }
+
+    fn layered_ring(layers: usize, width: usize) -> ModuleGraph {
+        build_cycle_graph(layers * width, &layered_ring_edges(layers, width))
     }
 
     #[test]
@@ -1887,5 +1902,30 @@ mod tests {
                 .iter()
                 .all(|cycle| cycle.len() == super::MAX_CYCLE_LENGTH)
         );
+    }
+
+    #[test]
+    fn group_out_of_steps_reports_a_short_cycle_away_from_the_first_file() {
+        // A 13-layer ring uses the step budget. Its only short cycle is a
+        // ring of 12 files through file5 (file5 and file39 to file49), and it
+        // does not pass file0, the first file of the group.
+        let mut edges = layered_ring_edges(super::MAX_CYCLE_LENGTH + 1, 3);
+        let ring: Vec<u32> = std::iter::once(5).chain(39..50).collect();
+        for (index, &from) in ring.iter().enumerate() {
+            edges.push((from, ring[(index + 1) % ring.len()]));
+        }
+        let graph = build_cycle_graph(50, &edges);
+        let search = graph.find_cycles_accepting(
+            super::CycleOptions::default(),
+            &mut |_| super::ImportElision::RemoveUnread(super::DecoratorMetadata::Off),
+            &mut |_| false,
+        );
+        assert_eq!(search.capped_sccs.len(), 1);
+        assert_eq!(search.cycles.len(), 1, "{:?}", search.cycles);
+        let mut files: Vec<u32> = search.cycles[0].iter().map(|file| file.0).collect();
+        files.sort_unstable();
+        let mut expected = ring;
+        expected.sort_unstable();
+        assert_eq!(files, expected);
     }
 }
