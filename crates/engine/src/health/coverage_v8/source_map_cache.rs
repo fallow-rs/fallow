@@ -141,16 +141,18 @@ fn push_candidate(candidates: &mut Vec<PathBuf>, candidate: PathBuf) {
 }
 
 /// The first candidate that is a file in `base_dir` or one of its
-/// ancestors. A missing directory is skipped. The walk stops at the first
-/// directory that resolves outside `root`, and each candidate is checked
-/// against `root` before the probe, so no probe reaches a path outside the
-/// root.
+/// ancestors. A missing directory is skipped. A `..` in `base_dir` and in a
+/// candidate applies by text first, so the ancestors do not depend on whether
+/// a directory before the `..` exists. The walk stops at the first directory
+/// that resolves outside `root`, and each candidate is checked against `root`
+/// before the probe, so no probe reaches a path outside the root.
 fn resolve_virtual_candidate(
     candidates: &[PathBuf],
     base_dir: &Path,
     root: &Path,
 ) -> Option<PathBuf> {
     let read_root = fallow_types::read_guard::ReadRoot::new(root);
+    let base_dir = fallow_types::path_guard::lexically_normalized(base_dir);
     for base in base_dir.ancestors() {
         if base.symlink_metadata().is_err() {
             continue;
@@ -159,7 +161,7 @@ fn resolve_virtual_candidate(
             return None;
         }
         for candidate in candidates {
-            let resolved = base.join(candidate);
+            let resolved = fallow_types::path_guard::lexically_normalized(&base.join(candidate));
             if read_root.is_inside(&resolved) && resolved.is_file() {
                 return Some(resolved);
             }
@@ -356,6 +358,25 @@ mod tests {
             resolve_original_source("../src/a.ts", base.as_deref(), None),
             Some(expected.join("../src/a.ts"))
         );
+    }
+
+    /// A base directory with `..` finds the same virtual source whether or
+    /// not the directory before the `..` exists.
+    #[test]
+    fn virtual_source_lookup_does_not_depend_on_a_dir_before_a_parent_step() {
+        for probe_exists in [true, false] {
+            let dir = project(&["dist/a.ts", "a.ts"]);
+            if probe_exists {
+                std::fs::create_dir_all(dir.path().join("outside/probe")).unwrap();
+            }
+            let base = dir.path().join("outside/probe/../../dist");
+            let found = resolve_original_source("webpack://app/./a.ts", Some(&base)).unwrap();
+            assert_eq!(
+                std::fs::canonicalize(found).unwrap(),
+                std::fs::canonicalize(dir.path().join("dist/a.ts")).unwrap(),
+                "probe exists: {probe_exists}"
+            );
+        }
     }
 
     #[test]
