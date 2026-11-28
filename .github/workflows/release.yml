@@ -572,7 +572,9 @@ jobs:
     if: ${{ !inputs.auth_check }}
     needs: [release-context, pgo-profile, pgo-profile-cross]
     runs-on: ${{ matrix.os }}
-    # The PGO macOS legs take about 140 minutes.
+    # The Rust build of the macOS x64 leg takes about 40 minutes on a typical
+    # runner. The limit covers a runner that is 3 times slower. See "macOS
+    # build time" in the release procedure.
     timeout-minutes: 180
     container: ${{ matrix.container }}
     permissions:
@@ -790,18 +792,36 @@ jobs:
         shell: bash
         run: echo "CARGO_BUILD_JOBS=1" >> "$GITHUB_ENV"
 
-      # One cargo invocation builds the four binaries. Cargo then resolves the
-      # features once, so every shared crate gets the same hash as in the
-      # fallow-multicall training build, and the profile matches. A separate
-      # build per package resolves other features and matches no function.
       # The multicall binary bundles the CLI plus the LSP and MCP server libs
       # into the single `fallow` binary the npm platform packages ship.
+      # The first build has the package set of the fallow-multicall training
+      # build, so every shared crate gets the same hash and the profile
+      # matches. It also compiles every lib crate of the other three binaries.
+      # The second build adds those three binaries to the same package set,
+      # so Cargo resolves the same features and only links them. A crate that
+      # the second build compiles again has another hash and no profile, so
+      # the step fails. A separate build per package resolves other features
+      # and matches no function. On the 3-core macOS runner, the second build
+      # links one binary at a time. In a probe of the v3.50.0 build, four
+      # parallel fat-LTO links took 61 and 85 minutes, and this order took 40
+      # and 42 minutes. See "macOS build time" in the release procedure.
       - name: Build Rust release binaries
         if: matrix.target != 'aarch64-unknown-linux-musl'
         shell: bash
-        run: cargo build --release --target ${{ matrix.target }} -p fallow-cli -p fallow-lsp -p fallow-mcp -p fallow-multicall --config target/pgo-profile/pgo.toml 2>&1 | node .github/scripts/pgo-build-log.mjs target/pgo-profile/build.log
+        run: |
+          set -euo pipefail
+          cargo build --release --target ${{ matrix.target }} -p fallow-multicall --config target/pgo-profile/pgo.toml 2>&1 | node .github/scripts/pgo-build-log.mjs target/pgo-profile/build.log
+          cargo build --release --target ${{ matrix.target }} -p fallow-cli -p fallow-lsp -p fallow-mcp -p fallow-multicall --config target/pgo-profile/pgo.toml ${LINK_JOBS:+-j "$LINK_JOBS"} 2>&1 | node .github/scripts/pgo-build-log.mjs target/pgo-profile/link.log
+          unexpected="$(grep -E '^ +Compiling ' target/pgo-profile/link.log | grep -vE '^ +Compiling fallow-(cli|lsp|mcp) v' || true)"
+          if [ -n "$unexpected" ]; then
+            echo "::error::The second build compiled crates again, so their hashes differ from the training build:"
+            echo "$unexpected"
+            exit 1
+          fi
         env:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+          CARGO_TERM_COLOR: never
+          LINK_JOBS: ${{ runner.os == 'macOS' && '1' || '' }}
 
       # A profile from another target or another package set matches no
       # function, but it still changes the code. This check fails the leg

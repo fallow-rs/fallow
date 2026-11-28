@@ -728,22 +728,68 @@ The release workflow does these steps:
    `target/pgo-profile/pgo.toml`. That file sets `target.<triple>.rustflags`
    to `-Cprofile-use` and `-Cllvm-args=-pgo-warn-missing-function`. The other
    legs write a `pgo.toml` file without flags.
-6. One cargo invocation builds `fallow-cli`, `fallow-lsp`, `fallow-mcp`, and
-   `fallow-multicall` with `--config target/pgo-profile/pgo.toml`. Cargo then
-   resolves the features once, and the shared crates get the same hashes as
-   in the `fallow-multicall` training build. The `aarch64-unknown-linux-musl`
-   leg keeps one build per package, all with `cargo zigbuild`, because every
-   binary compiles C on musl: the mimalloc allocator, plus QuickJS in MCP and
-   multicall.
+6. Two cargo builds make the four binaries, both with
+   `--config target/pgo-profile/pgo.toml`. The first build has only
+   `-p fallow-multicall`, the package set of the training build, so the
+   shared crates get the same hashes as in the training build. It also
+   compiles every lib crate of the other binaries. The second build has
+   `-p fallow-cli -p fallow-lsp -p fallow-mcp -p fallow-multicall`. Cargo
+   resolves the same features, so it only links the `fallow`, `fallow-lsp`,
+   and `fallow-mcp` binaries. The step fails when the second build compiles
+   any other crate. On macOS, the second build links one binary at a time
+   (`-j 1`). The `aarch64-unknown-linux-musl` leg keeps one build per
+   package, all with `cargo zigbuild`, because every binary compiles C on
+   musl: the mimalloc allocator, plus QuickJS in MCP and multicall.
 7. On the PGO legs, `.github/scripts/pgo-profile-match.mjs` counts the
-   warnings for functions without a profile record. The leg fails when that
-   count is more than 20% of the profile functions. A local
+   warnings for functions without a profile record in the log of the first
+   build. The leg fails when that count is more than 20% of the profile
+   functions. Do not count the log of the second build: Cargo prints the
+   stored warnings of each fresh crate again. The `fallow`, `fallow-lsp`, and
+   `fallow-mcp` binaries link the crates of the first build, so the guard of
+   step 6 is the profile check for them. A local
    `aarch64-apple-darwin` build that matched had 4%. A build of `fallow-cli`
    alone with the same profile had 51%.
 8. The `build` job fails when a release binary contains the LLVM profiler
    runtime.
 
 A failed `pgo-profile` job fails the release.
+
+### macOS build time
+
+The macOS build legs run on the `macos-latest` runner: an M1 virtual machine
+with 3 CPUs and 7 GB of memory. The `x86_64-apple-darwin` leg cross-compiles
+on that runner. In v3.50.0, this leg took 164 of its 180 minutes (issue
+#5430). The cause was not the PGO training: that is a separate job of about
+16 minutes. The cause was one cargo invocation that linked the four
+fat-LTO binaries at the same time on 3 CPUs. The same step took from 43 to
+145 minutes across the releases of November 2026, with a cold cache each
+time, and the arm64 leg of the v3.50.0 run took 14 minutes.
+
+A probe repeated the v3.50.0 build of this leg with the v3.50.0 profile, two
+samples per variant, in one run:
+
+| Variant | Rust build |
+| --- | --- |
+| One invocation, four parallel links | 61 and 85 min |
+| `fallow-multicall` first, then the other three links with `-j 1` | 42 and 40 min |
+
+The runner did not swap in any sample. The second build compiled only the
+three binaries, so the profile match did not change.
+
+Decision: keep PGO on the macOS x64 leg (8.5% to 10.2% less CPU time) and
+build in two steps on every leg except `aarch64-unknown-linux-musl`. The
+other options were worse:
+
+- A native Intel runner (`macos-15-intel`) needs a new training host,
+  because the host toolchain changes the crate hashes. It is also the last
+  Intel macOS image.
+- A higher time limit alone keeps the slow builds and gives a margin that
+  becomes smaller as the code grows.
+- PGO off for this leg loses the CPU gain and does not fix the parallel
+  links of the arm64 leg.
+
+The 180 minute limit stays. It covers a runner that is 3 times slower than
+the probe runners.
 
 ### Release without PGO
 
@@ -853,8 +899,10 @@ runs. The gate fails when these conditions occur:
   speed in two measurements, so the build keeps LTO off. `-Clto=thin` in
   rustflags fails, because rustc accepts LTO only for the final crate. A
   profile LTO value of `thin` changes the crate hashes.
-- Build the four Rust binaries in one cargo invocation. A build of one
-  package resolves other features and gives other crate hashes.
+- Build the four Rust binaries as the build job does: first
+  `fallow-multicall` alone, then all four packages in one invocation. A
+  build of `fallow-cli`, `fallow-lsp`, or `fallow-mcp` alone resolves other
+  features and gives other crate hashes.
 - `absolute_path` in `scripts/pgo-train.sh` runs `cd` in a command
   substitution, where errexit does not apply. The script creates the output
   directory first and stops when the path does not resolve.

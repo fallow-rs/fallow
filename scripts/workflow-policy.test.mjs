@@ -2400,7 +2400,7 @@ const PGO_LEGS = [
 const PGO_VALIDATED_LEGS = PGO_LEGS.filter((leg) => leg.validated);
 
 const cargoRunLines = (job) =>
-  Array.from(job.matchAll(/^\s+run: (.*\bcargo (?:build|zigbuild)\b.*)$/gmu), (match) => match[1]);
+  Array.from(job.matchAll(/^\s+(?:run: )?(cargo (?:build|zigbuild)\b.*)$/gmu), (match) => match[1]);
 
 const workflowSteps = (job) => job.split(/^\s{6}- (?=name: |uses: )/mu).slice(1);
 
@@ -2442,15 +2442,18 @@ test("release builds every Rust binary with the PGO config and nothing else", ()
     aarch64MuslSteps.map((step) => step.match(/-p (fallow-[a-z]+)/u)[1]).toSorted(),
     PGO_RUST_BINARY_PACKAGES,
   );
-  const combined = binaryRuns.filter((run) => run.match(/-p fallow-/gu).length > 1);
+  const packagesOf = (run) => Array.from(run.matchAll(/-p (fallow-[a-z]+)/gu), (match) => match[1]);
+  const [multicallRun, linkRun] = binaryRuns.filter((run) => /^cargo build\b/u.test(run));
 
-  // One combined build per leg, plus four separate builds on aarch64-musl.
-  assert.equal(binaryRuns.length, 5);
-  assert.equal(combined.length, 1, "one cargo invocation builds the four binaries");
-  assert.deepEqual(
-    Array.from(combined[0].matchAll(/-p (fallow-[a-z]+)/gu), (match) => match[1]),
-    PGO_RUST_BINARY_PACKAGES,
-  );
+  // Two builds per leg, plus four separate builds on aarch64-musl. The first
+  // build has the package set of the training build, so the profile matches.
+  // The second build adds the other three binaries to the same package set.
+  assert.equal(binaryRuns.length, 6);
+  assert.deepEqual(packagesOf(multicallRun), ["fallow-multicall"]);
+  assert.match(multicallRun, /pgo-build-log\.mjs target\/pgo-profile\/build\.log$/u);
+  assert.deepEqual(packagesOf(linkRun), PGO_RUST_BINARY_PACKAGES);
+  assert.match(linkRun, /\$\{LINK_JOBS:\+-j "\$LINK_JOBS"\}/u);
+  assert.match(linkRun, /pgo-build-log\.mjs target\/pgo-profile\/link\.log$/u);
   assert.deepEqual(
     [...new Set(binaryRuns.flatMap((run) => run.match(/fallow-[a-z]+/gu)))].toSorted(),
     PGO_RUST_BINARY_PACKAGES,
@@ -2627,9 +2630,15 @@ test("release trains one PGO profile per PGO target and can build without it", (
   assert.match(resolve, /No PGO profile for/u);
   assert.ok(combined, "one step builds the four Rust binaries");
   assert.match(combined, /shell: bash/u);
+  assert.match(combined, /set -euo pipefail/u);
+  assert.match(combined, /LINK_JOBS: \$\{\{ runner\.os == 'macOS' && '1' \|\| '' \}\}/u);
+  // The grep below reads plain `Compiling` lines, so the step turns off color.
+  assert.match(combined, /CARGO_TERM_COLOR: never/u);
+  // A crate other than the three binaries in the second build means another
+  // feature set, so the binaries would not get the profile.
   assert.match(
     combined,
-    /\| node \.github\/scripts\/pgo-build-log\.mjs target\/pgo-profile\/build\.log/u,
+    /unexpected="\$\(grep -E '\^ \+Compiling ' target\/pgo-profile\/link\.log \| grep -vE '\^ \+Compiling fallow-\(cli\|lsp\|mcp\) v' \|\| true\)"\n\s+if \[ -n "\$unexpected" \]; then\n(?:\s+echo .*\n)+\s+exit 1\n\s+fi\n/u,
   );
   assert.ok(match, "the build job must check that the profile matches the build");
   assert.match(match, /if: needs\.pgo-profile\.outputs\.enabled == 'true' && matrix\.pgo_profile/u);
