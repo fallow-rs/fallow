@@ -201,17 +201,28 @@ fn a_check_with_no_answer_restarts_the_companion_and_keeps_isolated_runs() {
 }
 
 #[test]
-fn concurrent_workers_check_a_set_one_time() {
+fn concurrent_workers_check_each_set_one_time() {
+    // Each of the 3 companions dry-runs one test file, so a companion can
+    // check only the set of its own file.
     let spawner = checking_spawner(|_| Ok(checked(RunWorkerMode::Shared)));
-    run_schedule(&spawner, &checking_plan(), &config(3)).expect("run");
+    let outcome = run_schedule(&spawner, &checking_plan(), &config(3)).expect("run");
 
-    assert_eq!(checks(&spawner).len(), 1);
-    let shared = SHARED_SET
-        .iter()
-        .flat_map(|mutant| modes_of(&spawner, mutant))
-        .filter(|mode| *mode == Some(RunWorkerMode::Shared))
-        .count();
-    assert!(shared > 0, "the runs after the check use its mode");
+    let mut checked_tests: Vec<String> = checks(&spawner).into_iter().flatten().collect();
+    let count = checked_tests.len();
+    checked_tests.sort();
+    checked_tests.dedup();
+    assert_eq!(checked_tests.len(), count, "no test is in two checks");
+    for mutant in SHARED_SET.iter().chain(OTHER_SET.iter()) {
+        assert!(
+            modes_of(&spawner, mutant)
+                .iter()
+                .all(|mode| matches!(mode, None | Some(RunWorkerMode::Shared))),
+            "{mutant}"
+        );
+    }
+    let plain = checking_spawner(|_| Ok(checked(RunWorkerMode::Isolated)));
+    let expected = run_schedule(&plain, &checking_plan(), &config(1)).expect("run");
+    assert_eq!(verdicts(&outcome), verdicts(&expected));
 }
 
 #[test]

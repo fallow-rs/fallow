@@ -173,6 +173,19 @@ impl WorkerChecks {
         }
     }
 
+    /// Opens sets of a claimed check again, with no check, so that a
+    /// companion that can run their tests checks them later.
+    pub(super) fn release(&self, batch: &[CheckedSet]) {
+        let Ok(mut sets) = self.sets.lock() else {
+            return;
+        };
+        for (files, _) in batch {
+            if let Some(set) = sets.get_mut(files) {
+                set.state = None;
+            }
+        }
+    }
+
     /// Opens the sets of a failed check of more than one set again, so that
     /// each gets a check of its own.
     pub(super) fn reopen(&self, batch: &[CheckedSet]) {
@@ -186,6 +199,19 @@ impl WorkerChecks {
             }
         }
     }
+}
+
+/// Splits a claimed check into the sets whose tests a companion can all
+/// run, and the other sets. A companion knows only the tests of its own dry
+/// run and of the tests that it took, so a check of another set would prove
+/// none of its tests.
+pub(super) fn split_batch(
+    batch: Vec<CheckedSet>,
+    runnable: impl Fn(&String) -> bool,
+) -> (Vec<CheckedSet>, Vec<CheckedSet>) {
+    batch
+        .into_iter()
+        .partition(|(_, candidates)| candidates.iter().all(&runnable))
 }
 
 /// The mode for a mutant run, or a fault of the check that ended the
@@ -215,8 +241,15 @@ impl Worker<'_> {
             Claim::Decided(mode) => return ModeStep::Mode(Some(mode)),
             Claim::Check(batch) => batch,
         };
-        // The check runs only tests that this companion can run. A test
-        // that it leaves out stays unchecked, so a run with it is isolated.
+        // A test that failed in a control run leaves each mutant run, so it
+        // needs no check.
+        let (batch, foreign) = split_batch(batch, |test| {
+            self.known_tests.contains(test) || self.memo.is_failed(test)
+        });
+        self.memo.checks.release(&foreign);
+        if batch.is_empty() {
+            return ModeStep::Mode(None);
+        }
         let checked: Vec<String> = batch
             .iter()
             .flat_map(|(_, candidates)| candidates.iter())
@@ -422,6 +455,31 @@ mod tests {
         assert_eq!(
             checks.claim(&files, &ids(&["a::1"]), true),
             Claim::Decided(RunWorkerMode::Reused)
+        );
+    }
+
+    #[test]
+    fn a_set_whose_tests_the_companion_cannot_run_stays_open_for_another_check() {
+        let checks = checks_with(&[
+            (&["a"], set_of(MIN_JOBS_FOR_CHECK, &["a::1"])),
+            (&["c"], set_of(MIN_JOBS_FOR_CHECK, &["c::1"])),
+        ]);
+        let Claim::Check(batch) = checks.claim(&ids(&["a"]), &ids(&["a::1"]), true) else {
+            panic!("the first claim starts a check");
+        };
+        let (covered, foreign) = split_batch(batch, |test| test == "a::1");
+        assert_eq!(covered, vec![(ids(&["a"]), ids(&["a::1"]))]);
+        checks.release(&foreign);
+        checks.decide(&covered, ALL, RunWorkerMode::Reused);
+
+        assert_eq!(
+            checks.claim(&ids(&["a"]), &ids(&["a::1"]), true),
+            Claim::Decided(RunWorkerMode::Reused)
+        );
+        assert_eq!(
+            checks.claim(&ids(&["c"]), &ids(&["c::1"]), true),
+            Claim::Check(vec![(ids(&["c"]), ids(&["c::1"]))]),
+            "the companion that knows the tests of c checks them"
         );
     }
 
