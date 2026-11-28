@@ -130,7 +130,7 @@ impl CodeModeWorker {
         }
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     pub(super) fn discard_idle(&self) {
         let idle = self.pool.idle.lock().ok().and_then(|mut slot| slot.take());
         drop(idle);

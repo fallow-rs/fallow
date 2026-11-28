@@ -240,7 +240,7 @@ fn build_code_mode_runtime(
     deadline: Instant,
     request: Option<CancellationToken>,
 ) -> Result<Runtime, String> {
-    let runtime = Runtime::new().map_err(|err| format!("failed to create JS runtime: {err}"))?;
+    let runtime = code_mode_worker::new_engine_runtime()?;
     runtime.set_memory_limit(MEMORY_LIMIT_BYTES);
     runtime.set_max_stack_size(MAX_STACK_BYTES);
     runtime.set_interrupt_handler(Some(Box::new(move || {

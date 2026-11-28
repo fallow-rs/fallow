@@ -46,8 +46,13 @@ use super::{
     run_batch_dispatches,
 };
 
+#[path = "code_mode_heap.rs"]
+mod heap;
 #[path = "code_mode_worker_process.rs"]
 mod process;
+
+use heap::CountingAllocator;
+pub(super) use heap::new_engine_runtime;
 
 pub use process::CodeModeWorker;
 use process::WorkerProcess;
@@ -74,13 +79,10 @@ const WORKER_GRACE: Duration = Duration::from_secs(2);
 
 const TIMED_OUT: &str = "code mode execution timed out";
 
-/// The error of a snippet that hit the engine memory limit.
-const OUT_OF_MEMORY: &str = "out of memory";
-
-/// Peak resident memory of a snippet process above which it ends after its
-/// snippet. It is the engine memory limit, so only a snippet near that limit
-/// passes it.
-const REPLACE_PEAK_RSS_BYTES: u64 = 32 * 1024 * 1024;
+/// Engine heap peak of one snippet above which its process ends after the
+/// snippet: half of the engine memory limit. A snippet that fills the engine
+/// memory passes it, whatever its error text.
+const REPLACE_ENGINE_PEAK_BYTES: usize = 16 * 1024 * 1024;
 
 /// How often the watchdog of a snippet process checks its parent and its time
 /// limit.
@@ -594,6 +596,7 @@ pub fn run_code_mode_worker() -> ExitCode {
             max_output_bytes: start.max_output_bytes,
         };
         watchdog.busy_for(SnippetLimits::new(&params).timeout_ms);
+        CountingAllocator::reset_peak();
         let result = execute_code_mode_with(
             HostDispatch::Server(ServerLink {
                 input: std::io::stdin(),
@@ -603,7 +606,7 @@ pub fn run_code_mode_worker() -> ExitCode {
             &start.cwd,
         );
         watchdog.idle();
-        let replace = needs_replacement(&result);
+        let replace = needs_replacement(CountingAllocator::peak());
         let (ok, output) = match result {
             Ok(output) => (true, output),
             Err(output) => (false, output),
@@ -626,49 +629,12 @@ fn read_line(input: &std::io::Stdin, line: &mut String) -> std::io::Result<usize
     input.lock().read_line(line)
 }
 
-/// Whether this snippet process should end after the snippet: the snippet ran
-/// out of engine memory, or the peak memory of the process passed
-/// [`REPLACE_PEAK_RSS_BYTES`]. The allocator keeps the pages of a large
-/// snippet, so an idle process would hold them until the next restart.
-fn needs_replacement(result: &Result<String, String>) -> bool {
-    let out_of_memory = result.as_ref().err().is_some_and(|envelope| {
-        serde_json::from_str::<serde_json::Value>(envelope)
-            .is_ok_and(|envelope| envelope["error"] == OUT_OF_MEMORY)
-    });
-    out_of_memory || peak_rss_bytes().is_some_and(|peak| peak > REPLACE_PEAK_RSS_BYTES)
+/// Whether this snippet process should end after a snippet whose engine
+/// heap peaked at `peak` bytes. The allocator keeps the pages of a large
+/// heap, so an idle process would hold them until the next restart.
+fn needs_replacement(peak: usize) -> bool {
+    peak > REPLACE_ENGINE_PEAK_BYTES
 }
-
-/// The peak resident memory of this process.
-#[cfg(unix)]
-fn peak_rss_bytes() -> Option<u64> {
-    let mut usage = std::mem::MaybeUninit::<libc::rusage>::zeroed();
-    #[expect(unsafe_code, reason = "getrusage has no safe wrapper in std")]
-    // SAFETY: getrusage writes one rusage struct to the pointer, which points
-    // to owned memory of that size.
-    let status = unsafe { libc::getrusage(libc::RUSAGE_SELF, usage.as_mut_ptr()) };
-    if status != 0 {
-        return None;
-    }
-    #[expect(unsafe_code, reason = "the struct came from getrusage")]
-    // SAFETY: getrusage returned 0, so it filled the struct. Every field is an
-    // integer, and the zeroed start is a valid value of each.
-    let usage = unsafe { usage.assume_init() };
-    u64::try_from(usage.ru_maxrss)
-        .ok()?
-        .checked_mul(MAXRSS_UNIT_BYTES)
-}
-
-/// No peak memory check: the out-of-memory check still applies.
-#[cfg(windows)]
-fn peak_rss_bytes() -> Option<u64> {
-    None
-}
-
-/// The unit of `ru_maxrss`: bytes on Apple systems, kilobytes elsewhere.
-#[cfg(target_vendor = "apple")]
-const MAXRSS_UNIT_BYTES: u64 = 1;
-#[cfg(all(unix, not(target_vendor = "apple")))]
-const MAXRSS_UNIT_BYTES: u64 = 1024;
 
 fn refuse_start(error: String) -> ExitCode {
     let _ = send_to_server(&WorkerMessage::Done {
@@ -966,29 +932,64 @@ mod tests {
         run(&worker, "return 3;", 5_000, dir.path()).expect("snippet after a replace");
     }
 
-    /// The idle process after a snippet that hit the engine memory limit
-    /// keeps that memory, so the server replaces it.
+    /// The allocator keeps the pages of a snippet that filled the engine
+    /// memory, so the server replaces its process. The error text of such a
+    /// snippet can be `out of memory` or `null`.
     #[test]
-    fn a_snippet_out_of_memory_replaces_its_process() {
+    fn a_snippet_that_fills_the_engine_memory_replaces_its_process() {
         let cwd = tempfile::tempdir().expect("tempdir");
         let worker = CodeModeWorker::server_binary(server_binary());
         run(&worker, "return 1;", 5_000, cwd.path()).expect("first snippet");
         let pid = worker.idle_pid().expect("an idle process");
 
-        let error = run(
-            &worker,
-            "return Array(2 ** 26).fill(0).length;",
-            5_000,
-            cwd.path(),
-        )
-        .expect_err("the snippet runs out of memory");
-        assert_eq!(error_of(&error), "out of memory");
+        let code = "const a = []; for (;;) a.push('x'.repeat(1024) + a.length);";
+        run(&worker, code, 5_000, cwd.path()).expect_err("the snippet runs out of memory");
         assert_ne!(
             worker.idle_pid(),
             Some(pid),
             "the process must not stay idle"
         );
         run(&worker, "return 1;", 5_000, cwd.path()).expect("a new process runs the next snippet");
+    }
+
+    #[test]
+    fn a_snippet_with_a_large_heap_replaces_its_process() {
+        let cwd = tempfile::tempdir().expect("tempdir");
+        let worker = CodeModeWorker::server_binary(server_binary());
+        run(&worker, "return 1;", 5_000, cwd.path()).expect("first snippet");
+        let pid = worker.idle_pid().expect("an idle process");
+
+        let code = "return 'x'.repeat(20 * 1024 * 1024).length;";
+        run(&worker, code, 5_000, cwd.path()).expect("the large snippet fits the limit");
+        assert_ne!(
+            worker.idle_pid(),
+            Some(pid),
+            "the process must not stay idle"
+        );
+    }
+
+    /// The decision uses the engine heap of the snippet, not the memory of the
+    /// process. On Linux a new process starts with the peak memory of its
+    /// parent in `ru_maxrss`, so a large server must not make each snippet
+    /// replace its process.
+    #[test]
+    fn a_server_with_much_memory_keeps_its_snippet_process() {
+        const SERVER_MEMORY: usize = 64 * 1024 * 1024;
+        let mut held = vec![0_u8; SERVER_MEMORY];
+        for page in held.chunks_mut(4096) {
+            page[0] = 1;
+        }
+        let cwd = tempfile::tempdir().expect("tempdir");
+        let worker = CodeModeWorker::server_binary(server_binary());
+        run(&worker, "return 1;", 5_000, cwd.path()).expect("first snippet");
+        let pid = worker.idle_pid().expect("an idle process");
+        run(&worker, "return 2;", 5_000, cwd.path()).expect("second snippet");
+        assert_eq!(
+            worker.idle_pid(),
+            Some(pid),
+            "a small snippet keeps its process"
+        );
+        assert_eq!(std::hint::black_box(&held).len(), SERVER_MEMORY);
     }
 
     #[test]
