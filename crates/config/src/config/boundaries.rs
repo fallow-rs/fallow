@@ -277,7 +277,7 @@ impl BoundaryPreset {
     fn zone(name: &str, source_root: &str) -> BoundaryZone {
         BoundaryZone {
             name: name.to_owned(),
-            patterns: vec![format!("{source_root}/{name}/**")],
+            patterns: vec![literal_dir_glob(source_root, &format!("{name}/**"))],
             auto_discover: vec![],
             root: None,
             public_files: vec![],
@@ -354,11 +354,14 @@ impl BoundaryPreset {
     fn feature_sliced_public_files(layer: &str, source_root: &str) -> Vec<String> {
         match layer {
             "pages" | "widgets" | "features" => {
-                vec![format!("{source_root}/{layer}/*/{INDEX_FILE_GLOB}")]
+                vec![literal_dir_glob(
+                    source_root,
+                    &format!("{layer}/*/{INDEX_FILE_GLOB}"),
+                )]
             }
             "entities" => vec![
-                format!("{source_root}/{layer}/*/{INDEX_FILE_GLOB}"),
-                format!("{source_root}/{layer}/*/@x/*"),
+                literal_dir_glob(source_root, &format!("{layer}/*/{INDEX_FILE_GLOB}")),
+                literal_dir_glob(source_root, &format!("{layer}/*/@x/*")),
             ],
             _ => Vec::new(),
         }
@@ -372,7 +375,7 @@ impl BoundaryPreset {
             Self::zone("app", source_root),
             BoundaryZone {
                 name: "features".to_owned(),
-                patterns: vec![format!("{source_root}/features/**")],
+                patterns: vec![literal_dir_glob(source_root, "features/**")],
                 auto_discover: vec![format!("{source_root}/features")],
                 public_files: if public_files {
                     vec![INDEX_FILE_GLOB.to_owned()]
@@ -396,7 +399,7 @@ impl BoundaryPreset {
                     "i18n",
                 ]
                 .iter()
-                .map(|dir| format!("{source_root}/{dir}/**"))
+                .map(|dir| literal_dir_glob(source_root, &format!("{dir}/**")))
                 .collect(),
                 ..BoundaryZone::default()
             },
@@ -433,14 +436,14 @@ impl BoundaryPreset {
         let zones = vec![
             BoundaryZone {
                 name: "modules".to_owned(),
-                patterns: vec![format!("{module_root}/**")],
+                patterns: vec![literal_dir_glob(module_root, "**")],
                 auto_discover: vec![module_root.to_owned()],
                 public_files: vec![INDEX_FILE_GLOB.to_owned()],
                 ..BoundaryZone::default()
             },
             BoundaryZone {
                 name: "app".to_owned(),
-                patterns: vec![format!("{source_root}/**")],
+                patterns: vec![literal_dir_glob(source_root, "**")],
                 ..BoundaryZone::default()
             },
             BoundaryZone {

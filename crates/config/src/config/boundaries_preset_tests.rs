@@ -286,3 +286,53 @@ fn a_user_modules_zone_needs_no_module_folder() {
     };
     assert!(config.validate_preset(temp.path()).is_empty());
 }
+
+#[test]
+fn a_root_dir_with_glob_characters_is_matched_literally() {
+    let temp = project_with_dirs(&["src[a]/modules/billing"]);
+    std::fs::write(
+        temp.path().join("tsconfig.json"),
+        r#"{ "compilerOptions": { "rootDir": "src[a]" } }"#,
+    )
+    .unwrap();
+    let cases = [
+        (BoundaryPreset::Layered, "src[a]/domain/a.ts", "domain"),
+        (BoundaryPreset::Hexagonal, "src[a]/ports/a.ts", "ports"),
+        (
+            BoundaryPreset::FeatureSliced,
+            "src[a]/shared/a.ts",
+            "shared",
+        ),
+        (BoundaryPreset::Bulletproof, "src[a]/lib/a.ts", "shared"),
+        (BoundaryPreset::DeepModules, "src[a]/main.ts", "app"),
+        (
+            BoundaryPreset::DeepModules,
+            "src[a]/modules/billing/a.ts",
+            "modules/billing",
+        ),
+    ];
+    for (kind, path, zone) in cases {
+        let mut config = preset(kind.clone(), true);
+        expand_boundary_preset(&mut config, temp.path());
+        config.expand_auto_discover(temp.path());
+        let resolved = config.resolve();
+        assert_eq!(resolved.classify_zone(path), Some(zone), "{kind:?} {path}");
+        assert_eq!(resolved.classify_zone("srca/domain/a.ts"), None, "{kind:?}");
+    }
+}
+
+#[test]
+fn a_root_dir_with_an_unclosed_class_resolves() {
+    let temp = project_with_dirs(&["src["]);
+    std::fs::write(
+        temp.path().join("tsconfig.json"),
+        r#"{ "compilerOptions": { "rootDir": "src[" } }"#,
+    )
+    .unwrap();
+    for kind in BoundaryPreset::all() {
+        let mut config = preset(kind.clone(), kind.supports_public_files());
+        expand_boundary_preset(&mut config, temp.path());
+        let resolved = config.resolve();
+        assert!(!resolved.zones.is_empty(), "{kind:?}");
+    }
+}
