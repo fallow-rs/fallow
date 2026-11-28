@@ -2,7 +2,7 @@
 //! bounds, and the expansion budget that the commands of one catalog share.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 /// The bytes of script text that the commands of one catalog may expand
 /// together.
@@ -16,14 +16,34 @@ const MAX_EXPANDED_SCRIPT_BYTES: usize = 256 * 1024;
 /// What is left of the expansion budget of a catalog. Clones share it.
 ///
 /// When the budget is used up, later calls are not expanded, as with the
-/// per-command bounds.
+/// per-command bounds, and one warning reports it.
 #[derive(Debug, Clone)]
-pub(super) struct ExpansionBudget(Option<Arc<AtomicUsize>>);
+pub(super) struct ExpansionBudget(Option<Arc<SharedBudget>>);
+
+#[derive(Debug)]
+struct SharedBudget {
+    /// The bytes that are left.
+    left: AtomicUsize,
+    /// Whether a refusal was reported.
+    refused: AtomicBool,
+}
 
 impl Default for ExpansionBudget {
     fn default() -> Self {
-        Self(Some(Arc::new(AtomicUsize::new(MAX_EXPANDED_SCRIPT_BYTES))))
+        Self(Some(Arc::new(SharedBudget {
+            left: AtomicUsize::new(MAX_EXPANDED_SCRIPT_BYTES),
+            refused: AtomicBool::new(false),
+        })))
     }
+}
+
+/// The result of a request for budget.
+#[derive(Debug, PartialEq, Eq)]
+enum Take {
+    Taken,
+    /// The first refusal of the budget, which is reported.
+    FirstRefusal,
+    Refused,
 }
 
 impl ExpansionBudget {
@@ -32,14 +52,42 @@ impl ExpansionBudget {
     pub(super) const NONE: Self = Self(None);
 
     /// Take `bytes` from the budget. Returns `false`, and takes nothing, when
-    /// less is left.
+    /// less is left. The first refusal of the budget emits a warning: the
+    /// catalog can be shared across threads, so which calls are not expanded
+    /// can vary between runs.
     pub(super) fn take(&self, bytes: usize) -> bool {
-        self.0.as_ref().is_some_and(|left| {
-            left.try_update(Ordering::Relaxed, Ordering::Relaxed, |left| {
+        match self.try_take(bytes) {
+            Take::Taken => true,
+            Take::FirstRefusal => {
+                tracing::warn!(
+                    "Scripts call other scripts with arguments for more than {} KiB of \
+                     expanded text, so the later calls are not expanded. Their \
+                     dependencies and file arguments can be missing from the results.",
+                    MAX_EXPANDED_SCRIPT_BYTES / 1024
+                );
+                false
+            }
+            Take::Refused => false,
+        }
+    }
+
+    fn try_take(&self, bytes: usize) -> Take {
+        let Some(shared) = &self.0 else {
+            return Take::Refused;
+        };
+        let taken = shared
+            .left
+            .try_update(Ordering::Relaxed, Ordering::Relaxed, |left| {
                 left.checked_sub(bytes)
             })
-            .is_ok()
-        })
+            .is_ok();
+        if taken {
+            Take::Taken
+        } else if shared.refused.swap(true, Ordering::Relaxed) {
+            Take::Refused
+        } else {
+            Take::FirstRefusal
+        }
     }
 }
 
@@ -84,6 +132,17 @@ impl ScriptExpansion {
 #[cfg(test)]
 mod tests {
     use super::super::{ScriptCatalog, parse_script_with_catalog};
+    use super::{ExpansionBudget, MAX_EXPANDED_SCRIPT_BYTES, Take};
+
+    #[test]
+    fn only_the_first_refusal_of_a_shared_budget_is_reported() {
+        let budget = ExpansionBudget::default();
+        let clone = budget.clone();
+        assert_eq!(budget.try_take(MAX_EXPANDED_SCRIPT_BYTES), Take::Taken);
+        assert_eq!(clone.try_take(1), Take::FirstRefusal);
+        assert_eq!(budget.try_take(1), Take::Refused);
+        assert!(!clone.take(1));
+    }
 
     #[test]
     #[expect(
