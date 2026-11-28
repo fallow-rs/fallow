@@ -3726,7 +3726,12 @@ fn process_config_result_rejects_a_regex_with_a_large_program() {
 
     assert!(aggregated.entry_patterns.is_empty());
     assert_eq!(errors.len(), 1);
-    assert!(format_plugin_regex_errors(&errors).contains("size limit"));
+    let rendered = format_plugin_regex_errors(&errors);
+    assert!(
+        rendered.contains("compiles past the 1 MiB regex size limit"),
+        "{rendered}"
+    );
+    assert!(rendered.contains(r"(?-u:\w){1,64}"), "{rendered}");
 }
 
 #[test]

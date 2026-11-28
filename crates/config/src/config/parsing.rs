@@ -1474,7 +1474,8 @@ impl FallowConfig {
         for (index, pattern) in config.health.tailwind_ignore_patterns.iter().enumerate() {
             if let Err(error) = crate::compile_config_regex(pattern) {
                 health_errors.push(format!(
-                    "health.tailwindIgnorePatterns[{index}] is not a valid regex: {error}"
+                    "health.tailwindIgnorePatterns[{index}] {}",
+                    crate::config_regex_error_reason(&error)
                 ));
             }
         }
@@ -1489,7 +1490,8 @@ impl FallowConfig {
             && let Err(e) = crate::compile_config_regex(pattern)
         {
             return Err(invalid(vec![format!(
-                "unusedComponentProps.ignorePattern is not a valid regex: {e}"
+                "unusedComponentProps.ignorePattern {}",
+                crate::config_regex_error_reason(&e)
             )]));
         }
         Ok(())

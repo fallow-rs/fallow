@@ -22,6 +22,20 @@ pub fn compile_config_regex(pattern: &str) -> Result<regex::Regex, regex::Error>
         .build()
 }
 
+/// Why `compile_config_regex` refused a pattern, as the end of a sentence
+/// that starts with the config field, such as
+/// `unusedComponentProps.ignorePattern is not a valid regex: ...`.
+#[must_use]
+pub fn config_regex_error_reason(error: &regex::Error) -> String {
+    match error {
+        regex::Error::CompiledTooBig(_) => "compiles past the 1 MiB regex size limit. A counted \
+             repeat of a Unicode class such as `\\w{1,64}` is large: use an ASCII class such as \
+             `[A-Za-z0-9_]{1,64}` or `(?-u:\\w){1,64}`, or `\\w+`"
+            .to_owned(),
+        _ => format!("is not a valid regex: {error}"),
+    }
+}
+
 /// The most regexes that one config list, such as
 /// `health.tailwindIgnorePatterns`, can hold. Each regex keeps its compiled
 /// program in memory for the full run.
@@ -56,7 +70,12 @@ mod tests {
                 .expect_err("large regex refused")
                 .to_string();
 
-            assert!(error.contains("size limit"), "{error}");
+            assert!(
+                error.contains("compiles past the 1 MiB regex size limit"),
+                "{error}"
+            );
+            assert!(error.contains("[A-Za-z0-9_]{1,64}"), "{error}");
+            assert!(!error.contains("is not a valid regex"), "{error}");
             assert!(start.elapsed() < LOAD_BOUND);
         }
     }
@@ -90,5 +109,21 @@ mod tests {
             .to_string();
 
         assert!(error.contains("tailwindIgnorePatterns lists"), "{error}");
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+    fn config_regex_with_bad_syntax_keeps_the_syntax_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(".fallowrc.json");
+        let config = serde_json::json!({ "unusedComponentProps": { "ignorePattern": "[a" } });
+        std::fs::write(&path, config.to_string()).unwrap();
+
+        let error = FallowConfig::load(&path)
+            .expect_err("bad regex")
+            .to_string();
+
+        assert!(error.contains("is not a valid regex"), "{error}");
+        assert!(!error.contains("1 MiB"), "{error}");
     }
 }

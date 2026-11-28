@@ -43,7 +43,7 @@ pub use boundaries::{
     reason = "this module is glob re-exported from lib.rs, so `pub` would leak the helper into the public API; pub(crate) keeps it internal to the crate"
 )]
 pub(crate) use boundaries::{expand_boundary_preset, wildcard_placement_error};
-pub use config_regex::compile_config_regex;
+pub use config_regex::{compile_config_regex, config_regex_error_reason};
 pub use dependency_ignore::{IgnoreDependencyMatcher, is_dependency_glob};
 pub use duplicates_config::{
     DetectionMode, DuplicatesConfig, NormalizationConfig, ResolvedNormalization,
