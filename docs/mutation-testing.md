@@ -587,7 +587,7 @@ or relational mutant, so it adds little test-strength signal for its run time.
 |---|---|
 | `0` | The plan, the run or inspect finished. Survivors do not fail a run. |
 | `1` | `--min-score` or `mutation.minScore` is set, and the score is lower. |
-| `2` | Invalid input or an execution error: a dirty worktree without `--allow-dirty`, a cache directory that hides project files, a missing runtime or runner, a companion file with a wrong digest, an invalid verdict document, `--typecheck` without a type-aware companion, a run in which baseline failures leave each mutant without a test result, a run path that fails the self-check (see Run-path self-check), a `--resume` journal of other inputs (`FALLOW_MUTATION_RESUME_MISMATCH`), a `--kill-matrix-for` run in which no target selects a test of the dry run (`FALLOW_MUTATION_TARGET_UNMATCHED`), a `--kill-matrix-for` test ID target that names a duplicate test ID (`FALLOW_MUTATION_TARGET_DUPLICATE_TEST_ID`), a `--recheck` with a changed source file, an unknown mutant id or no open task (see Recheck), a `--compare` with a saved report or a run that is not complete (`FALLOW_MUTATION_COMPARE_INCOMPLETE`, see Compare), a replay of a stale mutant, a runner with no replay, or a replay companion that fails (see Replay). |
+| `2` | Invalid input or an execution error: a dirty worktree without `--allow-dirty`, a cache directory that hides project files, a missing runtime or runner, a companion file with a wrong digest, an invalid verdict document, `--typecheck` without a type-aware companion, a run in which baseline failures leave each mutant without a test result, a run path that fails the self-check (see Run-path self-check), a `--resume` journal of other inputs (`FALLOW_MUTATION_RESUME_MISMATCH`), a `--kill-matrix-for` run in which no target selects a test of the dry run (`FALLOW_MUTATION_TARGET_UNMATCHED`), a `--kill-matrix-for` test ID target that names a duplicate test ID (`FALLOW_MUTATION_TARGET_DUPLICATE_TEST_ID`), a `--recheck` with a changed source file, an unknown mutant id or no open task (see Recheck), a `--compare` with a saved report or a run that is not complete (`FALLOW_MUTATION_COMPARE_INCOMPLETE`, see Compare), a replay of a stale mutant, a runner with no replay, or a replay companion that fails (see Replay), `--reach-selection` with `--no-cache`, or a `--reach-selection check` run in which a dropped test file covers a mutant (a defect of the selection, with a `reach-selection-violation` issue, see Reach selection). |
 | `128 + signal` | SIGINT, SIGTERM, SIGHUP or SIGQUIT stopped the run (`130` for SIGINT). A run that a signal stops during the mutant runs prints the report of the finished mutants, with the completion `partial`. A run that a signal stops earlier prints no report and no error. |
 
 The flag wins over the config key. The minimum applies to the score, in
@@ -2105,11 +2105,17 @@ comes from recorded execution facts.
   run a mutant of the run.
 - `check`: the run records in the same way, dry-runs each test file, and
   lists each mutant that a test file covers although the record drops the
-  file. A non-empty list exits 2.
+  file. A non-empty list adds a `reach-selection-violation` issue and exits
+  2, because the selection is wrong. A scheduled job with `check` finds such
+  a defect before it hides a survivor.
 
-The selection needs the dry-run cache, so `--no-cache` turns it off. A run of
-kill matrix targets also turns it off, because a target needs the dry run of
-its file.
+The selection keeps its record in the dry-run cache. `--reach-selection`
+with `--no-cache` is an input error, and `--no-cache` turns the config key
+off. A run of kill matrix targets does not select by reach, because a target
+needs the dry run of its file (`disabled: "kill-matrix-targets"`). A runner
+whose workers keep the modules of one test file for the next one, for
+example Vitest with `isolate: false`, gives no record
+(`disabled: "runner-shares-modules"`).
 
 ### Record
 
@@ -2119,48 +2125,75 @@ file reaches. An outer function is a function that no other function holds.
 A file with a mutant gets the probes in its instrumented code, and each other
 script file a copy with only the probes. The runtime records a probe like a
 mutant hit, so the dry run gives the probes of each test and the probes
-outside each test (for example while a module loads). The probes outside
-each test belong to each test file of the same dry-run share.
+outside each test (for example while a module loads). The dry run divides
+its test files over the companions; the files of one companion are a share.
+The probes outside each test belong to each test file of the same share.
 
-The outline of a file is a hash of each outer function body and a hash of
-the skeleton: the text with each outer function body replaced by a marker.
-The skeleton holds the imports, the top-level statements, the class field
-initializers, the static blocks, the decorators, and the name and the
-parameters of each function. Parameters are in the skeleton because code can
-read `fn.length` of a function that never runs.
+The outline of a file sorts its top-level statements into four groups:
+
+- Type-only statements (interfaces, type aliases, `import type`,
+  `export type`, `declare` statements). The runtime never sees them, so the
+  outline leaves them out.
+- Imports. The skeleton holds the source of each import, in order, because
+  that order is the load order. Each imported name is a binding.
+- Pure declarations: a function declaration with no `export`, and a `const`,
+  `let` or `var` with no `export` whose initializers run no code (literals,
+  arrays and objects of them, functions and arrows). Each declared name is a
+  binding. A function declaration gives the hash of its name and
+  parameters; its body counts only for a test file that entered it.
+- Each other statement is module code. The skeleton holds its text with each
+  outer function body replaced by a marker. Exports are module code, so a
+  new or changed export changes the skeleton.
+
+Comments do not count. Each outer function gets a key that stays the same
+when other code moves (the name of its declaration, or the hash of the
+statement that holds it and its index there), the hash of its name,
+parameters and body, and the names that its text references.
 
 The record of a test file is in `dry-runs.json`, next to the dry-run facts:
 
 - the environment part of the key: the result cache key without the reached
-  files, the runner and runtime versions and capabilities, and the shared
-  part of the dry-run key;
+  files and the support files, the runner and runtime versions and
+  capabilities, and the shared part of the dry-run key;
+- the digest of the runner config modules and the files that they reach. The
+  runner loads them in its main process, where no probe records, so the
+  record holds their content. A change of such a file keeps each test file
+  (`runner-config-changed`);
 - the outline key of each reached file of the run, or the content hash of a
   file without probes (a JSON file, a component file, a file that does not
   parse);
 - the probes of the test file and of its share.
 
 A test file with a failed test or an error gets no record. A runner whose
-workers keep the modules of one test file for the next one
-(`isolate: false`) gives no record, because a test file can then use code
-that an earlier file ran.
+workers keep the modules of one test file for the next one gives no record,
+because a test file can then use code that an earlier file ran.
 
 ### Rule
 
 A test file T stays out of the dry run only when each of these holds:
 
-1. T has a record, and the environment part is equal.
+1. T has a record, the environment part is equal, and the runner config
+   digest is equal. The setup files and the files that they reach count as
+   files that T reaches, because each test worker loads them.
 2. Each file that T reaches now is in the record, and each probe of the
    record names a file of the record.
-3. For each such file: the file is equal to the record; or T did not load
-   it; or its skeleton is equal and each body that T entered is equal. A
-   file without probes must be equal.
-4. No mutant of the run is in the skeleton of a file that T loaded, in a
-   body that T entered, or in a file without probes that T reaches.
+3. Each such file passes one of these:
+   - the file is equal to the record;
+   - the file has probes, and T did not load it;
+   - the file has probes, and T runs the same code of it: the skeleton is
+     equal, each function that T entered has the same text under the same
+     key, and each binding that changed is named by no module code and by no
+     function that T entered. A new binding must not take a name that the
+     recorded text used, because it would hide a global.
+4. No mutant of the run is outside the function bodies of a file that T
+   loaded, in a function that T entered, or in a file without probes that T
+   reaches.
 
-Each other case keeps T. With an equal environment, equal skeletons of each
-loaded file and equal bodies of each entered function, T runs the code of
-the recorded run until it enters a body that changed. The record shows that
-T entered no such body, so T runs no changed code and, by rule 4, no mutant.
+Each other case keeps T. With an equal environment, equal module code of
+each loaded file, equal entered functions and equal values of each name that
+this code reads, T runs the code of the recorded run until it enters a
+function that changed. The record shows that T entered no such function, so
+T runs no changed code and, by rule 4, no mutant.
 A dropped test file keeps its record, because its run is the same.
 
 Limits:
@@ -2171,28 +2204,54 @@ Limits:
   graph does not resolve, and files that a test reads.
 - Code that reads the text of a function that it never calls
   (`fn.toString()`), or that runs the text in another realm, is outside the
-  record.
+  record. A function that another module gets as a value and whose
+  parameters it reads (`fn.length`) is module code or an export, so a change
+  of its parameters keeps the test file.
 - A project module that Node loads itself, outside the runner, keeps its
   state between the test files of one worker process when the pool reuses
   the process.
 
 ### Report
 
-The `cache.reach_selection` object of the JSON report gives `check`,
-`dropped` (the test files that the record left out, or would leave out in a
-check run), `kept` (a count for each reason that kept a file: `no-record`,
-`environment`, `new-reach-file`, `unknown-loaded-file`,
+The `cache.reach_selection` object of the JSON report is present when the
+mode is not `off`. It gives `mode` (`on` or `check`), `disabled` (the reason
+when the run did not select by reach), `dropped` (the count of test files
+that the record left out, or would leave out in a check run),
+`dropped_files` (their paths), `kept` (a count for each reason that kept a
+file: `no-record`,
+`environment`, `runner-config-changed`, `new-reach-file`, `unknown-loaded-file`,
 `changed-file-without-probes`, `changed-skeleton`,
-`changed-entered-function`, `mutant-in-loaded-code`,
+`changed-entered-function`, `changed-binding`, `mutant-in-loaded-code`,
 `mutant-in-entered-function`, `mutant-in-file-without-probes`), `recorded`
 (the test files whose record the run wrote), and `violations` (each
 `test_file` and `mutant_id` of a check run where a dropped file covers a
 mutant).
 
-A pull request run gets the record of the base commit from the cache: a run
-on the default branch with `--reach-selection on` writes it, and the CI cache
-of the cache directory gives it to the pull request run, as it gives
-`results.json`.
+The human report adds a line, for example `Reach selection: left out the
+dry run of 12 of 40 test files.`
+
+### Records in CI
+
+A pull request run gets the record of the base commit from the cache:
+
+1. A run on the default branch with `--reach-selection on` (or `check`)
+   writes the record into `dry-runs.json` in `<cache dir>/mutation`.
+2. The CI job saves the cache directory on the default branch, and the pull
+   request job restores it, as for `results.json`.
+3. The pull request run with `--reach-selection on` reads the record. A cold
+   cache gives only `no-record` reasons, and the run dry-runs each file, with
+   no error.
+
+For example, with GitHub Actions:
+
+```yaml
+- uses: actions/cache@v4
+  with:
+    path: .fallow/mutation
+    key: fallow-mutation-${{ github.sha }}
+    restore-keys: fallow-mutation-
+- run: npx fallow mutation --reach-selection on
+```
 
 The probes live in `crates/mutation/src/reach.rs`, the plan part in
 `crates/engine/src/mutation/probes.rs`, the record and the rule in

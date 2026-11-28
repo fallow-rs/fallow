@@ -50,6 +50,7 @@ pub(super) fn key_files(
 pub(super) fn store_results(
     cache: Option<&ResultCache>,
     dry_cache: Option<&DryRunCache>,
+    reach: super::mutation_reach::ReachRequest,
     outcome: &mut ScheduleOutcome,
 ) -> Option<MutationCacheOutput> {
     let cache = cache.filter(|_| outcome.ready.is_some())?;
@@ -60,7 +61,7 @@ pub(super) fn store_results(
             "the mutation result cache was not saved: {message}"
         ));
     }
-    let reach_selection = super::mutation_reach::finish(dry_cache, outcome);
+    let reach_selection = super::mutation_reach::finish(reach, dry_cache, outcome);
     let dry_run_stored = dry_cache.map_or(0, |dry_cache| {
         let stored = dry_cache.record(&outcome.dry_run_entries);
         if let Err(message) = dry_cache.save() {

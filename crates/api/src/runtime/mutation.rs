@@ -1289,7 +1289,16 @@ fn execute(
     let mut outcome = run_schedule_with_progress(&spawner, &schedule, &config, progress)
         .map_err(|error| schedule_error(&error, &config.runner, config.runner_timeout))?;
     let runner = runner_output(&outcome, name, manifest, &runtime);
-    let cache = store_results(result_cache.as_deref(), dry_cache.as_deref(), &mut outcome);
+    let reach = super::mutation_reach::ReachRequest::new(
+        options.reach_selection,
+        !options.kill_matrix_targets.is_empty(),
+    );
+    let cache = store_results(
+        result_cache.as_deref(),
+        dry_cache.as_deref(),
+        reach,
+        &mut outcome,
+    );
     let journal_run_id = Some(run_journal.journal.run_id().to_owned());
     let resume = settle_journal(options, run_journal, &mut outcome);
     let (record, witness) = record_and_search(options, &outcome, spawner, &config, &mutation_cache);
@@ -1736,6 +1745,7 @@ mod tests {
             no_test_files: false,
             framework_config_checked: false,
             probes: None,
+            config_support_files: Vec::new(),
             skipped_files: Vec::new(),
             unmatched_paths: Vec::new(),
             skipped_tests: Vec::new(),
@@ -1774,6 +1784,7 @@ mod tests {
             no_test_files: false,
             framework_config_checked: false,
             probes: None,
+            config_support_files: Vec::new(),
             skipped_files: Vec::new(),
             unmatched_paths: Vec::new(),
             skipped_tests: Vec::new(),

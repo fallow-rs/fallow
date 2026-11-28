@@ -11,6 +11,7 @@ const A: &str = "src/a.ts";
 const B: &str = "src/b.ts";
 const INDEX: &str = "src/index.ts";
 const ENV: &str = "env-1";
+const CONFIG: &str = "config-1";
 
 const A_SOURCE: &str = "export const a = (x: number): number => (x > 0 ? x + 1 : x - 1);\n";
 const B_SOURCE: &str =
@@ -100,7 +101,7 @@ fn recorded(run: &Run, probes: &ShareProbes, extra_reach: &[&str]) -> ReachStore
         &run.facts(extra_reach),
         std::slice::from_ref(probes),
         true,
-        |_| ENV.to_owned(),
+        (|_: &str| ENV.to_owned(), CONFIG),
         1,
     );
     assert_eq!(count, 1);
@@ -108,14 +109,14 @@ fn recorded(run: &Run, probes: &ShareProbes, extra_reach: &[&str]) -> ReachStore
 }
 
 fn decide(store: &ReachStore, run: &Run, extra_reach: &[&str]) -> Result<(), KeepReason> {
-    store.decide(&run.facts(extra_reach), TEST, ENV)
+    store.decide(&run.facts(extra_reach), TEST, (ENV, CONFIG))
 }
 
 #[test]
 fn a_test_file_without_a_record_stays() {
     let run = Run::new();
     assert_eq!(
-        ReachStore::default().decide(&run.facts(&[]), TEST, ENV),
+        ReachStore::default().decide(&run.facts(&[]), TEST, (ENV, CONFIG)),
         Err(KeepReason::NoRecord)
     );
 }
@@ -232,8 +233,18 @@ fn another_environment_keeps_the_file() {
     let run = Run::new();
     let store = recorded(&run, &calls_b(), &[]);
     assert_eq!(
-        store.decide(&run.facts(&[]), TEST, "env-2"),
+        store.decide(&run.facts(&[]), TEST, ("env-2", CONFIG)),
         Err(KeepReason::Environment)
+    );
+}
+
+#[test]
+fn a_changed_runner_config_keeps_the_file() {
+    let run = Run::new();
+    let store = recorded(&run, &calls_b(), &[]);
+    assert_eq!(
+        store.decide(&run.facts(&[]), TEST, (ENV, "config-2")),
+        Err(KeepReason::RunnerConfigChanged)
     );
 }
 
@@ -269,15 +280,33 @@ fn a_failed_or_incomplete_dry_run_writes_no_record() {
     let mut store = ReachStore::default();
     let facts = run.facts(&[]);
     assert_eq!(
-        store.record(&facts, &[failed], true, |_| ENV.to_owned(), 1),
+        store.record(
+            &facts,
+            &[failed],
+            true,
+            (|_: &str| ENV.to_owned(), CONFIG),
+            1
+        ),
         0
     );
-    assert_eq!(store.decide(&facts, TEST, ENV), Err(KeepReason::NoRecord));
     assert_eq!(
-        store.record(&facts, &[calls_b()], false, |_| ENV.to_owned(), 1),
+        store.decide(&facts, TEST, (ENV, CONFIG)),
+        Err(KeepReason::NoRecord)
+    );
+    assert_eq!(
+        store.record(
+            &facts,
+            &[calls_b()],
+            false,
+            (|_: &str| ENV.to_owned(), CONFIG),
+            1
+        ),
         0
     );
-    assert_eq!(store.decide(&facts, TEST, ENV), Err(KeepReason::NoRecord));
+    assert_eq!(
+        store.decide(&facts, TEST, (ENV, CONFIG)),
+        Err(KeepReason::NoRecord)
+    );
 }
 
 #[test]
@@ -286,7 +315,13 @@ fn a_failed_dry_run_removes_an_earlier_record() {
     let mut store = recorded(&run, &calls_b(), &[]);
     let mut failed = calls_b();
     failed.failed.insert(TEST.to_owned());
-    store.record(&run.facts(&[]), &[failed], true, |_| ENV.to_owned(), 2);
+    store.record(
+        &run.facts(&[]),
+        &[failed],
+        true,
+        (|_: &str| ENV.to_owned(), CONFIG),
+        2,
+    );
     assert_eq!(decide(&store, &run, &[]), Err(KeepReason::NoRecord));
 }
 
@@ -325,10 +360,63 @@ fn prune_keeps_only_the_parts_that_an_entry_names() {
     other.entered = BTreeMap::new();
     other.statics.clear();
     let facts = run.facts(&[]);
-    store.record(&facts, &[other], true, |_| ENV.to_owned(), 2);
+    store.record(
+        &facts,
+        &[other],
+        true,
+        (|_: &str| ENV.to_owned(), CONFIG),
+        2,
+    );
     store.prune(1);
     assert_eq!(store.tests.len(), 1);
     assert!(store.tests.contains_key("src/b.test.ts"));
     assert_eq!(store.statics.len(), 1);
     assert_eq!(decide(&store, &run, &[]), Err(KeepReason::NoRecord));
+}
+
+const B_WITH_LIMIT: &str = "const LIMIT = 2;\nexport const b = (x: number): number => x * LIMIT;\nexport function c() { return 1; }\n";
+
+#[test]
+fn a_new_internal_helper_of_a_loaded_file_drops_the_file() {
+    let mut run = Run::new();
+    let store = recorded(&run, &calls_b(), &[]);
+    run.edit(
+        B,
+        "import type { Shape } from './shape';\nconst K = 3;\nfunction helper(x: number) { return x + K; }\nexport const b = (x: number): number => x * 2;\nexport function c() { return helper(1); }\n",
+    )
+    .mutant(B, "x + K");
+    assert_eq!(decide(&store, &run, &[]), Ok(()));
+}
+
+#[test]
+fn a_changed_constant_that_an_entered_function_reads_keeps_the_file() {
+    let mut run = Run::new();
+    run.edit(B, B_WITH_LIMIT);
+    let store = recorded(&run, &calls_b(), &[]);
+    run.edit(B, &B_WITH_LIMIT.replace("LIMIT = 2", "LIMIT = 3"));
+    assert_eq!(decide(&store, &run, &[]), Err(KeepReason::ChangedBinding));
+}
+
+#[test]
+fn a_new_binding_that_hides_a_global_keeps_the_file() {
+    let mut run = Run::new();
+    run.edit(
+        B,
+        "export const b = (x: number): number => Math.max(x, 2);\n",
+    );
+    let store = recorded(&run, &calls_b(), &[]);
+    run.edit(
+        B,
+        "const Math = { max: () => 0 };\nexport const b = (x: number): number => Math.max(x, 2);\n",
+    );
+    assert_eq!(decide(&store, &run, &[]), Err(KeepReason::ChangedBinding));
+}
+
+#[test]
+fn a_new_import_name_from_a_loaded_module_drops_the_file() {
+    let mut run = Run::new();
+    run.edit(INDEX, "import { a } from './a';\nexport * from './a';\nexport * from './b';\nexport const unused = () => a(1);\n");
+    let store = recorded(&run, &calls_b(), &[]);
+    run.edit(INDEX, "import { a, b } from './a';\nexport * from './a';\nexport * from './b';\nexport const unused = () => a(1) + b(1);\n");
+    assert_eq!(decide(&store, &run, &[]), Ok(()));
 }

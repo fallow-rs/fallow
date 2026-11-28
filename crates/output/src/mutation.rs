@@ -639,16 +639,28 @@ pub struct MutationCacheOutput {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct MutationReachSelectionOutput {
-    /// True for a check run: the dry run ran each test file, and
-    /// `violations` compares the covering tests with the dropped files.
-    pub check: bool,
+    /// The mode of the run. In a `check` run, the dry run ran each test
+    /// file, and `violations` compares the covering tests with the dropped
+    /// files.
+    pub mode: MutationReachSelectionMode,
+    /// Why the run did not select by reach, when it did not:
+    /// `kill-matrix-targets` (a target needs the dry run of its file) or
+    /// `runner-shares-modules` (the workers of the runner keep the modules
+    /// of one test file for the next one, for example Vitest with
+    /// `isolate: false`, so no record is complete).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub disabled: Option<String>,
     /// The test files that the reach record left out of the dry run. In a
     /// check run, the files that it would leave out.
     pub dropped: usize,
+    /// The paths of the dropped test files, relative to the project root,
+    /// sorted.
+    pub dropped_files: Vec<String>,
     /// The count of test files that stayed in the dry run, for each reason:
-    /// `no-record`, `environment`, `new-reach-file`, `unknown-loaded-file`,
+    /// `no-record`, `environment`, `runner-config-changed`, `new-reach-file`,
+    /// `unknown-loaded-file`,
     /// `changed-file-without-probes`, `changed-skeleton`,
-    /// `changed-entered-function`, `mutant-in-loaded-code`,
+    /// `changed-entered-function`, `changed-binding`, `mutant-in-loaded-code`,
     /// `mutant-in-entered-function` and `mutant-in-file-without-probes`.
     pub kept: std::collections::BTreeMap<String, usize>,
     /// The test files whose reach record this run wrote.
@@ -656,6 +668,17 @@ pub struct MutationReachSelectionOutput {
     /// In a check run, each mutant that a dropped test file covers. A
     /// non-empty list is a defect of the selection.
     pub violations: Vec<MutationReachViolation>,
+}
+
+/// The mode of the reach selection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub enum MutationReachSelectionMode {
+    /// Leave out the dropped test files.
+    On,
+    /// Dry-run each test file and compare.
+    Check,
 }
 
 /// A mutant that a test file covers although the reach record drops the file.
@@ -867,9 +890,10 @@ pub struct MutationWorktreeCheck {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct MutationRunIssue {
     /// A stable kebab-case code: `cache-write-failed`,
-    /// `duplicate-test-ids`, `journal-write-failed`, `runtime-error`,
-    /// `skipped-tests`, `static-map-miss`, `test-files-not-discovered`,
-    /// `typecheck-failed`, `worktree-changed` or `worktree-check-failed`.
+    /// `duplicate-test-ids`, `journal-write-failed`,
+    /// `reach-selection-violation`, `runtime-error`, `skipped-tests`,
+    /// `static-map-miss`, `test-files-not-discovered`, `typecheck-failed`,
+    /// `worktree-changed` or `worktree-check-failed`.
     pub code: String,
     /// A description.
     pub message: String,

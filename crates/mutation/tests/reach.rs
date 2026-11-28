@@ -281,3 +281,73 @@ fn each_corpus_file_gets_valid_probes() {
     eprintln!("probed {files} files, {skipped} skipped");
     assert!(files > 0);
 }
+
+fn ts_outline(source: &str) -> Outline {
+    outline(source, SourceKind::Ts).expect("outline")
+}
+
+#[test]
+fn types_and_comments_do_not_change_the_outline() {
+    let before = "import { a } from './a';\nexport function f(x: number) { return a(x); }\n";
+    let after = "import type { T } from './t';\nimport { a } from './a';\n// a note\ninterface Shape { x: number }\ntype Id = string;\nexport function f(x: number) { return a(x); }\n";
+    let old = ts_outline(before);
+    let new = ts_outline(after);
+    assert_eq!(old.skeleton, new.skeleton);
+    assert_eq!(old.bindings, new.bindings);
+    assert_eq!(old.bodies[0].key, new.bodies[0].key);
+    assert_eq!(old.bodies[0].hash, new.bodies[0].hash);
+}
+
+#[test]
+fn a_new_internal_declaration_is_a_binding_and_keeps_the_skeleton() {
+    let before = "import { a } from './a';\nexport function f(x) { return a(x); }\nfunction g() { return 1; }\n";
+    let after = "import { a, b } from './a';\nconst LIMIT = 2;\nfunction h(y) { return b(y) + LIMIT; }\nexport function f(x) { return a(x); }\nfunction g() { return 1; }\n";
+    let old = ts_outline(before);
+    let new = ts_outline(after);
+    assert_eq!(old.skeleton, new.skeleton);
+    for name in ["b", "LIMIT", "h"] {
+        assert!(
+            !old.bindings.contains_key(name) && new.bindings.contains_key(name),
+            "{name}"
+        );
+    }
+    // The keys of the other functions do not move with the insertion.
+    for key in ["fn:f#0", "fn:g"] {
+        let before = old.function(key).map(|index| old.bodies[index].hash);
+        let after = new.function(key).map(|index| new.bodies[index].hash);
+        assert!(before.is_some() && before == after, "{key}");
+    }
+}
+
+#[test]
+fn module_code_and_exports_change_the_skeleton() {
+    let base = "import { a } from './a';\nexport const LIMIT = 2;\nregister(a);\n";
+    for changed in [
+        // an exported value
+        "import { a } from './a';\nexport const LIMIT = 3;\nregister(a);\n",
+        // a call at load
+        "import { a } from './a';\nexport const LIMIT = 2;\nregister(a, 1);\n",
+        // a new module
+        "import { a } from './a';\nimport { c } from './c';\nexport const LIMIT = 2;\nregister(a);\n",
+        // a new export
+        "import { a } from './a';\nexport const LIMIT = 2;\nexport function g() {}\nregister(a);\n",
+        // a call in the initializer of an internal constant
+        "import { a } from './a';\nconst seed = a();\nexport const LIMIT = 2;\nregister(a);\n",
+    ] {
+        assert_ne!(
+            ts_outline(base).skeleton,
+            ts_outline(changed).skeleton,
+            "{changed}"
+        );
+    }
+}
+
+#[test]
+fn a_function_lists_the_names_that_it_references() {
+    let outline =
+        ts_outline("const LIMIT = 2;\nfunction f(x) { return helper(x) + LIMIT; }\nregister(f);\n");
+    let f = &outline.bodies[outline.function("fn:f").expect("f")];
+    assert!(f.refs.contains(&"LIMIT".to_owned()) && f.refs.contains(&"helper".to_owned()));
+    assert!(outline.skeleton_refs.contains(&"f".to_owned()));
+    assert!(!outline.skeleton_refs.contains(&"LIMIT".to_owned()));
+}

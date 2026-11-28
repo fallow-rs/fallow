@@ -6,8 +6,11 @@
 //! run, the record of each test file holds:
 //!
 //! - the environment part of its key: the result cache key without the
-//!   reached files, the runner and runtime versions and capabilities, and the
-//!   shared part of the dry-run key;
+//!   reached files and the support files, the runner and runtime versions and
+//!   capabilities, and the shared part of the dry-run key;
+//! - the digest of the runner config modules and the files that they reach.
+//!   The runner loads them in its main process, where no probe records, so
+//!   the record holds their content;
 //! - a snapshot of each reached file of the run: the key of its outline, or
 //!   the hash of its content for a file without probes;
 //! - the probe ids that its tests gave, and the probe ids of its dry-run
@@ -17,28 +20,35 @@
 //! A later run leaves test file T out of the dry run only when each of these
 //! holds:
 //!
-//! 1. T has a record and the environment part is equal.
+//! 1. T has a record, the environment part is equal, and the runner config
+//!    digest is equal. The setup files and the files that they reach count
+//!    as files that T reaches.
 //! 2. Each file that T reaches now is in the snapshot, and each probe id of
 //!    the record names a file of the snapshot.
-//! 3. For each such file F: F is equal to the snapshot, or F has probes, T
-//!    did not load F, or (the skeleton of F is equal and each body that T
-//!    entered is equal). A file without probes must be equal.
-//! 4. No mutant of the run is in the skeleton of a file that T loaded, in a
-//!    body that T entered, or in a file without probes that T reaches.
+//! 3. For each such file F: F is equal to the snapshot; or F has probes and T
+//!    did not load F; or F has probes and T runs the same code of F (see
+//!    `same_run`: equal module code and import sources, each entered
+//!    function unchanged under its key, and no changed binding that module
+//!    code or an entered function names). A file without probes must be
+//!    equal.
+//! 4. No mutant of the run is outside the function bodies of a file that T
+//!    loaded, in a function that T entered, or in a file without probes that
+//!    T reaches.
 //!
-//! Each other case keeps T. With an equal environment, equal skeletons of
-//! each loaded file and equal bodies of each entered function, T runs the
-//! code of the recorded run until it enters a body that changed. The record
-//! shows that T entered no such body, so T runs no changed code and, by rule
-//! 4, no mutant. The rule assumes that a test gives the same run for the
-//! same inputs, and it has the limits of the result cache: dynamic imports
+//! Each other case keeps T. With an equal environment, equal module code of
+//! each loaded file, equal entered functions and equal values of each name
+//! that this code reads, T runs the code of the recorded run until it enters
+//! a function that changed. The record shows that T entered no such
+//! function, so T runs no changed code and, by rule 4, no mutant. The rule
+//! assumes that a test gives the same run for the same inputs. It has the
+//! limits of the result cache: dynamic imports
 //! that the module graph does not resolve, and files that a test reads.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-use fallow_engine::mutation::{MutationPlan, Outline, SourceKind, probe_key};
+use fallow_engine::mutation::{MutationPlan, Outline, OutlineBody, SourceKind, probe_key};
 use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
 use xxhash_rust::xxh3::{Xxh3, xxh3_64};
@@ -57,6 +67,8 @@ pub enum KeepReason {
     NoRecord,
     /// The test file, its config or the runner changed.
     Environment,
+    /// A runner config module or a file that it reaches changed.
+    RunnerConfigChanged,
     /// The test file reaches a file that the record does not hold.
     NewReachFile,
     /// The record names a file that the snapshot does not hold.
@@ -65,8 +77,11 @@ pub enum KeepReason {
     ChangedFileWithoutProbes,
     /// The code outside the function bodies of a loaded file changed.
     ChangedSkeleton,
-    /// A function body that the test file entered changed.
+    /// A function that the test file entered changed.
     ChangedEnteredFunction,
+    /// An import or a declaration changed that module code or a function
+    /// that the test file entered names.
+    ChangedBinding,
     /// A mutant is outside each function body of a loaded file.
     MutantInLoadedCode,
     /// A mutant is in a function body that the test file entered.
@@ -81,11 +96,13 @@ impl KeepReason {
         match self {
             Self::NoRecord => "no-record",
             Self::Environment => "environment",
+            Self::RunnerConfigChanged => "runner-config-changed",
             Self::NewReachFile => "new-reach-file",
             Self::UnknownLoadedFile => "unknown-loaded-file",
             Self::ChangedFileWithoutProbes => "changed-file-without-probes",
             Self::ChangedSkeleton => "changed-skeleton",
             Self::ChangedEnteredFunction => "changed-entered-function",
+            Self::ChangedBinding => "changed-binding",
             Self::MutantInLoadedCode => "mutant-in-loaded-code",
             Self::MutantInEnteredFunction => "mutant-in-entered-function",
             Self::MutantInFileWithoutProbes => "mutant-in-file-without-probes",
@@ -104,6 +121,7 @@ struct Snapshot {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct ReachEntry {
     env: String,
+    config: String,
     snapshot: String,
     statics: String,
     entered: Vec<String>,
@@ -134,14 +152,11 @@ struct Fact {
     outline: Option<Outline>,
 }
 
+/// The fact key of a file with probes: the hash of its whole outline, so a
+/// change of any part (a binding, a key, a reference) changes the key.
 fn outline_key(outline: &Outline) -> String {
-    let mut hasher = Xxh3::new();
-    hasher.update(&outline.skeleton.to_le_bytes());
-    hasher.update(&(outline.bodies.len() as u64).to_le_bytes());
-    for body in &outline.bodies {
-        hasher.update(&body.hash.to_le_bytes());
-    }
-    format!("o{:016x}", hasher.digest())
+    let text = serde_json::to_vec(outline).unwrap_or_default();
+    format!("o{:016x}", xxh3_64(&text))
 }
 
 fn hash_ids<'a>(ids: impl Iterator<Item = &'a String>) -> String {
@@ -165,6 +180,8 @@ pub struct ReachFacts {
     reach_files: Vec<String>,
     /// The spans of the mutants of each file.
     mutants: FxHashMap<String, Vec<(u32, u32)>>,
+    /// The runner config modules and the files that they reach.
+    config_files: Vec<String>,
     facts: Mutex<FxHashMap<String, Fact>>,
 }
 
@@ -183,20 +200,38 @@ impl ReachFacts {
                     .collect()
             })
             .unwrap_or_default();
+        // Each test worker loads the setup files and their reach.
+        let config: rustc_hash::FxHashSet<&str> = plan
+            .config_support_files
+            .iter()
+            .map(String::as_str)
+            .collect();
+        let setup: Vec<String> = plan
+            .support_files
+            .iter()
+            .filter(|path| !config.contains(path.as_str()))
+            .cloned()
+            .collect();
         let reach = plan
             .test_files
             .iter()
             .map(|test| {
-                let files = plan
+                let mut files: Vec<String> = plan
                     .test_file_reach
                     .get(test)
                     .into_iter()
                     .flatten()
                     .filter_map(|&index| plan.reach_files.get(index as usize).cloned())
+                    .chain(setup.iter().cloned())
                     .collect();
+                files.sort_unstable();
+                files.dedup();
                 (test.clone(), files)
             })
             .collect();
+        let mut reach_files: Vec<String> = plan.reach_files.iter().chain(&setup).cloned().collect();
+        reach_files.sort_unstable();
+        reach_files.dedup();
         let mut mutants: FxHashMap<String, Vec<(u32, u32)>> = FxHashMap::default();
         for mutant in &plan.mutants {
             mutants
@@ -208,10 +243,16 @@ impl ReachFacts {
             root: root.to_path_buf(),
             probed,
             reach,
-            reach_files: plan.reach_files.clone(),
+            reach_files,
             mutants,
+            config_files: plan.config_support_files.clone(),
             facts: Mutex::new(FxHashMap::default()),
         }
+    }
+
+    /// The runner config modules and the files that they reach.
+    pub(super) fn config_files(&self) -> &[String] {
+        &self.config_files
     }
 
     /// Facts for a test: the outline of each probed file, the reach of each
@@ -232,6 +273,7 @@ impl ReachFacts {
             reach,
             reach_files,
             mutants,
+            config_files: Vec::new(),
             facts: Mutex::new(FxHashMap::default()),
         }
     }
@@ -280,6 +322,52 @@ impl ReachFacts {
     }
 }
 
+/// Checks that a test file that loaded a file with the `recorded` outline,
+/// and that entered the `entered` functions of it, runs the same code of the
+/// file in its `current` outline:
+///
+/// - the module code and the import sources are equal;
+/// - each entered function has the same text under the same key;
+/// - each binding that changed (an import or a pure declaration) is named by
+///   no module code and by no entered function, and a new binding does not
+///   take a name that the recorded text already used (a global).
+fn same_run(
+    recorded: &Outline,
+    current: &Outline,
+    entered: &[&OutlineBody],
+) -> Result<(), KeepReason> {
+    if recorded.skeleton != current.skeleton {
+        return Err(KeepReason::ChangedSkeleton);
+    }
+    for body in entered {
+        let same = current
+            .function(&body.key)
+            .is_some_and(|ordinal| current.bodies[ordinal].hash == body.hash);
+        if !same {
+            return Err(KeepReason::ChangedEnteredFunction);
+        }
+    }
+    let names: BTreeSet<&String> = recorded
+        .bindings
+        .keys()
+        .chain(current.bindings.keys())
+        .collect();
+    let named = |list: &[String], name: &String| list.binary_search(name).is_ok();
+    for name in names {
+        if recorded.bindings.get(name) == current.bindings.get(name) {
+            continue;
+        }
+        let used = named(&recorded.skeleton_refs, name)
+            || named(&current.skeleton_refs, name)
+            || entered.iter().any(|body| named(&body.refs, name))
+            || (!recorded.bindings.contains_key(name) && named(&recorded.refs, name));
+        if used {
+            return Err(KeepReason::ChangedBinding);
+        }
+    }
+    Ok(())
+}
+
 /// The probe ids of one file in a record: the module probe and the entered
 /// ordinals.
 #[derive(Debug, Default)]
@@ -304,12 +392,13 @@ fn group_probes<'a>(
 }
 
 impl ReachStore {
-    /// Decides for `test_file` with the environment part `env`.
+    /// Decides for `test_file` with the environment part `env` and the
+    /// runner config digest `config`.
     pub(super) fn decide(
         &self,
         facts: &ReachFacts,
         test_file: &str,
-        env: &str,
+        (env, config): (&str, &str),
     ) -> Result<(), KeepReason> {
         let entry = self.tests.get(test_file).ok_or(KeepReason::NoRecord)?;
         let snapshot = self
@@ -322,6 +411,9 @@ impl ReachStore {
             .ok_or(KeepReason::NoRecord)?;
         if entry.env != env {
             return Err(KeepReason::Environment);
+        }
+        if entry.config != config {
+            return Err(KeepReason::RunnerConfigChanged);
         }
         let groups = group_probes(entry.entered.iter().chain(statics))
             .ok_or(KeepReason::UnknownLoadedFile)?;
@@ -382,36 +474,28 @@ impl ReachStore {
             // reaches it only through code that it runs and that changed.
             return Ok(());
         };
+        let recorded = self.outlines.get(old).ok_or(KeepReason::NoRecord)?;
+        let entered: Vec<&OutlineBody> = probes
+            .entered
+            .iter()
+            .map(|&ordinal| recorded.bodies.get(ordinal))
+            .collect::<Option<_>>()
+            .ok_or(KeepReason::UnknownLoadedFile)?;
         let outline = match current.outline {
             Some(outline) => outline,
-            None if current.key == *old => self
-                .outlines
-                .get(old)
-                .cloned()
-                .ok_or(KeepReason::NoRecord)?,
+            None if current.key == *old => recorded.clone(),
             None => facts
                 .outline_on_disk(path)
                 .ok_or(KeepReason::ChangedFileWithoutProbes)?,
         };
         if current.key != *old {
-            let recorded = self.outlines.get(old).ok_or(KeepReason::NoRecord)?;
-            if recorded.skeleton != outline.skeleton
-                || recorded.bodies.len() != outline.bodies.len()
-            {
-                return Err(KeepReason::ChangedSkeleton);
-            }
-            for &ordinal in &probes.entered {
-                let before = recorded.bodies.get(ordinal).map(|body| body.hash);
-                let after = outline.bodies.get(ordinal).map(|body| body.hash);
-                if before.is_none() || before != after {
-                    return Err(KeepReason::ChangedEnteredFunction);
-                }
-            }
+            same_run(recorded, &outline, &entered)?;
         }
+        let entered_keys: BTreeSet<&str> = entered.iter().map(|body| body.key.as_str()).collect();
         for &span in mutants {
             match outline.body_of(span) {
                 None => return Err(KeepReason::MutantInLoadedCode),
-                Some(ordinal) if probes.entered.contains(&ordinal) => {
+                Some(ordinal) if entered_keys.contains(outline.bodies[ordinal].key.as_str()) => {
                     return Err(KeepReason::MutantInEnteredFunction);
                 }
                 Some(_) => {}
@@ -425,11 +509,11 @@ impl ReachStore {
         &self,
         facts: &ReachFacts,
         dry_files: &[String],
-        env: impl Fn(&str) -> String,
+        (env, config): (impl Fn(&str) -> String, &str),
     ) -> ReachSelection {
         let mut selection = ReachSelection::default();
         for test_file in dry_files {
-            match self.decide(facts, test_file, &env(test_file)) {
+            match self.decide(facts, test_file, (&env(test_file), config)) {
                 Ok(()) => selection.dropped.push(test_file.clone()),
                 Err(reason) => {
                     *selection.kept.entry(reason.name().to_owned()).or_default() += 1;
@@ -448,7 +532,7 @@ impl ReachStore {
         facts: &ReachFacts,
         shares: &[ShareProbes],
         complete: bool,
-        env: impl Fn(&str) -> String,
+        (env, config): (impl Fn(&str) -> String, &str),
         generation: u64,
     ) -> usize {
         let files: BTreeMap<String, String> = facts
@@ -480,6 +564,7 @@ impl ReachStore {
                     test_file.clone(),
                     ReachEntry {
                         env: env(test_file),
+                        config: config.to_owned(),
                         snapshot: snapshot.clone(),
                         statics: statics.clone(),
                         entered,

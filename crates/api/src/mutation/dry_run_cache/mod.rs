@@ -41,7 +41,7 @@ use super::scheduler::{
 };
 
 mod reach;
-pub use reach::{KeepReason, ReachFacts};
+pub use reach::ReachFacts;
 
 /// The file name of the cache below `<cache dir>/mutation`.
 pub const DRY_RUN_CACHE_FILE: &str = "dry-runs.json";
@@ -173,11 +173,12 @@ impl DryRunCache {
         };
         let generation = state.generation + 1;
         let complete = ready.capabilities.fresh_modules_per_run;
+        let config = self.keys.files_digest(facts.config_files());
         state.reach.record(
             facts,
             shares,
             complete,
-            |test_file| self.reach_env(ready, test_file),
+            (|test_file: &str| self.reach_env(ready, test_file), &config),
             generation,
         )
     }
@@ -283,15 +284,17 @@ impl ReachLookup for DryRunCache {
             return ReachSelection::default();
         };
         if !ready.capabilities.fresh_modules_per_run {
-            let mut selection = ReachSelection::default();
-            selection
-                .kept
-                .insert(KeepReason::NoRecord.name().to_owned(), dry_files.len());
-            return selection;
+            return ReachSelection {
+                disabled: Some("runner-shares-modules"),
+                ..ReachSelection::default()
+            };
         }
-        state.reach.select(facts, dry_files, |test_file| {
-            self.reach_env(ready, test_file)
-        })
+        let config = self.keys.files_digest(facts.config_files());
+        state.reach.select(
+            facts,
+            dry_files,
+            (|test_file: &str| self.reach_env(ready, test_file), &config),
+        )
     }
 }
 

@@ -26,8 +26,9 @@ use oxc_ast::ast::{ArrowFunctionBody, ArrowFunctionExpression, Function, Functio
 use oxc_ast_visit::{Visit, walk};
 use oxc_span::GetSpan;
 use oxc_syntax::scope::ScopeFlags;
-use serde::{Deserialize, Serialize};
-use xxhash_rust::xxh3::{Xxh3, xxh3_64};
+use xxhash_rust::xxh3::xxh3_64;
+
+pub use crate::outline::{Outline, OutlineBody};
 
 /// The prelude function that records the entry of a function body or a
 /// module.
@@ -58,40 +59,6 @@ pub fn function_probe(key: &str, ordinal: usize) -> String {
     format!("r{key}.{ordinal}")
 }
 
-/// The body of one outer function.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub struct OutlineBody {
-    /// The byte span of the body: the block with its braces, or the
-    /// expression of an arrow.
-    pub span: (u32, u32),
-    /// The hash of the body text.
-    pub hash: u64,
-}
-
-/// The outline of a source text. See the module docs.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Outline {
-    /// The hash of the text with each outer function body replaced by a
-    /// marker.
-    pub skeleton: u64,
-    /// The outer function bodies, in source order. The index is the ordinal
-    /// of the probe id.
-    pub bodies: Vec<OutlineBody>,
-}
-
-impl Outline {
-    /// The ordinal of the outer function body that holds `span`, or `None`
-    /// when the span is in the skeleton.
-    pub fn body_of(&self, span: (u32, u32)) -> Option<usize> {
-        let index = self
-            .bodies
-            .partition_point(|body| body.span.0 <= span.0)
-            .checked_sub(1)?;
-        let body = self.bodies.get(index)?;
-        (span.1 <= body.span.1).then_some(index)
-    }
-}
-
 /// Where the probe of a body goes.
 #[derive(Debug, Clone, Copy)]
 enum ProbeSite {
@@ -104,8 +71,12 @@ enum ProbeSite {
 }
 
 #[derive(Debug, Clone, Copy)]
-struct Body {
-    span: (u32, u32),
+pub(crate) struct Body {
+    /// The start of the function node: its parameters and its name start
+    /// here or later.
+    pub start: u32,
+    /// The span of the body.
+    pub span: (u32, u32),
     site: ProbeSite,
 }
 
@@ -116,7 +87,7 @@ struct Collector {
 }
 
 impl Collector {
-    fn block(&mut self, body: &FunctionBody<'_>) {
+    fn block(&mut self, start: u32, body: &FunctionBody<'_>) {
         let site = match body.directives.last() {
             Some(directive) => ProbeSite::Statement {
                 offset: directive.span.end,
@@ -128,6 +99,7 @@ impl Collector {
             },
         };
         self.bodies.push(Body {
+            start,
             span: (body.span.start, body.span.end),
             site,
         });
@@ -139,7 +111,7 @@ impl<'a> Visit<'a> for Collector {
         if self.depth == 0
             && let Some(body) = &it.body
         {
-            self.block(body);
+            self.block(it.span.start, body);
         }
         self.depth += 1;
         walk::walk_function(self, it, flags);
@@ -149,10 +121,11 @@ impl<'a> Visit<'a> for Collector {
     fn visit_arrow_function_expression(&mut self, it: &ArrowFunctionExpression<'a>) {
         if self.depth == 0 {
             match &it.body {
-                ArrowFunctionBody::FunctionBody(body) => self.block(body),
+                ArrowFunctionBody::FunctionBody(body) => self.block(it.span.start, body),
                 expression => {
                     let span = expression.span();
                     self.bodies.push(Body {
+                        start: it.span.start,
                         span: (span.start, span.end),
                         site: ProbeSite::Expression,
                     });
@@ -165,7 +138,7 @@ impl<'a> Visit<'a> for Collector {
     }
 }
 
-fn collect(program: &Program<'_>) -> Vec<Body> {
+pub(crate) fn collect(program: &Program<'_>) -> Vec<Body> {
     let mut collector = Collector::default();
     collector.visit_program(program);
     let mut bodies = collector.bodies;
@@ -175,31 +148,7 @@ fn collect(program: &Program<'_>) -> Vec<Body> {
 
 /// The outline of the parsed `program` of `source`.
 pub(crate) fn outline_of(program: &Program<'_>, source: &str) -> Outline {
-    outline_from(&collect(program), source)
-}
-
-fn outline_from(bodies: &[Body], source: &str) -> Outline {
-    let mut skeleton = Xxh3::new();
-    let mut cursor = 0usize;
-    let mut outline_bodies = Vec::with_capacity(bodies.len());
-    for body in bodies {
-        let (start, end) = (body.span.0 as usize, body.span.1 as usize);
-        let text = source.get(start..end).unwrap_or_default();
-        skeleton.update(source.get(cursor..start).unwrap_or_default().as_bytes());
-        // The marker holds no source byte, so two skeletons with a body at
-        // a different place never hash the same text.
-        skeleton.update(&[0xff]);
-        cursor = end;
-        outline_bodies.push(OutlineBody {
-            span: body.span,
-            hash: xxh3_64(text.as_bytes()),
-        });
-    }
-    skeleton.update(source.get(cursor..).unwrap_or_default().as_bytes());
-    Outline {
-        skeleton: skeleton.digest(),
-        bodies: outline_bodies,
-    }
+    crate::outline::outline(program, source, &collect(program))
 }
 
 /// One probe text for the emitter.
@@ -273,7 +222,7 @@ pub(crate) fn probes(program: &Program<'_>, source: &str, key: &str) -> (Vec<Pro
             }
         })
         .collect();
-    (sorted, outline_from(&bodies, source))
+    (sorted, crate::outline::outline(program, source, &bodies))
 }
 
 /// The module probe statement, which follows the prelude.

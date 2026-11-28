@@ -488,9 +488,16 @@ pub struct MutationPlan {
     pub framework_config_checked: bool,
     /// The probed files, when the request asked for probes. A file with a
     /// mutant gets its probed instrumented code here, and each other script
-    /// file of `reach_files` a copy with only the probes.
+    /// file of `reach_files` and of `support_files` a copy with only the
+    /// probes, except the files of `config_support_files`.
     #[serde(skip)]
     pub probes: Option<PlanProbes>,
+    /// The runner config modules at the root and the files that they reach
+    /// through static imports, sorted: the part of `support_files` that the
+    /// runner loads in its main process, outside each test worker. Filled
+    /// only when the request asked for probes.
+    #[serde(skip)]
+    pub config_support_files: Vec<String>,
     /// The selected files that the plan did not instrument, sorted by path.
     pub skipped_files: Vec<SkippedFile>,
     /// The paths of a `Paths` scope that select no source file, sorted by

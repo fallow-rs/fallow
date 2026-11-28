@@ -222,21 +222,40 @@ pub(super) fn build(
 
     let test_files: Vec<String> = test_files.into_iter().collect();
     let reach = super::reach::test_reach(graph, inputs.root, &test_files);
+    let support_files = super::reach::support_files(graph, inputs.root, inputs.setup_files);
+    let config_support_files = if request.probes {
+        super::reach::support_files(graph, inputs.root, &[])
+    } else {
+        Vec::new()
+    };
     let probes = request.probes.then(|| {
         probed.retain(|path, _| runnable.contains(path.as_str()));
-        let planned: FxHashSet<&str> = files.iter().map(|file| file.path.as_str()).collect();
-        let reach_only = super::probes::probe_reach_files(inputs.root, &reach.files, &planned);
+        let planned: FxHashSet<&str> = files
+            .iter()
+            .map(|file| file.path.as_str())
+            .chain(config_support_files.iter().map(String::as_str))
+            .collect();
+        let worker_files: Vec<String> = reach
+            .files
+            .iter()
+            .chain(&support_files)
+            .cloned()
+            .collect::<BTreeSet<String>>()
+            .into_iter()
+            .collect();
+        let reach_only = super::probes::probe_reach_files(inputs.root, &worker_files, &planned);
         probed.extend(reach_only);
         super::PlanProbes { files: probed }
     });
     MutationPlan {
         probes,
+        config_support_files,
         files,
         counts: count(&mutants),
         mutants,
         reach_files: reach.files,
         test_file_reach: reach.reach,
-        support_files: super::reach::support_files(graph, inputs.root, inputs.setup_files),
+        support_files,
         test_files,
         no_test_files: context.runner_entries.is_empty(),
         framework_config_checked: inputs.framework_config_exports.is_some(),

@@ -454,7 +454,23 @@ pub(super) fn joined_dry_phase(
 ) -> Result<DryPhase, ScheduleError> {
     let started = config.clock.now();
     let Reuse { stored, run, keys } = reuse(plan, config, ready, dry_files);
-    let universe = &config.init.path_map;
+    // The run dir of a run with reach selection also holds files that have
+    // only entry probes. They are no plan files, so the loaded paths leave
+    // them out.
+    let plan_paths: BTreeMap<String, String>;
+    let universe = match &config.reach {
+        Some(reach) if !reach.probe_only.is_empty() => {
+            plan_paths = config
+                .init
+                .path_map
+                .iter()
+                .filter(|(path, _)| !reach.probe_only.contains(*path))
+                .map(|(path, target)| (path.clone(), target.clone()))
+                .collect();
+            &plan_paths
+        }
+        _ => &config.init.path_map,
+    };
     let stored_time: Duration = stored.iter().map(|(_, facts)| facts.duration()).sum();
     outcome.dry_run_reused = stored.len();
     if run.is_empty() {

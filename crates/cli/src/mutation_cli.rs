@@ -530,7 +530,7 @@ pub fn run_options(input: &MutationCliInput<'_>) -> Result<MutationRunOptions, P
             Some(RecordArgsFlag::Shapes) => fallow_api::mutation::RecordArgsMode::Shapes,
             Some(RecordArgsFlag::Values) => fallow_api::mutation::RecordArgsMode::Values,
         },
-        reach_selection: reach_selection(input),
+        reach_selection: reach_selection(input)?,
     })
 }
 
@@ -1018,20 +1018,32 @@ fn save_reports(
 /// The `--report` file of a recheck, which the run replaces. The run writes
 /// it after the run, so the worktree check leaves it out, as it does for the
 /// `--output-file`.
-/// The reach selection of the run: the flag, else the config key.
-fn reach_selection(input: &MutationCliInput<'_>) -> fallow_api::mutation::ReachSelectionMode {
+/// The reach selection of the run: the flag, else the config key. The
+/// selection keeps its record in the cache, so `--no-cache` turns the config
+/// key off and refuses the flag.
+fn reach_selection(
+    input: &MutationCliInput<'_>,
+) -> Result<fallow_api::mutation::ReachSelectionMode, ProgrammaticError> {
     use fallow_api::mutation::ReachSelectionMode;
     use fallow_config::MutationReachSelection;
-    match input.args.reach_selection {
+    let mode = match input.args.reach_selection {
         Some(ReachSelectionFlag::Off) => ReachSelectionMode::Off,
         Some(ReachSelectionFlag::On) => ReachSelectionMode::On,
         Some(ReachSelectionFlag::Check) => ReachSelectionMode::Check,
+        None if input.no_cache => ReachSelectionMode::Off,
         None => match input.config.reach_selection {
             None | Some(MutationReachSelection::Off) => ReachSelectionMode::Off,
             Some(MutationReachSelection::On) => ReachSelectionMode::On,
             Some(MutationReachSelection::Check) => ReachSelectionMode::Check,
         },
+    };
+    if input.no_cache && mode != ReachSelectionMode::Off {
+        return Err(input_error(
+            "--reach-selection keeps its record in the cache, so it cannot run with --no-cache",
+            "mutation.reachSelection",
+        ));
     }
+    Ok(mode)
 }
 
 fn recheck_report_file<'a>(input: &'a MutationCliInput<'_>) -> Option<&'a Path> {

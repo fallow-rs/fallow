@@ -128,6 +128,8 @@ pub(super) fn take_probes(
 /// The selection of the dry-run test files of a run.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ReachSelection {
+    /// Why the run cannot select by reach, when it cannot.
+    pub disabled: Option<&'static str>,
     /// The test files that the record drops, sorted.
     pub dropped: Vec<String>,
     /// The count of kept test files for each reason.

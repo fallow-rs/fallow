@@ -273,6 +273,7 @@ mod tests {
             no_test_files: false,
             framework_config_checked: false,
             probes: None,
+            config_support_files: Vec::new(),
             skipped_files: Vec::new(),
             unmatched_paths: Vec::new(),
             skipped_tests: Vec::new(),

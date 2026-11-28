@@ -24,6 +24,7 @@ mod exports;
 mod id;
 mod logging_only;
 mod operator;
+mod outline;
 mod reach;
 mod record;
 mod regex;
