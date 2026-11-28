@@ -621,9 +621,11 @@ impl RuntimeCoverageCostBasis {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
-/// Blast-radius risk band. The current thresholds are high at >=20 static
-/// callers or >=1,000,000 traffic-weighted caller reach; medium at >=5 callers
-/// or >=50,000 weighted reach; low otherwise.
+/// Blast-radius risk band from the count of importer files (`caller_count`)
+/// only: high at 20 or more, medium at 5 or more, low otherwise. Traffic does
+/// not move the band; read `caller_count_weighted_by_traffic` for traffic.
+/// `unknown` when the caller count is not known. Context only: the band never
+/// changes a verdict, a confidence or an action.
 pub enum RuntimeCoverageRiskBand {
     /// Small caller footprint.
     Low,
@@ -631,6 +633,9 @@ pub enum RuntimeCoverageRiskBand {
     Medium,
     /// Wide caller footprint; changes ripple far.
     High,
+    /// The caller count is not known: Fallow Cloud has no caller graph for
+    /// the function and the local AST has no match for it.
+    Unknown,
 }
 
 impl RuntimeCoverageRiskBand {
@@ -641,6 +646,7 @@ impl RuntimeCoverageRiskBand {
             Self::Low => "low",
             Self::Medium => "medium",
             Self::High => "high",
+            Self::Unknown => "unknown",
         }
     }
 }
@@ -655,6 +661,22 @@ impl fmt::Display for RuntimeCoverageRiskBand {
 /// change to the function would ripple.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+// `caller_count_weighted_by_traffic` is always in the JSON, as a number or
+// `null`, so it stays required although its type is an `Option`.
+#[cfg_attr(
+    feature = "schema",
+    schemars(extend(
+        "required" = [
+            "id",
+            "file",
+            "function",
+            "line",
+            "caller_count",
+            "caller_count_weighted_by_traffic",
+            "risk_band"
+        ]
+    ))
+)]
 pub struct RuntimeCoverageBlastRadiusEntry {
     /// Stable content-hash ID of the form `fallow:blast:<hash>`.
     pub id: String,
@@ -681,13 +703,16 @@ pub struct RuntimeCoverageBlastRadiusEntry {
     pub line: u32,
     /// Static caller count from the module graph.
     pub caller_count: u32,
-    /// Caller reach weighted by observed runtime traffic.
-    pub caller_count_weighted_by_traffic: u64,
+    /// Production runtime hits in the importer files of the function: the sum
+    /// of the hits of the functions in the files that import it. `null` when
+    /// it is not measured: no importer file has runtime data, or a local run
+    /// (`health --runtime-coverage`), which has no measure for it.
+    pub caller_count_weighted_by_traffic: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     /// Distinct deploy SHAs that touched the function in the observation
     /// window. Cloud mode only; omitted in local mode.
     pub deploys_touched: Option<u32>,
-    /// Risk band derived from caller counts and traffic-weighted reach.
+    /// Risk band from the count of importer files. See `RuntimeCoverageRiskBand`.
     pub risk_band: RuntimeCoverageRiskBand,
     /// Fields of the Fallow Cloud blast-radius row that the CLI does not read,
     /// as the cloud sent them: for example `production_callers`,

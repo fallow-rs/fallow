@@ -82,6 +82,12 @@ impl RetainedModuleGraph {
             .map_or(0, Vec::len)
     }
 
+    /// The modules that directly import one file.
+    #[must_use]
+    pub fn direct_importers(&self, file_id: FileId) -> &[FileId] {
+        self.inner.importers_of(file_id)
+    }
+
     /// Summaries for modules that directly import one file.
     #[must_use]
     pub fn direct_importer_summaries(&self, target: FileId) -> Vec<DirectImporterSummary> {

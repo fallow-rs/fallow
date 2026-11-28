@@ -35,8 +35,8 @@ use fallow_output::{
     RUNTIME_STALE_AFTER_DAYS, RuntimeCoverageAction, RuntimeCoverageCaptureQuality,
     RuntimeCoverageConfidence, RuntimeCoverageDataSource, RuntimeCoverageEvidence,
     RuntimeCoverageFinding, RuntimeCoverageHotPath, RuntimeCoverageMessage,
-    RuntimeCoverageProvenance, RuntimeCoverageReport, RuntimeCoverageRiskBand,
-    RuntimeCoverageSchemaVersion, RuntimeCoverageVerdict,
+    RuntimeCoverageProvenance, RuntimeCoverageReport, RuntimeCoverageSchemaVersion,
+    RuntimeCoverageVerdict,
 };
 
 const RUNTIME_COVERAGE_SCHEMA_VERSION: &str = "1";
@@ -489,6 +489,8 @@ pub(super) struct StaticIndex {
     /// File name to repo-relative paths, used to rebase a runtime path that
     /// carries a container or bundle prefix onto the local tree.
     paths_by_file_name: FxHashMap<String, Vec<String>>,
+    /// Repo-relative path to the repo-relative paths of its direct importers.
+    pub(super) importers: FxHashMap<String, Vec<String>>,
 }
 
 /// The static index of the project. Without `--production`, the config
@@ -560,8 +562,12 @@ fn build_index_from_analysis(
             continue;
         };
         let rel = normalize_runtime_path(path.strip_prefix(root).unwrap_or(path));
-        let caller_count = graph.map_or(0_usize, |g| g.direct_importer_count(module.file_id));
-        let caller_count = u32::try_from(caller_count).unwrap_or(u32::MAX);
+        let sources = graph.map_or(&[][..], |g| g.direct_importers(module.file_id));
+        let caller_count = u32::try_from(sources.len()).unwrap_or(u32::MAX);
+        let importers = sources.iter().filter_map(|id| file_paths.get(id));
+        let importers =
+            importers.map(|p| normalize_runtime_path(p.strip_prefix(root).unwrap_or(p)));
+        out.importers.insert(rel.clone(), importers.collect());
         let owner_count = codeowners.map(|co| co.owner_count_of(Path::new(&rel)).unwrap_or(0));
         for function in &module.complexity {
             let info = static_function_info(
@@ -1127,16 +1133,6 @@ pub(super) fn importance_reason(
         None => "no CODEOWNERS data",
     };
     format!("{traffic}, {complexity}, {ownership}")
-}
-
-pub(super) fn blast_radius_risk_band(caller_count: u32, weighted: u64) -> RuntimeCoverageRiskBand {
-    if caller_count >= 20 || weighted >= 1_000_000 {
-        RuntimeCoverageRiskBand::High
-    } else if caller_count >= 5 || weighted >= 50_000 {
-        RuntimeCoverageRiskBand::Medium
-    } else {
-        RuntimeCoverageRiskBand::Low
-    }
 }
 
 pub(super) fn cloud_finding_decision(
@@ -1750,12 +1746,14 @@ fn print_runtime_blast_radius(report: &RuntimeCoverageReport, display_limit: usi
     println!("  blast radius:");
     for entry in report.blast_radius.iter().take(display_limit) {
         println!(
-            "  {}:{} {} ({} callers, weighted {}, {})",
+            "  {}:{} {} ({} callers, importer traffic {}, {})",
             entry.file.display(),
             entry.line,
             entry.function,
             entry.caller_count,
-            entry.caller_count_weighted_by_traffic,
+            entry
+                .caller_count_weighted_by_traffic
+                .map_or_else(|| "not measured".to_owned(), |hits| hits.to_string()),
             entry.risk_band,
         );
     }
@@ -1785,10 +1783,10 @@ fn print_runtime_importance(report: &RuntimeCoverageReport, display_limit: usize
 #[cfg(test)]
 pub(super) mod tests {
     use super::*;
-    use fallow_output::RuntimeCoverageReportVerdict;
     use fallow_output::{
         RuntimeCoverageBlastRadiusEntry, RuntimeCoverageCostBasis, RuntimeCoverageImportanceEntry,
     };
+    use fallow_output::{RuntimeCoverageReportVerdict, RuntimeCoverageRiskBand};
 
     #[test]
     fn api_key_alone_does_not_enable_cloud_source() {
@@ -2980,16 +2978,6 @@ export const createStore = (rows: string[]) => {
                 < runtime_verdict_rank(RuntimeCoverageVerdict::Active)
         );
 
-        assert_eq!(
-            blast_radius_risk_band(25, 10),
-            RuntimeCoverageRiskBand::High
-        );
-        assert_eq!(
-            blast_radius_risk_band(5, 10),
-            RuntimeCoverageRiskBand::Medium
-        );
-        assert_eq!(blast_radius_risk_band(1, 10), RuntimeCoverageRiskBand::Low);
-
         assert_eq!(cloud_v8_tracking(CloudTrackingState::Called), "tracked");
         assert_eq!(
             cloud_v8_tracking(CloudTrackingState::Untracked),
@@ -3167,7 +3155,7 @@ export const createStore = (rows: string[]) => {
             function: "a".to_owned(),
             line: 1,
             caller_count: 1,
-            caller_count_weighted_by_traffic: 1,
+            caller_count_weighted_by_traffic: Some(1),
             deploys_touched: None,
             risk_band: RuntimeCoverageRiskBand::Low,
         }

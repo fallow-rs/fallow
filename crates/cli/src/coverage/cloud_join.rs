@@ -8,12 +8,13 @@ use fallow_output::{
 };
 
 use super::analyze::{
-    StaticFunctionInfo, StaticIndex, blast_radius_risk_band, cloud_finding, cloud_finding_decision,
-    cloud_observation_days, importance_reason, match_cloud_function, stable_runtime_id,
+    StaticFunctionInfo, StaticIndex, cloud_finding, cloud_finding_decision, cloud_observation_days,
+    importance_reason, match_cloud_function, stable_runtime_id,
 };
 use super::cloud_client::{CloudRuntimeContext, CloudRuntimeFunction, CloudTrackingState};
 use super::cloud_context_ids::ContextIdResolver;
 use super::cloud_rows;
+use super::risk_band::{FileTraffic, risk_band};
 use crate::health::optimization_target::optimization_target;
 
 /// Share of cloud runtime functions that must have a local AST counterpart
@@ -110,6 +111,16 @@ pub(super) fn collect_cloud_merge_entries(
         .map(|function| (function, match_cloud_function(function, static_index)))
         .collect();
     let ids = ContextIdResolver::from_index(static_index);
+    let mut traffic = FileTraffic::default();
+    for (function, local) in &matches {
+        if let Some(local) = local {
+            traffic.add(&local.path, function.hit_count.unwrap_or(0));
+        }
+    }
+    let weighted_of = |local: &StaticFunctionInfo| {
+        let importers = static_index.importers.get(&*local.path.to_string_lossy());
+        importers.and_then(|importers| traffic.through(importers))
+    };
     let join = CloudJoin {
         total: matches.len(),
         matched: matches.iter().filter(|(_, local)| local.is_some()).count(),
@@ -146,7 +157,8 @@ pub(super) fn collect_cloud_merge_entries(
         };
         // The cloud builds a blast-radius and importance row for each
         // function with hits, whatever its tracking state.
-        if let Some(invocations) = function.hit_count.filter(|hits| *hits > 0) {
+        let weighted = weighted_of(&local);
+        if function.hit_count.is_some_and(|hits| hits > 0) {
             entries.local_structure.insert(
                 function.stable_id.as_deref(),
                 &function.file_path,
@@ -156,12 +168,18 @@ pub(super) fn collect_cloud_merge_entries(
                     caller_count: local.caller_count,
                     cyclomatic: local.cyclomatic,
                     owner_count: local.owner_count,
-                    invocations,
+                    weighted,
                 },
             );
         }
         if matches!(function.tracking_state, CloudTrackingState::Called) {
-            collect_called_cloud_function(&mut entries, function, &local, min_invocations_hot);
+            collect_called_cloud_function(
+                &mut entries,
+                function,
+                &local,
+                weighted,
+                min_invocations_hot,
+            );
         } else {
             if join.incomplete()
                 && cloud_finding_decision(function, &local).0
@@ -185,6 +203,7 @@ fn collect_called_cloud_function(
     entries: &mut CloudMergeEntries,
     function: &CloudRuntimeFunction,
     local: &StaticFunctionInfo,
+    weighted: Option<u64>,
     min_invocations_hot: u64,
 ) {
     if let Some(invocations) = function.hit_count
@@ -197,7 +216,7 @@ fn collect_called_cloud_function(
     if let Some(invocations) = function.hit_count {
         entries
             .synthesized_blast_radius
-            .push(cloud_blast_radius(local, invocations, function));
+            .push(cloud_blast_radius(local, weighted, function));
         entries
             .synthesized_importance
             .push(cloud_importance(local, invocations));
@@ -229,10 +248,9 @@ fn cloud_hot_path(
 
 fn cloud_blast_radius(
     local: &StaticFunctionInfo,
-    invocations: u64,
+    weighted: Option<u64>,
     function: &CloudRuntimeFunction,
 ) -> fallow_output::RuntimeCoverageBlastRadiusEntry {
-    let weighted = invocations.saturating_mul(u64::from(local.caller_count));
     fallow_output::RuntimeCoverageBlastRadiusEntry {
         id: stable_runtime_id("blast", &local.path, &local.name, local.start_line),
         legacy_id: None,
@@ -243,7 +261,7 @@ fn cloud_blast_radius(
         caller_count: local.caller_count,
         caller_count_weighted_by_traffic: weighted,
         deploys_touched: Some(function.deployments_observed),
-        risk_band: blast_radius_risk_band(local.caller_count, weighted),
+        risk_band: risk_band(local.caller_count),
         cloud_context: None,
     }
 }

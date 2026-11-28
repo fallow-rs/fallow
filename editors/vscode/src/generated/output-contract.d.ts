@@ -1330,11 +1330,13 @@ export type RuntimeCoverageConfidence = ("very_high" | "high" | "medium" | "low"
  */
 export type RuntimeCoverageCostBasis = ("inner_iterations" | "cognitive")
 /**
- * Blast-radius risk band. The current thresholds are high at >=20 static
- * callers or >=1,000,000 traffic-weighted caller reach; medium at >=5 callers
- * or >=50,000 weighted reach; low otherwise.
+ * Blast-radius risk band from the count of importer files (`caller_count`)
+ * only: high at 20 or more, medium at 5 or more, low otherwise. Traffic does
+ * not move the band; read `caller_count_weighted_by_traffic` for traffic.
+ * `unknown` when the caller count is not known. Context only: the band never
+ * changes a verdict, a confidence or an action.
  */
-export type RuntimeCoverageRiskBand = ("low" | "medium" | "high")
+export type RuntimeCoverageRiskBand = ("low" | "medium" | "high" | "unknown")
 /**
  * License or trial watermark applied to runtime coverage output.
  */
@@ -11644,9 +11646,12 @@ line: number
  */
 caller_count: number
 /**
- * Caller reach weighted by observed runtime traffic.
+ * Production runtime hits in the importer files of the function: the sum
+ * of the hits of the functions in the files that import it. `null` when
+ * it is not measured: no importer file has runtime data, or a local run
+ * (`health --runtime-coverage`), which has no measure for it.
  */
-caller_count_weighted_by_traffic: number
+caller_count_weighted_by_traffic: (number | null)
 /**
  * Distinct deploy SHAs that touched the function in the observation
  * window. Cloud mode only; omitted in local mode.

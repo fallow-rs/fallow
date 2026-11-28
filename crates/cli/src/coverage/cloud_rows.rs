@@ -7,8 +7,8 @@ use std::path::PathBuf;
 use fallow_output::{RuntimeCoverageCloudContext, RuntimeCoverageRiskBand};
 use rustc_hash::FxHashMap;
 
-use super::analyze::blast_radius_risk_band;
 use super::cloud_client::{CloudRuntimeContext, CloudRuntimeRiskBand};
+use super::risk_band::risk_band;
 
 /// The local AST structure of one called cloud function. It fills the
 /// structure fields that a cloud row leaves null, because the cloud has no
@@ -18,8 +18,9 @@ pub(super) struct LocalStructure {
     pub caller_count: u32,
     pub cyclomatic: u32,
     pub owner_count: Option<u32>,
-    /// Production invocations of the function in the cloud window.
-    pub invocations: u64,
+    /// Production hits in the importer files, `None` when no importer file
+    /// has runtime data. The cloud definition of the weighted value.
+    pub weighted: Option<u64>,
 }
 
 /// The local structure of each cloud function, under its `stable_id` and
@@ -85,24 +86,19 @@ pub(super) fn cloud_blast_radius_entries(
             );
             // A cloud caller count means the cloud has a caller graph: keep
             // its counts, also a null weighted value (no importer file ran).
-            // Without one, the local AST gives the importers and the weighted
-            // traffic, and the band follows from them as in a local run.
-            let (caller_count, weighted) = match (entry.caller_count, structure) {
+            // Without one, the local AST gives the importers and the traffic
+            // in them, and the band follows from the importer count.
+            let (caller_count, weighted, risk_band) = match (entry.caller_count, structure) {
                 (None, Some(local)) => (
                     Some(local.caller_count),
-                    Some(
-                        local
-                            .invocations
-                            .saturating_mul(u64::from(local.caller_count)),
-                    ),
+                    local.weighted,
+                    risk_band(local.caller_count),
                 ),
-                _ => (entry.caller_count, entry.caller_count_weighted_by_traffic),
-            };
-            let risk_band = match (entry.risk_band, caller_count, weighted) {
-                (CloudRuntimeRiskBand::Unknown, Some(callers), Some(weighted)) => {
-                    blast_radius_risk_band(callers, weighted)
-                }
-                (band, _, _) => map_cloud_risk_band(band),
+                _ => (
+                    entry.caller_count,
+                    entry.caller_count_weighted_by_traffic,
+                    map_cloud_risk_band(entry.risk_band),
+                ),
             };
             fallow_output::RuntimeCoverageBlastRadiusEntry {
                 id: entry.id.clone(),
@@ -112,7 +108,7 @@ pub(super) fn cloud_blast_radius_entries(
                 function: entry.function.clone(),
                 line: entry.line,
                 caller_count: caller_count.unwrap_or(0),
-                caller_count_weighted_by_traffic: weighted.unwrap_or(0),
+                caller_count_weighted_by_traffic: weighted,
                 deploys_touched: entry.deploys_touched,
                 risk_band,
                 cloud_context: cloud_context(&entry.extra),
@@ -175,7 +171,8 @@ pub(super) fn cloud_context(
 
 const fn map_cloud_risk_band(risk_band: CloudRuntimeRiskBand) -> RuntimeCoverageRiskBand {
     match risk_band {
-        CloudRuntimeRiskBand::Low | CloudRuntimeRiskBand::Unknown => RuntimeCoverageRiskBand::Low,
+        CloudRuntimeRiskBand::Low => RuntimeCoverageRiskBand::Low,
+        CloudRuntimeRiskBand::Unknown => RuntimeCoverageRiskBand::Unknown,
         CloudRuntimeRiskBand::Medium => RuntimeCoverageRiskBand::Medium,
         CloudRuntimeRiskBand::High => RuntimeCoverageRiskBand::High,
     }
