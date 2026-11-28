@@ -166,3 +166,22 @@ fn complexity_context_name_of_a_long_callee_stays_bounded() {
         16 * MIB,
     );
 }
+
+/// Each fixture type alias names the previous alias twice, so the fixture
+/// bindings double at each declaration.
+#[test]
+fn fixture_type_alias_bindings_stay_bounded() {
+    let mut source = String::from("type F0 = { a: Page; b: Page };\n");
+    for index in 1..=16 {
+        let previous = index - 1;
+        let _ = writeln!(
+            source,
+            "type F{index} = {{ a: F{previous}; b: F{previous} }};"
+        );
+    }
+    assert_bytes_below(
+        "fixture type aliases",
+        extraction_work("a.ts", source),
+        16 * MIB,
+    );
+}
