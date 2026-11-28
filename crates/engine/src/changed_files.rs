@@ -153,6 +153,12 @@ pub(crate) fn validate_git_ref(s: &str) -> Result<&str, String> {
     if s.starts_with('-') {
         return Err("git ref cannot start with '-'".to_string());
     }
+    if s.contains("..") {
+        return Err(
+            "git ref cannot be a range: pass the base ref only, fallow compares it with HEAD"
+                .to_string(),
+        );
+    }
     if s.contains("^{/") || s.contains(":/") {
         return Err("git ref cannot search commit messages".to_string());
     }
