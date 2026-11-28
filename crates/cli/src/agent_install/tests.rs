@@ -619,6 +619,29 @@ fn mcp_json_edit_keeps_the_existing_indent() {
 }
 
 #[test]
+fn mcp_json_edit_does_not_copy_a_very_wide_indent() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join(".mcp.json");
+    let wide = " ".repeat(100_000);
+    let existing = format!("{{\n{wide}\"mcpServers\": {{}}\n}}\n");
+    std::fs::write(&path, &existing).unwrap();
+    let entry = serde_json::json!({"command": "fallow-mcp", "args": ["a", "b"]});
+    mcp::merge_json_server(&path, "mcpServers", Some(&entry), false, false).unwrap();
+    let text = std::fs::read_to_string(&path).unwrap();
+    // The new document has four nesting levels. A copied indent would repeat
+    // the 100,000 spaces at each level of each line.
+    assert!(
+        text.len() < 1_000,
+        "the edit wrote {} bytes for a small document",
+        text.len()
+    );
+    assert!(
+        text.contains("\n  \"mcpServers\": {\n    \"fallow\""),
+        "{text}"
+    );
+}
+
+#[test]
 fn mcp_command_shapes_are_recognized_as_fallow_owned() {
     let owned = [
         ("npx", vec!["--no", "fallow-mcp"]),

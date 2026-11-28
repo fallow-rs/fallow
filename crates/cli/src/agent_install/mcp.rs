@@ -665,6 +665,11 @@ enum ApprovalOutcome {
     ClearedRejection,
 }
 
+/// The widest indent unit that an edit copies from an existing JSON file.
+/// The serializer repeats the unit once per nesting level on each line, so
+/// a wider first indent falls back to two spaces.
+const MAX_KEPT_INDENT: usize = 8;
+
 /// Formatting of an existing JSON file, so an edit does not reflow the
 /// whole document: indentation of the first indented line and whether the
 /// file ended with a newline.
@@ -678,13 +683,12 @@ impl JsonStyle {
         let indent = text
             .lines()
             .find_map(|line| {
-                let ws: String = line
-                    .chars()
-                    .take_while(|c| *c == ' ' || *c == '\t')
-                    .collect();
-                (!ws.is_empty() && ws.len() < line.len()).then_some(ws)
+                let width = line.len() - line.trim_start_matches([' ', '\t']).len();
+                (width > 0 && width < line.len()).then_some(&line[..width])
             })
-            .unwrap_or_else(|| "  ".to_string());
+            .filter(|ws| ws.len() <= MAX_KEPT_INDENT)
+            .unwrap_or("  ")
+            .to_string();
         Self {
             indent: indent.into_bytes(),
             trailing_newline: text.is_empty() || text.ends_with('\n'),

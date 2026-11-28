@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use fallow_types::path_util::{is_absolute_path_any_platform, looks_like_windows_absolute_path};
 use rustc_hash::FxHashMap;
 use serde::Deserialize;
+use srcmap_sourcemap::SourceMap;
 use url::Url;
 
 /// One `source-map-cache` entry of a V8 dump.
@@ -20,6 +21,47 @@ pub struct SourceMapCacheEntry {
     /// UTF-16 length of each line of the generated code.
     #[serde(default, rename = "lineLengths")]
     pub line_lengths: Vec<u32>,
+}
+
+impl SourceMapCacheEntry {
+    /// Parse the source map of the entry. The generated script has the lines
+    /// of `lineLengths`, or of `generated_source` when that text is known and
+    /// has more lines. The map parser sizes its line table from the largest
+    /// generated line, and a section of an indexed map can start at any line.
+    /// So a map with a section that starts past the last generated line gives
+    /// `None`: it does not describe the script, and its table could be far
+    /// larger than the script.
+    #[must_use]
+    pub fn parse_map(&self, generated_source: Option<&str>) -> Option<SourceMap> {
+        let generated_lines = generated_source
+            .map_or(0, generated_line_bound)
+            .max(self.line_lengths.len());
+        let sections = self
+            .data
+            .get("sections")
+            .and_then(serde_json::Value::as_array)
+            .map_or(&[][..], Vec::as_slice);
+        let past_the_end = sections.iter().any(|section| {
+            section
+                .pointer("/offset/line")
+                .and_then(serde_json::Value::as_u64)
+                .is_some_and(|line| line >= generated_lines as u64)
+        });
+        if past_the_end {
+            return None;
+        }
+        SourceMap::from_json(&self.data.to_string()).ok()
+    }
+}
+
+/// An upper bound on the lines of a generated script. JavaScript ends a line
+/// at `\n`, `\r`, U+2028 and U+2029, and `\r\n` counts twice here.
+fn generated_line_bound(source: &str) -> usize {
+    source
+        .chars()
+        .filter(|c| matches!(c, '\n' | '\r' | '\u{2028}' | '\u{2029}'))
+        .count()
+        + 1
 }
 
 /// Decodes each entry of a `source-map-cache` object on its own, keyed by
