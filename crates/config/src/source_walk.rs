@@ -595,25 +595,51 @@ mod tests {
         }
     }
 
-    /// A private base directory and one that all users can write. Above the
-    /// top level of a repository, the second makes the walk apply the parent
-    /// rules itself instead of the crate.
+    /// A private base directory, when the test host gives one, and one that
+    /// all users can write. Above the top level of a repository, the second
+    /// makes the walk apply the parent rules itself instead of the crate.
     #[cfg(unix)]
-    fn base_directories() -> [tempfile::TempDir; 2] {
-        [
-            tempfile::tempdir().expect("temporary directory"),
-            shared_base_directory(),
-        ]
+    fn base_directories() -> Vec<tempfile::TempDir> {
+        crate::ignore_files::test_bases::private_base_directory()
+            .into_iter()
+            .chain([shared_base_directory()])
+            .collect()
     }
 
     #[cfg(unix)]
     fn shared_base_directory() -> tempfile::TempDir {
-        use std::os::unix::fs::PermissionsExt as _;
+        crate::ignore_files::test_bases::shared_base_directory()
+    }
 
-        let directory = tempfile::tempdir().expect("temporary directory");
-        std::fs::set_permissions(directory.path(), std::fs::Permissions::from_mode(0o777))
-            .expect("make the base directory writable by all");
-        directory
+    /// An entry of the access list of a directory that lets all users add
+    /// files makes the walk apply the parent rules itself, as a mode that
+    /// lets them write does. A `.ignore` file that appears above the top
+    /// level after the builder is made then does not apply.
+    #[cfg(target_os = "macos")]
+    #[test]
+    #[expect(clippy::print_stderr, reason = "a skipped test names the reason")]
+    fn source_walk_ignores_a_late_file_below_an_access_list_that_lets_all_users_add_files() {
+        let Some(directory) = crate::ignore_files::test_bases::private_base_directory() else {
+            return;
+        };
+        let base = directory.path();
+        let granted = std::process::Command::new("chmod")
+            .args(["+a", "everyone allow add_file,add_subdirectory"])
+            .arg(base)
+            .status()
+            .is_ok_and(|status| status.success());
+        if !granted {
+            eprintln!("skipped: chmod +a is not available");
+            return;
+        }
+        let root = base.join("repo");
+        std::fs::create_dir_all(root.join(".git")).expect("git directory");
+        write_file(&root.join("src/consumer.ts"), "");
+
+        let builder = source_walk_builder(&root, |_| true);
+        write_file(&base.join(".ignore"), "consumer.ts\n");
+        let walked = walked_files_within(builder, &root).expect("walk ends");
+        assert_eq!(walked, vec!["src/consumer.ts".to_string()]);
     }
 
     /// The root-relative paths of the files that a parallel walk yields.

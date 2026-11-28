@@ -21,8 +21,8 @@
 //! the names from the directory listing, so a name must match exactly. A
 //! parent directory is read by path, as both walkers read it.
 //!
-//! The crate reads the ignore files of the walk from the listing that it
-//! already has, so it keeps that work when it can:
+//! The crate reads the ignore files of the walk itself, so it keeps that
+//! work when it can:
 //!
 //! - Without a rule in a parent directory, the crate applies every rule and
 //!   [`ParentRules::load`] gives `None`.

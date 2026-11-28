@@ -392,6 +392,59 @@ where
     builder
 }
 
+/// Base directories for the tests of the parent rules of a walk.
+#[cfg(all(test, unix))]
+pub mod test_bases {
+    use std::path::Path;
+
+    /// A base directory under the home directory, above which only the user
+    /// or root can create a file and no `.ignore` file is present. A test
+    /// temp dir can be below a directory that all users can write, such as
+    /// `/tmp`. `None`, with a message, when the home directory gives no such
+    /// base.
+    #[must_use]
+    #[expect(
+        clippy::print_stderr,
+        reason = "a test that skips its private base case names the reason"
+    )]
+    pub fn private_base_directory() -> Option<tempfile::TempDir> {
+        let home = std::env::var_os("HOME")?;
+        let directory = tempfile::Builder::new()
+            .prefix("fallow-walk-test-")
+            .tempdir_in(home)
+            .ok()?;
+        let base = dunce::canonicalize(directory.path()).ok()?;
+        let private = base.ancestors().all(|dir| {
+            fallow_types::read_scope::only_owner_writes(dir)
+                && std::fs::symlink_metadata(dir.join(".ignore")).is_err()
+        });
+        if !private {
+            eprintln!(
+                "skipped the private base case: a directory above {} can get a file \
+                 from another user, or holds a .ignore file",
+                base.display()
+            );
+            return None;
+        }
+        Some(directory)
+    }
+
+    /// A base directory that all users can write.
+    #[must_use]
+    pub fn shared_base_directory() -> tempfile::TempDir {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        set_mode(directory.path(), 0o777);
+        directory
+    }
+
+    fn set_mode(path: &Path, mode: u32) {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode))
+            .expect("set the mode of the base directory");
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -411,14 +464,13 @@ mod tests {
                 git_global: true,
             },
         };
-        let directory = tempfile::tempdir().expect("temporary directory");
+        let Some(directory) = test_bases::private_base_directory() else {
+            return;
+        };
         let base = dunce::canonicalize(directory.path()).expect("canonical base");
         let top = base.join("repo");
         std::fs::create_dir_all(top.join(".git")).expect("git directory");
-        let private = base
-            .ancestors()
-            .all(fallow_types::read_scope::only_owner_writes);
-        assert_eq!(crate_may_read_parents(&top, reads), private);
+        assert!(crate_may_read_parents(&top, reads));
 
         std::fs::write(base.join(".ignore"), "x\n").expect("ignore file");
         assert!(!crate_may_read_parents(&top, reads));
