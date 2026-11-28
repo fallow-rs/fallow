@@ -1,11 +1,11 @@
 //! The `.sha` sidecar of a reusable audit snapshot: the identity of the
 //! snapshot that readiness compares before a reuse.
 
-use std::io::{Read, Write};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use super::{REUSABLE_SHA_SUFFIX, metadata_is_regular_file, sidecar_path};
+use super::{REUSABLE_SHA_SUFFIX, read_trusted_sidecar, sidecar_path};
 
 /// Sidecar path recording the base SHA a reusable cache entry was
 /// materialized at. Lives next to the cache directory like the `.last-used` /
@@ -76,16 +76,6 @@ pub(super) fn read_reusable_sha(path: &Path) -> Option<String> {
     // newlines take 88 bytes.
     const MAX_SHA_SIDECAR_BYTES: u64 = 129;
 
-    let sidecar = reusable_worktree_sha_path(path);
-    let metadata = std::fs::symlink_metadata(&sidecar).ok()?;
-    if !metadata_is_regular_file(&metadata) || metadata.len() > MAX_SHA_SIDECAR_BYTES {
-        return None;
-    }
-    let mut contents = String::new();
-    std::fs::File::open(sidecar)
-        .ok()?
-        .take(MAX_SHA_SIDECAR_BYTES)
-        .read_to_string(&mut contents)
-        .ok()?;
-    Some(contents.trim().to_owned())
+    read_trusted_sidecar(&reusable_worktree_sha_path(path), MAX_SHA_SIDECAR_BYTES)
+        .map(|contents| contents.trim().to_owned())
 }
