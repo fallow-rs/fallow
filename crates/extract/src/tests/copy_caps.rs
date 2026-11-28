@@ -78,3 +78,20 @@ fn folded_template_literals_stay_bounded() {
         8 * MIB,
     );
 }
+
+/// A call with a long static callee and many arguments records the callee
+/// path once for each argument.
+#[test]
+fn long_callee_path_is_not_copied_per_argument() {
+    let callee = format!("a{}", ".bbbbbbbbbb".repeat(900));
+    let arguments = (0..2_000)
+        .map(|index| format!("x{index}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let source = format!("{callee}({arguments});\n");
+    assert_bytes_below(
+        "long callee path",
+        extraction_work("a.ts", source),
+        16 * MIB,
+    );
+}
