@@ -734,11 +734,37 @@ mod tests {
             "HEAD@{2025-01-01}",
             "HEAD@{1 week ago}",
             "HEAD@{3 days ago}",
+            "HEAD@{2025-01-01 10:30:00}",
+            "main@{upstream}",
+            "origin/main",
+            "main...HEAD",
+            "HEAD^{commit}",
+            "v1.2.3^{}",
+            "0123456789abcdef0123456789abcdef01234567",
         ] {
             assert_eq!(
                 validate_git_ref(input),
                 Ok(input),
                 "{input:?} must be accepted"
+            );
+        }
+    }
+
+    /// A commit message search makes git walk the whole history, so a ref
+    /// that names a commit by a message pattern is refused.
+    #[test]
+    fn git_ref_refuses_message_search_and_nested_braces() {
+        for input in [
+            "HEAD^{/fix}",
+            "main^{/}",
+            ":/fix",
+            "HEAD@{:/fix}",
+            "HEAD@{{0}}",
+            "HEAD@{1{2}}",
+        ] {
+            assert!(
+                validate_git_ref(input).is_err(),
+                "{input:?} must be refused"
             );
         }
     }

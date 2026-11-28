@@ -142,6 +142,9 @@ pub fn set_spawn_hook(hook: ChangedFilesSpawnHook) {
 }
 
 /// Validate a user-supplied git ref before passing it to git.
+///
+/// A commit message search (`^{/text}` or `:/text`) is refused: git walks
+/// the whole history for it, and the ref then names no fixed commit.
 pub(crate) fn validate_git_ref(s: &str) -> Result<&str, String> {
     if s.is_empty() {
         return Err("git ref cannot be empty".to_string());
@@ -149,9 +152,13 @@ pub(crate) fn validate_git_ref(s: &str) -> Result<&str, String> {
     if s.starts_with('-') {
         return Err("git ref cannot start with '-'".to_string());
     }
+    if s.contains("^{/") || s.contains(":/") {
+        return Err("git ref cannot search commit messages".to_string());
+    }
     let mut in_braces = false;
     for c in s.chars() {
         match c {
+            '{' if in_braces => return Err("git ref has nested '{'".to_string()),
             '{' => in_braces = true,
             '}' => in_braces = false,
             ':' | ' ' if in_braces => {}
