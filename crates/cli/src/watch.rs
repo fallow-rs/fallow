@@ -843,13 +843,23 @@ struct ProjectWatcher {
     config_dirs: FxHashSet<PathBuf>,
 }
 
+/// Settings of the project watcher.
+///
+/// The recursive watch does not follow directory links, the same as source
+/// discovery. A followed link can put a tree outside the project under watch,
+/// give the project files a second path, or make the setup walk loop. The
+/// target of a link inside the project is still watched under its real path.
+fn watcher_config() -> notify::Config {
+    notify::Config::default().with_follow_symlinks(false)
+}
+
 fn create_watcher(
     root: &Path,
     filter: Arc<Mutex<WatchFilter>>,
     tx: std::sync::mpsc::Sender<WatchEvent>,
     config_dirs: FxHashSet<PathBuf>,
 ) -> notify::Result<ProjectWatcher> {
-    let mut watcher = notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
+    let handler = move |event: notify::Result<notify::Event>| {
         let event = match event {
             Ok(event) => event,
             Err(err) => {
@@ -864,7 +874,8 @@ fn create_watcher(
         if !paths.is_empty() {
             let _ = tx.send(Ok(paths));
         }
-    })?;
+    };
+    let mut watcher = RecommendedWatcher::new(handler, watcher_config())?;
     watcher.watch(root, notify::RecursiveMode::Recursive)?;
     for parent in &config_dirs {
         watcher.watch(parent, notify::RecursiveMode::NonRecursive)?;
@@ -1863,3 +1874,7 @@ mod tests {
         assert!(watch.config.production);
     }
 }
+
+#[cfg(all(test, unix))]
+#[path = "watch_link_tests.rs"]
+mod link_tests;
