@@ -252,8 +252,10 @@ pub fn resolve_git_common_dir(cwd: &Path) -> Result<PathBuf, ChangedFilesError> 
 /// Returns the reason when git is missing, `cwd` is not in a repository, or
 /// git prints anything other than one path.
 pub fn resolve_git_hooks_dir(cwd: &Path) -> Result<PathBuf, ChangedFilesError> {
-    let output = spawn_output(&mut git_command(cwd, &["rev-parse", "--git-path", "hooks"]))
-        .map_err(|e| ChangedFilesError::GitMissing(e.to_string()))?;
+    let mut command = crate::git_env::git_command_with_repository_hooks(cwd);
+    command.args(["rev-parse", "--git-path", "hooks"]);
+    let output =
+        spawn_output(&mut command).map_err(|e| ChangedFilesError::GitMissing(e.to_string()))?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         return Err(if stderr.contains("not a git repository") {
