@@ -2056,14 +2056,17 @@ and the instrumented files that loaded. A stored file keeps the part of
 these facts that belongs to the source files that it reaches.
 
 The test files of one dry run that reach the same source file are a group.
-When the facts of one file of a group are not valid, each file of the group
-dry-runs again. Another file of the group can be the file that gave the
-fact, for example when a test file imports only types from the module. So
-this rule keeps the result of a warm run equal to the result of a
-`--no-cache` run.
+Another file of the group can be the file that gave the fact, for example
+when a test file imports only types from the module. So a stored file keeps
+the keys of the other files of its group. When the key of one of them
+changes, the file dry-runs again. This rule keeps the result of a warm run
+equal to the result of a `--no-cache` run.
 
 - The store keeps only a file with no failed test and no error. A file with a
-  baseline failure dry-runs again in each run.
+  baseline failure dry-runs again in each run, so a fixed or flaky test shows
+  in the next run. The other files of its group keep their stored facts while
+  its key stays the same: its dry run gives the same facts from the same
+  inputs.
 - Facts that name a mutant id outside the plan are not used.
 - A stored test keeps its test index entry. A runner with the `adopt`
   capability then gives a new companion the stored entries, so a warm run
@@ -2078,6 +2081,11 @@ this rule keeps the result of a warm run equal to the result of a
 - `cache.dry_run_hits` counts the test files with stored facts,
   `cache.dry_run_misses` the files that the first dry run ran, and
   `cache.dry_run_stored` the files that the run stored.
+  `cache.dry_run_miss_reasons` gives the misses for each reason: `no-entry`
+  (a new or changed file, or a file whose last dry run failed),
+  `unknown-mutant` (the facts name a mutant outside the plan) and
+  `bound-file-changed` (a file of the group changed its key, or is not in
+  the dry run).
   `timings.dry_run_ms` is the time of that first dry run, so it is near zero
   when each file had stored facts.
 - The human `Cache:` line gives the count, for example `the dry run of 3 of

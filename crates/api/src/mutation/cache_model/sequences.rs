@@ -4,8 +4,8 @@
 //! The model of a warm run is the `--no-cache` run on the same tree. After
 //! each step, the mutant statuses of the warm run must equal those of the
 //! cache-free run. After the last step, a warm run with no edit must take
-//! the dry run of each test file and each result from the cache, so a cache
-//! that never hits cannot pass.
+//! the dry run of each test file with no failed test and each result from
+//! the cache, so a cache that never hits cannot pass.
 //!
 //! Each step runs the real runner twice, so PR CI runs the regression
 //! sequences and [`PR_SEEDS`] only. Set
@@ -17,7 +17,7 @@
 //! fix the cause.
 
 use super::project::{Project, available_runners, vitest_package};
-use super::template::{Runner, Step, apply};
+use super::template::{Runner, Step, apply, failing_test_files};
 use crate::mutation::ReachSelectionMode;
 
 /// The seeds of the generated sequences in PR CI. One starts on Vitest and
@@ -71,6 +71,35 @@ const REACH_REGRESSIONS: &[Regression] = &[
             Step::ToggleSetupListed,
             Step::ToggleSourceForm,
         ],
+    },
+];
+
+/// A sequence with a failed test, and the count of test files that each warm
+/// run dry-runs: the first run, one run after each step, and the repeat run.
+/// A file with a failed test gets no stored facts, so it dry-runs in each
+/// run. The facts of another file stay valid while the key of the failed
+/// file stays the same.
+struct FailureRegression {
+    name: &'static str,
+    steps: &'static [Step],
+    dry_runs: &'static [usize],
+}
+
+const FAILURE_REGRESSIONS: &[FailureRegression] = &[
+    FailureRegression {
+        name: "dry run: a test file with a failed test",
+        steps: &[Step::ToggleOtherFails],
+        dry_runs: &[2, 2, 1],
+    },
+    FailureRegression {
+        name: "dry run: a test that fails in one run and passes in the next",
+        steps: &[Step::ToggleOtherFlaky, Step::ToggleOtherFlaky],
+        dry_runs: &[2, 2, 1, 0],
+    },
+    FailureRegression {
+        name: "dry run: a failed test file, then a change of the other file",
+        steps: &[Step::ToggleOtherFails, Step::ToggleHelperExact],
+        dry_runs: &[2, 2, 2, 1],
     },
 ];
 
@@ -139,25 +168,28 @@ fn run_sequence(
     label: &str,
     runner: Runner,
     steps: &[Step],
-) -> Result<(), String> {
+) -> Result<Vec<usize>, String> {
     run_sequence_with(vitest, label, (runner, ReachSelectionMode::Off), steps)
 }
 
-/// [`run_sequence`] with the reach selection `reach` in each warm run.
+/// [`run_sequence`] with the reach selection `reach` in each warm run. Gives
+/// the count of test files that each warm run dry-ran.
 fn run_sequence_with(
     vitest: &std::path::Path,
     label: &str,
     (runner, reach): (Runner, ReachSelectionMode),
     steps: &[Step],
-) -> Result<(), String> {
+) -> Result<Vec<usize>, String> {
     let project = Project::new(runner, vitest).with_reach(reach);
     let mut done: Vec<Step> = Vec::new();
+    let mut dry_runs = Vec::new();
     for step in std::iter::once(None).chain(steps.iter().copied().map(Some)) {
         if let Some(step) = step {
             apply(&project.root, step);
             done.push(step);
         }
         let warm = project.run(true);
+        dry_runs.push(warm.dry_run_misses);
         let cold = project.run(false);
         if warm.observation != cold.observation {
             return Err(format!(
@@ -167,17 +199,20 @@ fn run_sequence_with(
         }
     }
     let repeat = project.run(true);
+    dry_runs.push(repeat.dry_run_misses);
     let cold = project.run(false);
     // A file that the reach record leaves out needs no dry run, so it counts
-    // with the stored dry runs.
+    // with the stored dry runs. A file with a failed test has no stored dry
+    // run.
     let reused = repeat.dry_run_hits + repeat.reach_dropped;
-    if reused != TEST_FILES || repeat.observation != cold.observation {
+    let expected = TEST_FILES - failing_test_files(&project.root);
+    if reused != expected || repeat.observation != cold.observation {
         return Err(format!(
-            "{label}: a warm run with no edit does not reuse the dry run of each test file, or differs from the cache-free run\n  runner: {runner:?}\n  steps: {done:?}\n  stored or dropped dry runs: {} of {TEST_FILES}\n  warm: {:?}\n  cold: {:?}",
-            reused, repeat.observation, cold.observation
+            "{label}: a warm run with no edit does not reuse the dry run of each test file with no failed test, or differs from the cache-free run\n  runner: {runner:?}\n  steps: {done:?}\n  stored or dropped dry runs: {reused} of {expected}\n  warm: {:?}\n  cold: {:?}",
+            repeat.observation, cold.observation
         ));
     }
-    Ok(())
+    Ok(dry_runs)
 }
 
 /// A xorshift generator, so a seed gives the same sequence on every platform.
@@ -268,6 +303,27 @@ fn regression_sequences_match_cache_free_runs() {
                 regression.steps,
             )
             .err()
+        })
+        .collect();
+    assert!(failures.is_empty(), "{}", failures.join("\n\n"));
+}
+
+#[test]
+fn failed_test_sequences_match_cache_free_runs_and_bound_the_dry_run() {
+    let Some(vitest) = vitest_package() else {
+        return;
+    };
+    let failures: Vec<String> = FAILURE_REGRESSIONS
+        .iter()
+        .filter_map(|regression| {
+            match run_sequence(&vitest, regression.name, Runner::Vitest, regression.steps) {
+                Err(failure) => Some(failure),
+                Ok(dry_runs) if dry_runs != regression.dry_runs => Some(format!(
+                    "{}: the warm runs dry-run {dry_runs:?} test files, expected {:?}",
+                    regression.name, regression.dry_runs
+                )),
+                Ok(_) => None,
+            }
         })
         .collect();
     assert!(failures.is_empty(), "{}", failures.join("\n\n"));

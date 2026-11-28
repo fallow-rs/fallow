@@ -3,7 +3,9 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use fallow_output::{MutantStatus, MutationCompletionStatus, MutationReport};
+use fallow_output::{
+    MutantStatus, MutationCompletionStatus, MutationIncompleteReason, MutationReport,
+};
 
 use super::template::{self, Runner};
 use crate::mutation::{MutationRunOptions, MutationRunScope, Operator, ReachSelectionMode};
@@ -87,6 +89,8 @@ pub struct Run {
     pub stored: usize,
     /// The test files whose dry-run facts came from the cache.
     pub dry_run_hits: usize,
+    /// The test files that the first dry run ran.
+    pub dry_run_misses: usize,
     /// The test files that the reach record left out of the dry run.
     pub reach_dropped: usize,
 }
@@ -138,9 +142,15 @@ impl Project {
         };
         let report = run_mutation(&options).expect("the mutation run completes");
         check_complete(&report);
-        let (hits, stored, dry_run_hits) = report.cache.as_ref().map_or((0, 0, 0), |cache| {
-            (cache.hits, cache.stored, cache.dry_run_hits)
-        });
+        let (hits, stored, dry_run_hits, dry_run_misses) =
+            report.cache.as_ref().map_or((0, 0, 0, 0), |cache| {
+                (
+                    cache.hits,
+                    cache.stored,
+                    cache.dry_run_hits,
+                    cache.dry_run_misses,
+                )
+            });
         let reach_dropped = report
             .cache
             .as_ref()
@@ -168,18 +178,22 @@ impl Project {
             hits,
             stored,
             dry_run_hits,
+            dry_run_misses,
             reach_dropped,
         }
     }
 }
 
+/// Checks that each mutant ran. A failed baseline test makes the run
+/// partial, which the steps with a failed test expect.
 fn check_complete(report: &MutationReport) {
     assert!(report.errors.is_empty(), "{:#?}", report.errors);
-    assert_eq!(
-        report.completion.status,
-        MutationCompletionStatus::Complete,
-        "{:#?}",
-        report.completion
-    );
+    let complete = report.completion.status == MutationCompletionStatus::Complete
+        || report
+            .completion
+            .reasons
+            .iter()
+            .all(|reason| *reason == MutationIncompleteReason::BaselineFailure);
+    assert!(complete, "{:#?}", report.completion);
     assert!(!report.mutants.is_empty(), "the run has no mutant");
 }

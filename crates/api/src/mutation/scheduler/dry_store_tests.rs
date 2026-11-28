@@ -90,7 +90,16 @@ fn stored_run(
     ids: &[&str],
     concurrency: usize,
 ) -> (ScheduleOutcome, FakeSpawner) {
-    let spawner = shard_spawner(None);
+    failing_run(store, ids, (concurrency, None))
+}
+
+/// [`stored_run`] in which the test of `failing` fails.
+fn failing_run(
+    store: &Arc<MemoryStore>,
+    ids: &[&str],
+    (concurrency, failing): (usize, Option<&'static str>),
+) -> (ScheduleOutcome, FakeSpawner) {
+    let spawner = shard_spawner(failing);
     let outcome = run_schedule(
         &spawner,
         &reach_plan(ids),
@@ -102,7 +111,22 @@ fn stored_run(
 }
 
 fn cold(ids: &[&str]) -> ScheduleOutcome {
-    run_schedule(&shard_spawner(None), &reach_plan(ids), &config(1)).expect("run")
+    cold_failing(ids, None)
+}
+
+fn cold_failing(ids: &[&str], failing: Option<&'static str>) -> ScheduleOutcome {
+    run_schedule(&shard_spawner(failing), &reach_plan(ids), &config(1)).expect("run")
+}
+
+/// The files of the first dry run of a run, which dry-runs each file with no
+/// valid stored facts. A companion of the mutant phase can dry-run more
+/// files for its jobs.
+fn first_dry_run(spawner: &FakeSpawner) -> Vec<String> {
+    dry_runs(spawner)
+        .into_iter()
+        .next()
+        .map(|(_, files)| files)
+        .unwrap_or_default()
 }
 
 fn dry_files(spawner: &FakeSpawner) -> Vec<String> {
@@ -246,6 +270,23 @@ fn stored_facts_with_a_mutant_id_outside_the_plan_dry_run_again() {
     let (warm, spawner) = stored_run(&store, &["m1"], 1);
     assert_eq!(dry_runs(&spawner)[0].1, vec!["test/c.test.ts".to_owned()]);
     assert_eq!(warm.dry_run_reused, 2);
+    assert_eq!(
+        warm.dry_run_miss_reasons,
+        BTreeMap::from([("unknown-mutant", 1)])
+    );
+}
+
+#[test]
+fn bound_facts_without_the_keys_of_their_bound_files_dry_run_again() {
+    let store = Arc::new(MemoryStore::default());
+    stored_run(&store, &["m1"], 1);
+    store.edit("test/a.test.ts", |facts| facts.bound_keys = None);
+    let (warm, spawner) = stored_run(&store, &["m1"], 1);
+    assert_eq!(dry_runs(&spawner)[0].1, vec!["test/a.test.ts".to_owned()]);
+    assert_eq!(
+        warm.dry_run_miss_reasons,
+        BTreeMap::from([("bound-file-changed", 1)])
+    );
 }
 
 #[test]
@@ -332,4 +373,78 @@ fn a_warm_run_gives_new_companions_the_stored_test_index() {
         "the companions take the stored index"
     );
     assert_eq!(verdicts(&second), verdicts(&first));
+}
+
+#[test]
+fn a_file_with_a_failed_test_dry_runs_again_alone() {
+    // `a` and `b` reach `src/a.ts`, so the facts of `a` are bound to `b`.
+    // The failed `b` gets no entry, but its key does not change, so the
+    // facts of `a` stay valid.
+    const IDS: [&str; 4] = ["m0", "m1", "m2", "m3"];
+    let b = Some("test/b.test.ts");
+    for concurrency in [1, 3] {
+        let store = Arc::new(MemoryStore::default());
+        let (first, _) = failing_run(&store, &IDS, (concurrency, b));
+        assert_eq!(first.dry_run_entries.len(), 2);
+
+        let (failed_again, spawner) = failing_run(&store, &IDS, (concurrency, b));
+        assert_eq!(first_dry_run(&spawner), vec!["test/b.test.ts".to_owned()]);
+        assert_eq!(
+            (failed_again.dry_run_reused, failed_again.dry_run_missed),
+            (2, 1)
+        );
+        assert_eq!(
+            failed_again.dry_run_miss_reasons,
+            BTreeMap::from([("no-entry", 1)])
+        );
+        let expected = cold_failing(&IDS, b);
+        assert_eq!(verdicts(&failed_again), verdicts(&expected));
+        assert_eq!(failed_again.baseline_failures, expected.baseline_failures);
+
+        // The test of `b` passes again. Only `b` dry-runs, and its test can
+        // kill a mutant again.
+        let (passed, spawner) = failing_run(&store, &IDS, (concurrency, None));
+        assert_eq!(first_dry_run(&spawner), vec!["test/b.test.ts".to_owned()]);
+        let expected = cold(&IDS);
+        assert_eq!(verdicts(&passed), verdicts(&expected));
+        assert!(passed.baseline_failures.is_empty());
+
+        let (repeat, _) = failing_run(&store, &IDS, (concurrency, None));
+        assert_eq!((repeat.dry_run_reused, repeat.dry_run_missed), (3, 0));
+        assert_eq!(verdicts(&repeat), verdicts(&expected));
+    }
+}
+
+#[test]
+fn a_passing_file_whose_stored_test_now_fails_dry_runs_again() {
+    // A stored pass must not hide a failure: the edit of `b` changes its key.
+    const IDS: [&str; 4] = ["m0", "m1", "m2", "m3"];
+    let store = Arc::new(MemoryStore::default());
+    stored_run(&store, &IDS, 1);
+    store.change("test/b.test.ts");
+    let (warm, spawner) = failing_run(&store, &IDS, (1, Some("test/b.test.ts")));
+    assert_eq!(
+        first_dry_run(&spawner),
+        vec!["test/a.test.ts".to_owned(), "test/b.test.ts".to_owned()]
+    );
+    let expected = cold_failing(&IDS, Some("test/b.test.ts"));
+    assert_eq!(verdicts(&warm), verdicts(&expected));
+    assert_eq!(warm.baseline_failures, expected.baseline_failures);
+}
+
+#[test]
+fn a_changed_failed_file_drops_the_facts_that_are_bound_to_it() {
+    let b = Some("test/b.test.ts");
+    let store = Arc::new(MemoryStore::default());
+    failing_run(&store, &["m1"], (1, b));
+    store.change("test/b.test.ts");
+    let (warm, spawner) = failing_run(&store, &["m1"], (1, b));
+    assert_eq!(
+        first_dry_run(&spawner),
+        vec!["test/a.test.ts".to_owned(), "test/b.test.ts".to_owned()]
+    );
+    assert_eq!(
+        warm.dry_run_miss_reasons,
+        BTreeMap::from([("bound-file-changed", 1), ("no-entry", 1)])
+    );
 }

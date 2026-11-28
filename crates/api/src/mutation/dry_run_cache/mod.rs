@@ -47,7 +47,7 @@ pub use reach::ReachFacts;
 pub const DRY_RUN_CACHE_FILE: &str = "dry-runs.json";
 /// The version of the key and of the file format. A change to the key parts
 /// or to the file shape needs a new version.
-const FORMAT_VERSION: u32 = 2;
+const FORMAT_VERSION: u32 = 3;
 /// The most entries that the file keeps.
 pub const MAX_ENTRIES: usize = 20_000;
 
