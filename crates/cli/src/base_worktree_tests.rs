@@ -154,3 +154,24 @@ fn cache_sidecar_open_does_not_follow_symlinks() {
         "unchanged\n",
     );
 }
+
+/// Audit snapshots live in a directory of this user inside the temp dir, not
+/// in the shared temp dir itself, where other users can create files.
+#[cfg(unix)]
+#[test]
+fn audit_snapshots_live_in_a_private_directory_of_this_user() {
+    use std::os::unix::fs::{MetadataExt as _, PermissionsExt as _};
+
+    let tmp = tempfile::tempdir().unwrap();
+    let non_reusable = non_reusable_worktree_path().expect("path should build");
+    let reusable = reusable_audit_worktree_path(tmp.path());
+    let dir = non_reusable.parent().expect("snapshot directory");
+    assert_eq!(reusable.parent(), Some(dir));
+    assert_ne!(dir, std::env::temp_dir());
+    assert!(dir.starts_with(std::env::temp_dir()), "{}", dir.display());
+
+    let metadata = std::fs::symlink_metadata(dir).expect("snapshot directory exists");
+    assert!(metadata.file_type().is_dir());
+    assert_eq!(metadata.uid(), rustix::process::geteuid().as_raw());
+    assert_eq!(metadata.permissions().mode() & 0o777, 0o700);
+}

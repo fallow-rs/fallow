@@ -27,6 +27,8 @@ use std::fmt;
 #[cfg(test)]
 use std::path::Path;
 
+/// The private directory of this user that holds the audit base snapshots.
+pub mod audit_snapshot_dir;
 /// Finding-count and finding-identity baselines for suppressing known issues
 /// across runs.
 pub mod baseline;

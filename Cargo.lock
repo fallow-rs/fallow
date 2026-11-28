@@ -1313,6 +1313,7 @@ dependencies = [
  "proptest",
  "rayon",
  "rustc-hash",
+ "rustix",
  "serde",
  "serde_json",
  "sha2",

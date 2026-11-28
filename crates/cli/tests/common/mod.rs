@@ -73,7 +73,9 @@ fn sweep_orphaned_audit_caches() {
             return;
         }
         let _ = std::fs::write(&marker, "");
-        remove_orphaned_audit_caches(&temp);
+        for dir in fallow_engine::audit_snapshot_dir::audit_snapshot_scan_dirs() {
+            remove_orphaned_audit_caches_in(&dir, &temp);
+        }
     });
 }
 
@@ -85,10 +87,16 @@ fn sweep_orphaned_audit_caches() {
 /// entry with an owner at another place stays, also when that owner is
 /// missing: it can be a repository on a volume that is not mounted now.
 pub fn remove_orphaned_audit_caches(temp: &Path) -> usize {
+    remove_orphaned_audit_caches_in(temp, temp)
+}
+
+/// [`remove_orphaned_audit_caches`] for the entries in `dir`, which can be
+/// the snapshot directory of the user inside `temp`.
+fn remove_orphaned_audit_caches_in(dir: &Path, temp: &Path) -> usize {
     const PREFIX: &str = "fallow-audit-base-cache-";
     const OWNER_SUFFIX: &str = ".last-used";
 
-    let Ok(entries) = std::fs::read_dir(temp) else {
+    let Ok(entries) = std::fs::read_dir(dir) else {
         return 0;
     };
     let canonical_temp = dunce::canonicalize(temp).unwrap_or_else(|_| temp.to_path_buf());
@@ -116,9 +124,9 @@ pub fn remove_orphaned_audit_caches(temp: &Path) -> usize {
         if !below_temp || !gone {
             continue;
         }
-        let _ = std::fs::remove_dir_all(temp.join(entry_name));
+        let _ = std::fs::remove_dir_all(dir.join(entry_name));
         for suffix in [OWNER_SUFFIX, ".sha", ".lock"] {
-            let _ = std::fs::remove_file(temp.join(format!("{entry_name}{suffix}")));
+            let _ = std::fs::remove_file(dir.join(format!("{entry_name}{suffix}")));
         }
         removed += 1;
     }

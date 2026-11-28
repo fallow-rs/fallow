@@ -1442,8 +1442,9 @@ directory has no parse cache yet.
 ## Audit cache maintenance
 
 `fallow audit-cache` maintains the reusable base-snapshot caches
-(`$TMPDIR/fallow-audit-base-cache-*`) that `fallow audit` builds and
-garbage-collects. Two subcommands with distinct semantics:
+(`$TMPDIR/fallow-audit-snapshots-<euid>/fallow-audit-base-cache-*` on Unix,
+`$TMPDIR/fallow-audit-base-cache-*` on Windows) that `fallow audit` builds
+and garbage-collects. Two subcommands with distinct semantics:
 
 - `audit-cache remove`: delete every cache owned by an explicit `--root`,
   warm or not. Requires `--root` and `--yes` (non-interactive), exits 2 on
@@ -1474,6 +1475,18 @@ garbage-collects. Two subcommands with distinct semantics:
   (`crates/cli/src/audit_cache.rs`).
 
 Shared invariants (`crates/cli/src/base_worktree.rs`):
+
+- The snapshots live in the snapshot directory of the user
+  (`crates/engine/src/audit_snapshot_dir.rs`). On Unix it is
+  `fallow-audit-snapshots-<euid>` in the temp dir, made with mode 0700. A link,
+  a non-directory, a directory of another user, or a directory with group or
+  other access at that path is refused, and the audit stops with exit 2.
+  Fallow never changes or removes such a path. The sweeps, `prune` and
+  `remove` scan that directory and the temp dir, where earlier versions kept
+  the snapshots. In the temp dir, an entry with the name of the requested
+  root's cache counts as that root's own entry.
+- The `.sha` and `.last-used` sidecars are read only when they are regular
+  files of the effective user (`sidecar_metadata_is_trusted`).
 
 - Both prune modes and the per-audit sweep share one decision code path
   (`sweep_reusable_caches_with_report`), so prune can never drift from what

@@ -108,6 +108,7 @@ impl BaseWorktree {
         base_sha: &str,
         workspace_patterns: &[String],
     ) -> Option<Self> {
+        ensure_snapshot_dir()?;
         let path = reusable_audit_worktree_path(repo_root);
         let reusable_lock =
             ReusableWorktreeLock::try_acquire(&path, "falling back to non-reusable worktree")?;
@@ -204,10 +205,19 @@ fn non_reusable_worktree_path() -> Option<PathBuf> {
         .duration_since(SystemTime::UNIX_EPOCH)
         .ok()?
         .as_nanos();
-    Some(std::env::temp_dir().join(format!(
+    Some(ensure_snapshot_dir()?.join(format!(
         "fallow-audit-base-{}-{nanos}-{seq}",
         std::process::id()
     )))
+}
+
+/// Create and check the snapshot directory of this user. A refusal gets a
+/// warning that names the directory, because the audit then cannot build its
+/// base snapshot.
+pub fn ensure_snapshot_dir() -> Option<PathBuf> {
+    fallow_engine::audit_snapshot_dir::ensure_audit_snapshot_dir()
+        .map_err(|error| tracing::warn!("{error}"))
+        .ok()
 }
 
 /// RAII cleanup guard for a freshly-created git worktree directory.
@@ -577,20 +587,29 @@ fn load_audit_config(
 /// On Unix the `.lock` sidecar goes with the entry, unlinked under the lock;
 /// see [`ReusableWorktreeLock`] for why that is race-safe. Windows keeps it.
 pub fn sweep_old_reusable_caches(repo_root: &Path, max_age: Option<Duration>, quiet: bool) {
-    sweep_old_reusable_caches_in(repo_root, max_age, quiet, &std::env::temp_dir());
+    let removed = fallow_engine::audit_snapshot_dir::audit_snapshot_scan_dirs()
+        .iter()
+        .map(|scan_root| sweep_scan_root(repo_root, max_age, scan_root))
+        .sum();
+    report_reclaimed_caches(removed, quiet);
 }
 
 /// Scan-root-injectable body of [`sweep_old_reusable_caches`]. Production
-/// always passes `std::env::temp_dir()`; tests pass a private per-test
-/// directory so one test's cross-repo pass never scans (and reclaims)
-/// another test's fixtures or a developer's real ownerless caches in the
-/// shared temp dir.
+/// passes each directory of `audit_snapshot_scan_dirs`; tests pass a private
+/// per-test directory so one test's cross-repo pass never scans (and
+/// reclaims) another test's fixtures or a developer's real ownerless caches
+/// in the shared temp dir.
+#[cfg(test)]
 pub fn sweep_old_reusable_caches_in(
     repo_root: &Path,
     max_age: Option<Duration>,
     quiet: bool,
     scan_root: &Path,
 ) {
+    report_reclaimed_caches(sweep_scan_root(repo_root, max_age, scan_root), quiet);
+}
+
+fn sweep_scan_root(repo_root: &Path, max_age: Option<Duration>, scan_root: &Path) -> u32 {
     let scope = claim_full_sweep(scan_root, SystemTime::now());
     let report = sweep_reusable_caches_with_report(
         repo_root,
@@ -601,7 +620,10 @@ pub fn sweep_old_reusable_caches_in(
         scope,
     );
     log_sweep_entries(&report, SweepMode::Apply, max_age);
-    let removed = report.removed;
+    report.removed
+}
+
+fn report_reclaimed_caches(removed: u32, quiet: bool) {
     if removed == 0 {
         return;
     }
@@ -877,7 +899,7 @@ pub fn log_sweep_entries(report: &SweepReport, mode: SweepMode, max_age: Option<
 }
 
 /// Report-producing body shared by the per-audit GC sweep
-/// ([`sweep_old_reusable_caches_in`], [`SweepMode::Apply`], sizes skipped)
+/// ([`sweep_old_reusable_caches`], [`SweepMode::Apply`], sizes skipped)
 /// and `fallow audit-cache prune` (both modes, sizes measured). Running the
 /// same code path is what guarantees prune "runs the same reclaim logic"
 /// (issue #2221) by construction.
@@ -891,17 +913,22 @@ pub fn sweep_reusable_caches_with_report(
 ) -> SweepReport {
     let now = SystemTime::now();
     let mut report = SweepReport::default();
+    let owned_path = reusable_audit_worktree_path(repo_root);
+    // Earlier versions kept this root's cache directly in the temp dir.
+    let scan_root_owned_path = owned_path.file_name().map(|name| scan_root.join(name));
+    let owned_paths: Vec<&Path> = std::iter::once(owned_path.as_path())
+        .chain(scan_root_owned_path.as_deref())
+        .collect();
 
     // Legacy pass: deregister reusable caches left REGISTERED by pre-#1815
     // fallow (the reporter's `git worktree list` backlog). Each entry is
     // deregistered individually so unavailable user worktrees stay registered.
-    legacy_registered_pass(repo_root, mode, sizes, now, &mut report);
+    legacy_registered_pass(repo_root, &owned_paths, mode, sizes, now, &mut report);
 
     // Primary pass: visit this requested root's cache plus legacy SHA-suffixed
     // entries from the old git-top-level identity. `git worktree list` no
     // longer sees the deregistered caches.
-    let owned_path = reusable_audit_worktree_path(repo_root);
-    let mut paths = vec![owned_path.clone()];
+    let mut paths: Vec<PathBuf> = owned_paths.iter().map(|path| path.to_path_buf()).collect();
     if scope == SweepScope::All {
         paths.extend(scan_legacy_reusable_cache_paths(repo_root, scan_root));
     }
@@ -937,7 +964,7 @@ pub fn sweep_reusable_caches_with_report(
         if !cache_entry_has_presence(path) {
             continue;
         }
-        let pass = if *path == owned_path {
+        let pass = if owned_paths.contains(&path.as_path()) {
             SweepPass::Owned
         } else {
             SweepPass::Legacy
@@ -993,6 +1020,7 @@ fn entry_probe_metadata(path: &Path, now: SystemTime) -> (Option<u64>, Option<Pa
 /// entries are reported without locks, deregistration, or removal.
 fn legacy_registered_pass(
     repo_root: &Path,
+    owned_paths: &[&Path],
     mode: SweepMode,
     sizes: SweepSizes,
     now: SystemTime,
@@ -1006,9 +1034,8 @@ fn legacy_registered_pass(
         .filter(|path| is_reusable_audit_worktree_path(path))
         .collect();
     let mut size_map = measure_entry_sizes(sizes, candidates.iter());
-    let owned_path = reusable_audit_worktree_path(repo_root);
     for path in candidates {
-        let pass = if paths_equal(&path, &owned_path) {
+        let pass = if owned_paths.iter().any(|owned| paths_equal(&path, owned)) {
             SweepPass::Owned
         } else {
             SweepPass::Legacy
@@ -1111,11 +1138,11 @@ fn scan_legacy_reusable_cache_paths(repo_root: &Path, scan_root: &Path) -> Vec<P
     scan_cache_paths_with_hex_suffix(&prefix, scan_root)
 }
 
-fn scan_root_owned_cache_paths(repo_root: &Path) -> Vec<PathBuf> {
+fn scan_root_owned_cache_paths(repo_root: &Path, scan_root: &Path) -> Vec<PathBuf> {
     let Some(prefix) = root_owned_cache_repo_prefix(repo_root) else {
         return Vec::new();
     };
-    scan_cache_paths_with_hex_suffix(&prefix, &std::env::temp_dir())
+    scan_cache_paths_with_hex_suffix(&prefix, scan_root)
 }
 
 /// Reclaim a single reusable-cache entry, reporting the per-entry outcome.
@@ -1498,7 +1525,7 @@ pub fn reusable_audit_worktree_path(requested_root: &Path) -> PathBuf {
     let repo_hash = git_toplevel(requested_root)
         .as_deref()
         .map_or(root_hash, canonical_root_hash);
-    std::env::temp_dir().join(format!(
+    fallow_engine::audit_snapshot_dir::audit_snapshot_dir().join(format!(
         "fallow-audit-base-cache-{repo_hash:016x}-root-{root_hash:016x}"
     ))
 }
@@ -1605,13 +1632,16 @@ pub fn remove_reusable_audit_caches(
     requested_root: &Path,
     dry_run: bool,
 ) -> std::io::Result<AuditCacheRemovalReport> {
-    let mut paths = vec![reusable_audit_worktree_path(requested_root)];
-    paths.extend(scan_legacy_reusable_cache_paths(
-        requested_root,
-        &std::env::temp_dir(),
-    ));
-    if git_toplevel(requested_root).is_some_and(|root| paths_equal(&root, requested_root)) {
-        paths.extend(scan_root_owned_cache_paths(requested_root));
+    let owned_path = reusable_audit_worktree_path(requested_root);
+    let mut paths = vec![owned_path.clone()];
+    let at_toplevel =
+        git_toplevel(requested_root).is_some_and(|root| paths_equal(&root, requested_root));
+    for scan_root in fallow_engine::audit_snapshot_dir::audit_snapshot_scan_dirs() {
+        paths.extend(owned_path.file_name().map(|name| scan_root.join(name)));
+        paths.extend(scan_legacy_reusable_cache_paths(requested_root, &scan_root));
+        if at_toplevel {
+            paths.extend(scan_root_owned_cache_paths(requested_root, &scan_root));
+        }
     }
     paths.sort();
     paths.dedup();
