@@ -132,7 +132,7 @@ pub(super) fn load_v8_coverage_map(
         for (script_index, script) in dump.result.into_iter().enumerate() {
             let id = (dump_index, script_index);
             let functions: Arc<[V8FunctionCoverage]> = Arc::from(script.functions);
-            if let Some(path) = file_url_path(&script.url).and_then(|p| project_path(p, scope)) {
+            if let Some(path) = file_url_path(&script.url).and_then(|p| project_path(&p, scope)) {
                 views_by_file
                     .entry(path)
                     .or_default()
@@ -151,7 +151,7 @@ pub(super) fn load_v8_coverage_map(
             for (source_index, source) in
                 generated.source_paths(&script.url, entry.url.as_deref(), scope.project_root)
             {
-                if let Some(path) = project_path(source, scope) {
+                if let Some(path) = project_path(&source, scope) {
                     views_by_file
                         .entry(path)
                         .or_default()
@@ -232,7 +232,10 @@ fn file_url_path(url: &str) -> Option<PathBuf> {
 
 /// Map a recorded path onto a canonical project source, or `None` for
 /// dependencies and files outside the project.
-fn project_path(recorded: PathBuf, scope: &V8ScriptScope<'_>) -> Option<PathBuf> {
+fn project_path(recorded: &Path, scope: &V8ScriptScope<'_>) -> Option<PathBuf> {
+    // A `..` applies by text. The file system applies it only when the
+    // directory before it exists, so the match would depend on the host.
+    let recorded = fallow_types::path_guard::lexically_normalized(recorded);
     let rebased = match (scope.coverage_root, scope.project_root) {
         (Some(coverage_root), Some(project_root)) => recorded
             .strip_prefix(coverage_root)
@@ -807,6 +810,21 @@ mod tests {
         std::fs::create_dir_all(fixture.dir.path().join("dist/maps")).unwrap();
         fixture.entry["url"] = serde_json::json!("maps/index.js.map");
         fixture.entry["data"]["sources"] = serde_json::json!(["../../pick.ts"]);
+        let script_url = dist_script_url(&fixture);
+        let dump = serde_json::json!({
+            "result": [{ "url": script_url, "functions": fixture.functions }],
+            "source-map-cache": { script_url: fixture.entry },
+        });
+        let map = load_one_dump(&fixture, "coverage-1.json", &dump, &[&fixture.path]).unwrap();
+        assert!(map.contains_key(&coverage_key(&fixture.path)));
+    }
+
+    /// A source path with `..` gets its coverage whether or not the
+    /// directory before the `..` exists.
+    #[test]
+    fn a_source_with_a_parent_step_through_a_missing_dir_gets_coverage() {
+        let mut fixture = mapped_fixture(PICK_SOURCE, true);
+        fixture.entry["data"]["sources"] = serde_json::json!(["../missing-dir/../pick.ts"]);
         let script_url = dist_script_url(&fixture);
         let dump = serde_json::json!({
             "result": [{ "url": script_url, "functions": fixture.functions }],

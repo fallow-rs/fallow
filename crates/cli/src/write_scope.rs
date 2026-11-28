@@ -213,6 +213,8 @@ fn same_existing_file(left: &Path, right: &Path) -> bool {
 /// When the default cache directory `<root>/.fallow` resolves outside the
 /// project, or through a symlink into a `.git` or `node_modules` directory,
 /// return a note that names the reason, and do not use it for the cache.
+/// The note names the link only. The link target is text from the
+/// repository and can hold any bytes, so the note does not print it.
 /// `FALLOW_CACHE_DIR` and `--no-cache` skip the check, because the default
 /// directory is then not used for the cache.
 pub fn default_cache_dir_note(
@@ -226,15 +228,13 @@ pub fn default_cache_dir_note(
     let cache_dir = root.join(".fallow");
     cache_dir.symlink_metadata().ok()?;
     let cwd = std::env::current_dir().ok()?;
-    let resolved = write_guard::resolve(&cache_dir);
     let reason = match WriteScope::new(root, &cwd, write_guard::shared_dirs()) {
         Ok(scope) => scope.refusal_reason(&cwd.join(&cache_dir))?,
         Err(_) => "outside the project",
     };
     Some(format!(
-        "note: {} resolves {reason} ({}), so it is not used for the cache in this run. Remove the link, or set FALLOW_CACHE_DIR or cache.dir to relocate the cache.",
-        cache_dir.display(),
-        resolved.display()
+        "note: {} resolves {reason}, so it is not used for the cache in this run. Remove the link, or set FALLOW_CACHE_DIR or cache.dir to relocate the cache.",
+        cache_dir.display()
     ))
 }
 

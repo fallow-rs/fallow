@@ -2192,6 +2192,28 @@ fn a_fallow_symlink_that_leaves_the_project_is_not_used_for_the_cache() {
     assert_eq!(std::fs::read_dir(&elsewhere).unwrap().count(), 0);
 }
 
+/// The note about a `.fallow` symlink names the link, not where the link
+/// leads, so the text of a link target never reaches the output.
+#[cfg(unix)]
+#[test]
+fn the_cache_note_does_not_print_the_link_target() {
+    let (dir, root) = write_confinement_project();
+    let target = dir.path().join("target-name-4417\n::line");
+    std::os::unix::fs::symlink(&target, root.join(".fallow")).unwrap();
+    let output = run_fallow_from(dir.path(), &root, &["dead-code", "--format", "json"]);
+    assert_ne!(output.code, 2, "{}", output.stderr);
+    assert!(
+        output.stderr.contains("not used for the cache"),
+        "{}",
+        output.stderr
+    );
+    assert!(
+        !output.stderr.contains("target-name-4417"),
+        "{}",
+        output.stderr
+    );
+}
+
 /// A `.fallow` symlink into `node_modules` is not used for the cache, and the
 /// note names the reason.
 #[cfg(unix)]

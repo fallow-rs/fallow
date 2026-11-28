@@ -76,8 +76,9 @@ enum ParentSteps {
 }
 
 /// The first entry below `base`, up to and including `path`, that is a
-/// symlink whose resolved target is outside the canonical `base`, or that
-/// [`is_protected_link_target`] refuses. A dangling link also counts, because
+/// symlink whose resolved target is outside the canonical `base`, whose
+/// target leaves `base` on the way (also when a later `..` comes back), or
+/// that [`is_protected_link_target`] refuses. A dangling link also counts, because
 /// its target can appear outside `base` later. A `base` that is itself a link
 /// into a protected directory returns `base`. An existing `path` that is not
 /// a regular file or a directory (a device, a named pipe or a socket) returns
@@ -149,7 +150,7 @@ fn step_into(
     let candidate = parent.join(name);
     match candidate.symlink_metadata() {
         Ok(meta) if meta.file_type().is_symlink() => {
-            link_target_in(canonical_base, &candidate).map(Some)
+            link_target_in(canonical_base, parent, &candidate).map(Some)
         }
         Ok(_) => Ok(Some(candidate)),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
@@ -159,10 +160,20 @@ fn step_into(
     }
 }
 
-/// The canonical target of the symlink `link`, when it is inside the
-/// canonical base and not protected.
-fn link_target_in(canonical_base: &Path, link: &Path) -> Result<PathBuf, Refusal> {
-    let target = std::fs::canonicalize(link).map_err(|_| Refusal::LinkOutside)?;
+/// The resolved target of the symlink `link` in the resolved directory
+/// `parent`, when each step of the target stays inside the canonical base,
+/// the target exists, and it is not protected. A target that leaves the base
+/// and comes back through `..` is refused, so the answer does not depend on
+/// entries outside the base.
+///
+/// The walk keeps the letter case of the link target. On a file system that
+/// ignores case, `META` names the Git directory `meta`, so the protected
+/// check runs on the canonical spelling. The walk already proved that each
+/// step stays inside the base, so this resolution reads only entries there.
+fn link_target_in(canonical_base: &Path, parent: &Path, link: &Path) -> Result<PathBuf, Refusal> {
+    let walked = crate::link_walk::link_target_below(canonical_base, parent, link)
+        .map_err(|_| Refusal::LinkOutside)?;
+    let target = std::fs::canonicalize(walked).map_err(|_| Refusal::LinkOutside)?;
     if !target.starts_with(canonical_base) {
         return Err(Refusal::LinkOutside);
     }
@@ -907,6 +918,37 @@ mod tests {
         assert_eq!(outside_link(&f.root, &path), Some(f.root.join("m")));
     }
 
+    /// Whether the file system of `dir` finds a name in another letter case.
+    fn ignores_case(dir: &Path) -> bool {
+        std::fs::write(dir.join("case-probe"), "").expect("probe");
+        dir.join("CASE-PROBE").exists()
+    }
+
+    /// On a file system that ignores letter case, a link target in another
+    /// case still counts as the Git directory, for a `.git` file and for a
+    /// bare repository with worktrees. The test does nothing on a file
+    /// system that keeps case apart.
+    #[test]
+    fn a_link_into_the_git_dir_in_another_letter_case_is_refused() {
+        for (git_dir, spelled) in [("meta", "META"), (".bare", ".BARE")] {
+            let f = fixture();
+            if !ignores_case(&f.root) {
+                return;
+            }
+            std::fs::create_dir_all(f.root.join(git_dir).join("cachedir")).expect("git dir");
+            std::fs::write(f.root.join(".git"), format!("gitdir: ./{git_dir}\n"))
+                .expect("git file");
+            symlink(format!("{spelled}/cachedir"), f.root.join("cachelink")).expect("link");
+            let path = f.root.join("cachelink/cache.bin");
+            assert_eq!(
+                outside_link(&f.root, &path),
+                Some(f.root.join("cachelink")),
+                "{git_dir}"
+            );
+            assert!(ensure_no_outside_link(&f.root, &path).is_err(), "{git_dir}");
+        }
+    }
+
     #[test]
     fn a_base_that_links_into_the_git_dir_is_refused() {
         let f = fixture();
@@ -1397,6 +1439,85 @@ mod tests {
             &submodule,
             &submodule.join("src/a.ts")
         ));
+    }
+
+    /// A link target that leaves the base and comes back through `..` is
+    /// refused at the step that leaves. The answer does not depend on whether
+    /// the directory outside the base exists.
+    #[test]
+    fn a_link_that_leaves_the_base_and_comes_back_is_refused() {
+        for middle_exists in [true, false] {
+            let f = fixture();
+            std::fs::create_dir_all(f.root.join(".fallow")).expect("cache");
+            std::fs::write(f.root.join("ignore-all"), "*\n").expect("file");
+            if middle_exists {
+                std::fs::create_dir_all(f.outside.join("probe")).expect("probe");
+            }
+            let relative = f.root.join(".fallow/.gitignore");
+            symlink("../../outside/probe/../../project/ignore-all", &relative).expect("link");
+            assert_eq!(
+                outside_link(&f.root, &relative),
+                Some(relative.clone()),
+                "relative target, middle exists: {middle_exists}"
+            );
+            assert!(ensure_no_outside_link(&f.root, &relative).is_err());
+
+            let absolute = f.root.join(".fallow/absolute");
+            let target = f.outside.join("probe/../../project/ignore-all");
+            symlink(&target, &absolute).expect("link");
+            assert_eq!(
+                outside_link(&f.root, &absolute),
+                Some(absolute.clone()),
+                "absolute target, middle exists: {middle_exists}"
+            );
+        }
+    }
+
+    /// A link to a second link is refused when the second link leaves the
+    /// base and comes back.
+    #[test]
+    fn a_chained_link_that_leaves_the_base_and_comes_back_is_refused() {
+        let f = fixture();
+        std::fs::create_dir_all(f.outside.join("probe")).expect("probe");
+        std::fs::write(f.root.join("ignore-all"), "*\n").expect("file");
+        symlink(
+            "../outside/probe/../../project/ignore-all",
+            f.root.join("hop"),
+        )
+        .expect("hop");
+        symlink("hop", f.root.join(".fallow")).expect("link");
+        let path = f.root.join(".fallow");
+        assert_eq!(outside_link(&f.root, &path), Some(path));
+    }
+
+    /// A link with an absolute target that names the base through another
+    /// spelling, such as `/var` for `/private/var` on macOS, stays allowed.
+    #[test]
+    fn an_absolute_link_inside_the_base_passes() {
+        let f = fixture();
+        std::fs::create_dir_all(f.root.join("build/cache")).expect("target");
+        symlink(f.root.join("build/./cache"), f.root.join(".fallow")).expect("link");
+        assert_eq!(
+            outside_link(&f.root, &f.root.join(".fallow/cache.bin")),
+            None
+        );
+        let canonical = std::fs::canonicalize(&f.root).expect("root");
+        symlink(canonical.join("build"), f.root.join("out")).expect("link");
+        assert_eq!(outside_link(&f.root, &f.root.join("out/cache")), None);
+    }
+
+    /// A link inside the base that steps up and down inside the base stays
+    /// allowed, as the links of a pnpm `node_modules` do.
+    #[test]
+    fn a_relative_link_with_parent_steps_inside_the_base_passes() {
+        let f = fixture();
+        std::fs::create_dir_all(f.root.join("packages/app/src")).expect("app");
+        std::fs::create_dir_all(f.root.join("build")).expect("build");
+        symlink("../../../build", f.root.join("packages/app/src/out")).expect("link");
+        assert_eq!(
+            outside_link(&f.root, &f.root.join("packages/app/src/out/x.bin")),
+            None
+        );
     }
 
     /// A `.git` file that is not text leaves the Git directory unknown too.

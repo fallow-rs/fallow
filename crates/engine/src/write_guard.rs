@@ -32,6 +32,8 @@ use std::io::{self, Write};
 use std::path::{Component, Path, PathBuf};
 use std::sync::OnceLock;
 
+use fallow_types::display_text::display_path;
+
 /// The directories a run may write into.
 #[derive(Debug, Clone)]
 pub struct WriteScope {
@@ -52,10 +54,11 @@ enum Refusal {
     /// The path resolves outside the allowed directories.
     Outside,
     /// A symlink in the project leads out of the project, or into a `.git`
-    /// or `node_modules` directory.
+    /// or `node_modules` directory. `link` is the symlink when it is in the
+    /// checkout. A message never names the target, because a symlink
+    /// outside the project can lead anywhere on the host.
     Link {
-        link: PathBuf,
-        target: PathBuf,
+        link: Option<PathBuf>,
         kind: LinkTarget,
     },
     /// The path names a file that is not a regular file or a directory, and
@@ -182,9 +185,8 @@ impl WriteScope {
         let refusal = self.refusal(&walk)?;
         Some(match refusal {
             Refusal::Outside => format!(
-                "{flag} {} resolves to {}, which is outside the project root {}. Choose a path inside the project root{}, or inside the CI workspace (GITHUB_WORKSPACE or CI_PROJECT_DIR) or a temp directory (RUNNER_TEMP, the system temp directory, or /tmp on Unix).",
-                path.display(),
-                walk.resolved.display(),
+                "{flag} {} resolves outside the project root {}. Choose a path inside the project root{}, or inside the CI workspace (GITHUB_WORKSPACE or CI_PROJECT_DIR) or a temp directory (RUNNER_TEMP, the system temp directory, or /tmp on Unix).",
+                display_path(path),
                 self.root.display(),
                 self.work_tree
                     .as_deref()
@@ -192,17 +194,15 @@ impl WriteScope {
                     .map(|tree| format!(" or its Git work tree {}", tree.display()))
                     .unwrap_or_default(),
             ),
-            Refusal::Link { link, target, kind } => format!(
-                "{flag} {} goes through the symlink {}, which resolves {} ({}). No symlink on the path may resolve into a .git or node_modules directory, and a symlink in the project must resolve inside the project. Choose a path without the symlink.",
-                path.display(),
-                link.display(),
+            Refusal::Link { link, kind } => format!(
+                "{flag} {} goes through {}, which resolves {}. No symlink on the path may resolve into a .git or node_modules directory, and a symlink in the project must resolve inside the project. Choose a path without the symlink.",
+                display_path(path),
+                link_phrase(link.as_deref()),
                 kind.phrase(),
-                target.display(),
             ),
             Refusal::Special => format!(
-                "{flag} {} resolves to {}, which is not a regular file. Choose a path to a regular file.",
-                path.display(),
-                walk.resolved.display(),
+                "{flag} {} does not lead to a regular file. Choose a path to a regular file.",
+                display_path(path),
             ),
         })
     }
@@ -230,8 +230,9 @@ impl WriteScope {
             };
             if let Some(kind) = kind {
                 return Some(Refusal::Link {
-                    link: link.location.clone(),
-                    target: link.target.clone(),
+                    link: self
+                        .in_checkout(&link.location)
+                        .then(|| link.location.clone()),
                     kind,
                 });
             }
@@ -298,25 +299,31 @@ impl WriteScope {
     fn refusal_error(&self, requested: &Path, walk: &Walk) -> Option<io::Error> {
         let reason = match self.refusal(walk)? {
             Refusal::Outside => format!(
-                "{} resolves to {}, which is outside the directories this run may write to",
-                requested.display(),
-                walk.resolved.display()
+                "{} resolves outside the directories this run may write to",
+                display_path(requested),
             ),
-            Refusal::Link { link, target, kind } => format!(
-                "{} goes through the symlink {}, which resolves {} ({}), so fallow did not write it",
-                requested.display(),
-                link.display(),
+            Refusal::Link { link, kind } => format!(
+                "{} goes through {}, which resolves {}, so fallow did not write it",
+                display_path(requested),
+                link_phrase(link.as_deref()),
                 kind.phrase(),
-                target.display()
             ),
             Refusal::Special => format!(
-                "{} resolves to {}, which is not a regular file, so fallow did not write it",
-                requested.display(),
-                walk.resolved.display()
+                "{} does not lead to a regular file, so fallow did not write it",
+                display_path(requested),
             ),
         };
         Some(io::Error::new(io::ErrorKind::PermissionDenied, reason))
     }
+}
+
+/// The symlink of a refusal for a message: its path when it is in the
+/// checkout, else no path.
+fn link_phrase(link: Option<&Path>) -> String {
+    link.map_or_else(
+        || "a symlink".to_owned(),
+        |link| format!("the symlink {}", display_path(link)),
+    )
 }
 
 /// The environment variables that name a shared directory a run may write
@@ -1100,6 +1107,36 @@ mod tests {
                 .check("--sarif-file", &shared.join("report.sarif"), &root)
                 .is_none()
         );
+    }
+
+    /// A refusal names the given path and the link in the project, never
+    /// the place outside the project that a link leads to.
+    #[cfg(unix)]
+    #[test]
+    fn a_refusal_does_not_print_where_an_outside_link_leads() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path().join("project");
+        let elsewhere = dir.path().join("target-name-5520");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(elsewhere.join("sub")).unwrap();
+        std::os::unix::fs::symlink(&elsewhere, root.join("out")).unwrap();
+        std::os::unix::fs::symlink(elsewhere.join("sub"), dir.path().join("via")).unwrap();
+        let scope = WriteScope::new(&root, &root, Vec::new()).expect("scope");
+        let messages = [
+            scope.check("--sarif-file", &root.join("out/report.sarif"), &root),
+            scope.check("--sarif-file", &dir.path().join("via/r.sarif"), &root),
+            create_checked(
+                &root.join("out/report.sarif"),
+                &root.join("out/report.sarif"),
+                Some(&scope),
+            )
+            .err()
+            .map(|failure| failure.to_string()),
+        ];
+        for message in messages {
+            let message = message.expect("refused");
+            assert!(!message.contains("target-name-5520"), "{message}");
+        }
     }
 
     /// A link in the project to a named pipe is refused, while a pipe that
