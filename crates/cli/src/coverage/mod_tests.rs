@@ -1,10 +1,10 @@
 use super::{
     COVERAGE_DOCS_URL, CoverageSetupContext, FrameworkKind, PackageManager, SetupArgs,
     build_setup_json, detect_coverage_artifact, detect_framework, detect_package_manager,
-    handle_license_step, load_setup_state, recipe_contents, recipe_state_is_current,
-    record_recipe_state, record_sidecar_state, render_setup_json, run_setup, run_setup_recipe_step,
-    setup_context_fingerprint, setup_state_path, sidecar_state_is_current,
-    upload_inventory_hint_lines, write_recipe,
+    handle_license_step, load_setup_state, read_confirmation, recipe_contents,
+    recipe_state_is_current, record_recipe_state, record_sidecar_state, render_setup_json,
+    run_setup, run_setup_recipe_step, setup_context_fingerprint, setup_state_path,
+    sidecar_state_is_current, upload_inventory_hint_lines, write_recipe,
 };
 
 #[test]
@@ -1244,4 +1244,13 @@ fn detect_coverage_artifact_skips_links_out_of_the_project() {
         .expect("coverage link should be created");
 
     assert_eq!(detect_coverage_artifact(dir.path()), None);
+}
+
+#[test]
+fn confirmation_at_end_of_input_is_no_even_with_a_yes_default() {
+    assert_eq!(read_confirmation(&mut &b""[..], true), Ok(false));
+    assert_eq!(read_confirmation(&mut &b"\n"[..], true), Ok(true));
+    assert_eq!(read_confirmation(&mut &b"\n"[..], false), Ok(false));
+    assert_eq!(read_confirmation(&mut &b"y\n"[..], false), Ok(true));
+    assert_eq!(read_confirmation(&mut &b"n"[..], true), Ok(false));
 }

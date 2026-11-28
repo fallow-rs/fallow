@@ -9,7 +9,7 @@ Use the `coverage` subcommands for runtime setup, analysis, inventory upload, an
 - `coverage deployment-changes` - read the Fallow Cloud deployment change report for `--sha` (default `HEAD`) against `--base` (default: the previous deployment with production runtime) as JSON.
 
 ```bash
-fallow coverage setup                         # interactive
+fallow coverage setup                         # interactive, needs a terminal on stdin
 fallow coverage setup --yes                   # accept all prompts
 fallow coverage setup --non-interactive       # print instructions, do not prompt
 fallow coverage setup --yes --json            # agent-readable JSON, no prompts/writes/installs/network

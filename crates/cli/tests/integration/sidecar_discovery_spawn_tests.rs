@@ -233,3 +233,25 @@ fn missing_sidecar_message_names_no_package_manager_command() {
         "the message must name FALLOW_COV_BIN, got:\n{combined}"
     );
 }
+
+/// Without a terminal on stdin, `coverage setup` cannot ask before it starts
+/// a package manager. It must refuse and name `--yes` instead of taking the
+/// `[Y/n]` default.
+#[test]
+fn coverage_setup_without_a_terminal_refuses_the_install_prompt() {
+    let sandbox = Sandbox::new();
+    let root = sandbox.projects[0].to_string_lossy().into_owned();
+    let output = sandbox
+        .command(&["coverage", "setup", "--root", &root])
+        .stdin(std::process::Stdio::null())
+        .output()
+        .expect("run fallow");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let spawned = sandbox.spawned();
+    assert!(
+        spawned.is_empty(),
+        "setup started a package manager without consent:\n{spawned}\n{stderr}"
+    );
+    assert_eq!(output.status.code(), Some(2), "stderr:\n{stderr}");
+    assert!(stderr.contains("--yes"), "stderr:\n{stderr}");
+}
