@@ -6,6 +6,33 @@ use std::process::ExitCode;
 
 use crate::exit_codes::exit_invalid_input;
 
+/// The hook manager that `hooks install --target git` writes for.
+pub(super) enum HookTarget {
+    Husky(PathBuf),
+    Lefthook,
+    GitHooks(PathBuf),
+}
+
+/// The hook manager of `root`: Husky, Lefthook, or the Git hooks folder.
+///
+/// A Husky or Lefthook path that links out of the project is refused before
+/// the probe, so the answer does not depend on the link target.
+pub(super) fn detect_hook_target(root: &Path, removing: bool) -> Result<HookTarget, ExitCode> {
+    for name in [".husky", ".lefthook", "lefthook.yml", "lefthook.json"] {
+        super::project_files::refuse_outside_link(root, &root.join(name))?;
+    }
+    if root.join(".husky").is_dir() {
+        Ok(HookTarget::Husky(root.join(".husky/pre-commit")))
+    } else if root.join(".lefthook").is_dir()
+        || root.join("lefthook.yml").exists()
+        || root.join("lefthook.json").exists()
+    {
+        Ok(HookTarget::Lefthook)
+    } else {
+        git_pre_commit_target(root, removing).map(HookTarget::GitHooks)
+    }
+}
+
 /// The `pre-commit` file that Git runs for `root`. Git missing from `PATH`
 /// gives `.git/hooks/pre-commit` when that folder exists.
 ///

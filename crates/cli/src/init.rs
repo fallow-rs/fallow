@@ -6,7 +6,7 @@ use fallow_config::{ExternalPluginDef, FallowConfig, PackageJson};
 use crate::exit_codes::exit_invalid_input;
 #[path = "init_git_hook_location.rs"]
 pub mod git_hook_location;
-use git_hook_location::{git_pre_commit_target, write_hook};
+use git_hook_location::{HookTarget, detect_hook_target, write_hook};
 
 #[cfg(test)]
 #[path = "init_hook_script_tests.rs"]
@@ -663,21 +663,17 @@ fn run_init_config(root: &Path, use_toml: bool, quiet: bool) -> ExitCode {
         "fallow.toml",
         ".fallow.toml",
     ];
+    // The link check comes before the exists check, so a link out of the
+    // project gets the same answer whether its target exists or not.
     for name in &existing_names {
         let path = root.join(name);
+        if let Err(code) = refuse_outside_link(root, &path) {
+            return code;
+        }
         if path.exists() {
             eprintln!("{name} already exists");
             return exit_invalid_input();
         }
-    }
-
-    let config_name = if use_toml {
-        "fallow.toml"
-    } else {
-        ".fallowrc.json"
-    };
-    if let Err(code) = refuse_outside_link(root, &root.join(config_name)) {
-        return code;
     }
 
     let info = detect_project(root);
@@ -738,12 +734,12 @@ fn init_next_step(root: &Path, cwd: Option<&Path>) -> String {
 
 fn run_init_agents(root: &Path) -> ExitCode {
     let agents_path = root.join(AGENTS_GUIDE_FILENAME);
+    if let Err(code) = refuse_outside_link(root, &agents_path) {
+        return code;
+    }
     if agents_path.exists() {
         eprintln!("{AGENTS_GUIDE_FILENAME} already exists");
         return exit_invalid_input();
-    }
-    if let Err(code) = refuse_outside_link(root, &agents_path) {
-        return code;
     }
 
     let info = detect_project(root);
@@ -855,25 +851,6 @@ fn indent_block(block: &str, indent: &str) -> String {
         indented.push('\n');
     }
     indented
-}
-
-enum HookTarget {
-    Husky(std::path::PathBuf),
-    Lefthook,
-    GitHooks(std::path::PathBuf),
-}
-
-fn detect_hook_target(root: &Path, removing: bool) -> Result<HookTarget, ExitCode> {
-    if root.join(".husky").is_dir() {
-        Ok(HookTarget::Husky(root.join(".husky/pre-commit")))
-    } else if root.join(".lefthook").is_dir()
-        || root.join("lefthook.yml").exists()
-        || root.join("lefthook.json").exists()
-    {
-        Ok(HookTarget::Lefthook)
-    } else {
-        git_pre_commit_target(root, removing).map(HookTarget::GitHooks)
-    }
 }
 
 pub fn run_git_hooks_install(opts: &GitHooksInstallOptions<'_>) -> ExitCode {
