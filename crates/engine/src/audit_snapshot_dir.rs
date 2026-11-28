@@ -73,14 +73,16 @@ fn ensure_audit_snapshot_dir_in(temp: &Path) -> std::io::Result<PathBuf> {
 }
 
 /// Refuse a path that is not a directory of this user with mode 0700 or
-/// stricter. `symlink_metadata` does not follow a link, so a link fails the
-/// directory test.
+/// stricter. `symlink_metadata` does not follow a link, so a link at the
+/// path is refused as a link.
 #[cfg(unix)]
 fn check_private_dir(dir: &Path) -> std::io::Result<()> {
     use std::os::unix::fs::{MetadataExt as _, PermissionsExt as _};
 
     let metadata = std::fs::symlink_metadata(dir)?;
-    let reason = if !metadata.file_type().is_dir() {
+    let reason = if metadata.file_type().is_symlink() {
+        Some("it is a link")
+    } else if !metadata.file_type().is_dir() {
         Some("it is not a directory")
     } else if metadata.uid() != rustix::process::geteuid().as_raw() {
         Some("another user owns it")
@@ -166,7 +168,10 @@ mod tests {
 
         let error = ensure_audit_snapshot_dir_in(temp.path()).expect_err("a link is refused");
         assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
-        assert!(error.to_string().contains("not a directory"), "{error}");
+        assert!(
+            error.to_string().contains("because it is a link"),
+            "{error}"
+        );
         assert_eq!(
             audit_snapshot_scan_dirs_in(temp.path()),
             vec![temp.path().to_path_buf()]
