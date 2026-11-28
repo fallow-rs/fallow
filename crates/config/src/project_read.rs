@@ -91,11 +91,23 @@ struct ProbeScope {
 
 static SCOPE_BASES: OnceLock<Mutex<ScopeBases>> = OnceLock::new();
 
+/// The count of [`clear_project_scope_bases`] calls, for caches outside this
+/// module that must not outlive a clear.
+static SCOPE_GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// The count of [`clear_project_scope_bases`] calls so far. A cache of scope
+/// results is valid only while this value stays the same.
+#[must_use]
+pub fn scope_generation() -> u64 {
+    SCOPE_GENERATION.load(std::sync::atomic::Ordering::Acquire)
+}
+
 /// Forget the scope bases that [`project_scope_base`] found. Workspace
 /// discovery calls it at the start of each analysis, so a long-lived
 /// process (LSP, watch) sees a new `.git` entry or workspace manifest. A
 /// search that runs during the clear does not keep its result.
 pub fn clear_project_scope_bases() {
+    SCOPE_GENERATION.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
     if let Some(Ok(mut bases)) = SCOPE_BASES.get().map(Mutex::lock) {
         bases.bases.clear();
         bases.given_bases.clear();

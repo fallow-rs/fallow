@@ -54,6 +54,7 @@ mod production_env;
 mod project_read;
 pub use project_read::{
     clear_project_scope_bases, dir_inside_scope_base, may_probe_project_path, project_scope_base,
+    scope_generation,
 };
 mod rule_pack;
 mod run_inputs;

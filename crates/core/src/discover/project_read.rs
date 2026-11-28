@@ -118,7 +118,8 @@ pub fn is_project_file(root: &Path, path: &Path) -> bool {
 ///
 /// A candidate that is not a symlink resolves where its directory resolves,
 /// so only the directory needs the scope check, and each directory gets it
-/// once per run.
+/// once per run. The candidates of one entry share a directory, so each
+/// thread keeps the last directory that passed.
 pub fn is_probed_project_file(root: &Path, path: &Path) -> bool {
     let Ok(meta) = path.symlink_metadata() else {
         return false;
@@ -132,8 +133,46 @@ pub fn is_probed_project_file(root: &Path, path: &Path) -> bool {
     let Some(dir) = path.parent() else {
         return false;
     };
+    let generation = fallow_config::scope_generation();
+    let known = LAST_INSIDE_DIR.with(|last| {
+        last.borrow()
+            .as_ref()
+            .is_some_and(|(seen, seen_root, seen_dir)| {
+                *seen == generation && seen_root == root && seen_dir == dir
+            })
+    });
+    if known {
+        return true;
+    }
     let base = scope_base(root);
-    fallow_config::dir_inside_scope_base(&base, dir, || is_inside_root(&base, dir))
+    let inside = dir_inside_scope(&base, dir);
+    if inside {
+        LAST_INSIDE_DIR.with(|last| {
+            *last.borrow_mut() = Some((generation, root.to_path_buf(), dir.to_path_buf()));
+        });
+    }
+    inside
+}
+
+std::thread_local! {
+    /// The generation, root and directory of the last probed directory that
+    /// passed the scope check on this thread.
+    static LAST_INSIDE_DIR: std::cell::RefCell<Option<(u64, PathBuf, PathBuf)>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Whether the directory `dir` resolves inside the scope base `base`. A
+/// directory that is not a symlink resolves where its parent resolves, so a
+/// directory below a checked parent costs one `lstat`. A directory that is
+/// not spelled below the base gets the full check.
+fn dir_inside_scope(base: &Path, dir: &Path) -> bool {
+    fallow_config::dir_inside_scope_base(base, dir, || {
+        let parent_below_base = dir.parent().filter(|parent| parent.starts_with(base));
+        match (parent_below_base, dir.symlink_metadata()) {
+            (Some(parent), Ok(meta)) if meta.is_dir() => dir_inside_scope(base, parent),
+            _ => is_inside_root(base, dir),
+        }
+    })
 }
 
 /// The bounded reads of one scan of many candidate files under `root`, such
