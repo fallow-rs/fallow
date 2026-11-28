@@ -131,10 +131,17 @@ fn accepted_mdx_source(source: &str) -> (MdxScan<'_>, ExtractionResult) {
     (scan, extraction)
 }
 
-/// Most parser probes for one statement block. A block that has no complete
-/// statement after this many probes takes lines until the next top-level
-/// statement, and the final check of the block then classifies it.
+/// Most parser probes after a line of one statement block. Each probe parses
+/// the whole block, so a block that never completes would cost work that grows
+/// with the square of its line count.
 const MAX_STATEMENT_PROBES: usize = 256;
+
+/// Most parser probes at a blank line of one statement block, after the block
+/// used [`MAX_STATEMENT_PROBES`]. A blank line ends an MDX ESM block, so a long
+/// statement still ends there. A block that has no complete statement after
+/// these probes takes lines until the next top-level statement, and the final
+/// check of the block then classifies it.
+const MAX_BOUNDARY_PROBES: usize = 64;
 
 #[cfg(test)]
 thread_local! {
@@ -152,8 +159,12 @@ struct MdxStatementScanner<'a> {
     code_lines: Vec<&'a str>,
     collecting_statement: bool,
     boundary: StatementBoundary,
-    /// Parser probes of the current block, see [`MAX_STATEMENT_PROBES`].
+    /// Line probes of the current block, see [`MAX_STATEMENT_PROBES`].
     probes: usize,
+    /// Blank-line probes of the current block, see [`MAX_BOUNDARY_PROBES`].
+    boundary_probes: usize,
+    /// The current block has a line after its last probe.
+    unprobed_lines: bool,
     code_fence: Option<CodeFence>,
 }
 
@@ -219,6 +230,8 @@ impl<'a> MdxStatementScanner<'a> {
         self.boundary = StatementBoundary::default();
         self.boundary.push(line);
         self.probes = 0;
+        self.boundary_probes = 0;
+        self.unprobed_lines = false;
         self.collecting_statement =
             !self.boundary.may_complete() || !parses_as_typescript(statement);
     }
@@ -227,15 +240,30 @@ impl<'a> MdxStatementScanner<'a> {
         if let Some(block) = self.blocks.last_mut() {
             block.push((line_start, line));
             self.boundary.push(line);
-            // Whitespace cannot complete a rejected prefix, including in the
-            // parser fallback for JSX and regex literals.
-            if !line.trim().is_empty()
-                && self.boundary.may_complete()
-                && self.probes < MAX_STATEMENT_PROBES
-            {
-                self.probes += 1;
-                self.collecting_statement = !statement_block_is_accepted(block);
+            let blank = line.trim().is_empty();
+            if !blank {
+                self.unprobed_lines = true;
             }
+            if !self.boundary.may_complete() {
+                return;
+            }
+            // Whitespace cannot complete a rejected prefix, including in the
+            // parser fallback for JSX and regex literals. After the line
+            // probes, only a blank line, where an MDX ESM block ends, gets a
+            // probe.
+            if self.probes < MAX_STATEMENT_PROBES {
+                if blank {
+                    return;
+                }
+                self.probes += 1;
+            } else {
+                if !blank || !self.unprobed_lines || self.boundary_probes >= MAX_BOUNDARY_PROBES {
+                    return;
+                }
+                self.boundary_probes += 1;
+            }
+            self.unprobed_lines = false;
+            self.collecting_statement = !statement_block_is_accepted(block);
         }
     }
 

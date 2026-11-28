@@ -4,7 +4,7 @@
   - The component contract pass resolves the keys of each spread `const` object once. An object with more than 512 keys, or a spread chain deeper than the limit, gets no spread binding.
   - The StyleX consumer scan checks each constant once per resolution, with a step budget and a depth limit. A value above a limit is not static.
   - The duplication tokenizer tokenizes the parameter patterns of a function nested 4 or more parameter lists deep once instead of twice.
-  - The MDX scan probes an open `import` or `export` statement at most 256 times. A longer statement takes lines until the next top-level statement, and the final check of the statement classifies it.
+  - The MDX scan checks an open `import` or `export` statement after at most 256 of its lines. After that it checks the statement only at a blank line, at most 64 more times, so a long statement still ends at the blank line after it. A statement that is still open after these checks is read as prose: Fallow does not see its imports and exports.
   - An extglob include pattern with more than 32 negated groups, for example in `import.meta.glob`, gets no exclude glob and matches more paths.
 
   The extraction and duplication cache versions change, so the first run after an upgrade parses all files again.
