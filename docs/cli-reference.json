@@ -8970,6 +8970,52 @@
           "negated_by": null
         },
         {
+          "id": "reach_selection",
+          "long": "--reach-selection",
+          "short": null,
+          "aliases": [],
+          "value_name": "MODE",
+          "value_names": [
+            "MODE"
+          ],
+          "value_optional": false,
+          "action": "set",
+          "takes_value": true,
+          "multiple": false,
+          "possible_values": [
+            {
+              "name": "off",
+              "aliases": [],
+              "help": "No reach record and no selection",
+              "hidden": false
+            },
+            {
+              "name": "on",
+              "aliases": [],
+              "help": "Record the reach, and leave out the test files that the record drops",
+              "hidden": false
+            },
+            {
+              "name": "check",
+              "aliases": [],
+              "help": "Record the reach, dry-run each test file, and report each dropped test file that covers a mutant",
+              "hidden": false
+            }
+          ],
+          "default": null,
+          "env": null,
+          "help": "Select the dry-run test files by recorded function reach (off by default). `on` records in the cache which functions each test file enters, and leaves a test file out of a later dry run when its record proves that it cannot run a mutant. `check` records, dry-runs each file, and reports each dropped file that covers a mutant. Needs the cache. Overrides `mutation.reachSelection`",
+          "long_help": null,
+          "hidden": false,
+          "hidden_in_short_help": false,
+          "global": false,
+          "help_heading": "Run",
+          "required": false,
+          "conflicts_with": [],
+          "negates": null,
+          "negated_by": null
+        },
+        {
           "id": "min_score",
           "long": "--min-score",
           "short": null,

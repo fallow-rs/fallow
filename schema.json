@@ -1314,6 +1314,17 @@
           "items": {
             "type": "string"
           }
+        },
+        "reachSelection": {
+          "description": "Select the dry-run test files by recorded function reach: `off`, `on`\nor `check`. A run with `on` or `check` records in the cache which\nfunctions each test file enters. A later run with `on` leaves a test\nfile out of the dry run when its record proves that the file cannot\nrun a mutant of that run. `check` dry-runs each file and reports each\ndropped file that covers a mutant. The selection needs the cache.\nUnset is `off`. `--reach-selection` wins.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MutationReachSelection"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "additionalProperties": false
@@ -1460,6 +1471,26 @@
           "description": "Opt-in. `a ?? b` to `a`.",
           "type": "string",
           "const": "nullish-fallback"
+        }
+      ]
+    },
+    "MutationReachSelection": {
+      "description": "The selection of the dry-run test files by recorded function reach.",
+      "oneOf": [
+        {
+          "description": "No reach record and no selection.",
+          "type": "string",
+          "const": "off"
+        },
+        {
+          "description": "Record the functions that each test file enters, and leave a test file\nout of the dry run when its record proves that it cannot run a mutant.",
+          "type": "string",
+          "const": "on"
+        },
+        {
+          "description": "Record as `on`, dry-run each test file, and report each dropped test\nfile that covers a mutant.",
+          "type": "string",
+          "const": "check"
         }
       ]
     },
