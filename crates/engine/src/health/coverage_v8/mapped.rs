@@ -29,7 +29,7 @@ pub(super) struct GeneratedScript {
 
 impl GeneratedScript {
     pub(super) fn parse(entry: &SourceMapCacheEntry) -> Option<Self> {
-        let map = SourceMap::from_json(&entry.data.to_string()).ok()?;
+        let map = entry.parse_map(None)?;
         let mut line_starts = Vec::with_capacity(entry.line_lengths.len());
         let mut offset = 0u32;
         for length in &entry.line_lengths {
@@ -203,6 +203,35 @@ mod tests {
         let script = GeneratedScript::parse(&entry).unwrap();
         assert_eq!(script.line_starts, vec![0, 11, 12]);
         assert_eq!(script.generated_len, 17);
+    }
+
+    fn indexed_entry(offset_line: u32, line_lengths: Vec<u32>) -> SourceMapCacheEntry {
+        SourceMapCacheEntry {
+            url: None,
+            line_lengths,
+            data: serde_json::json!({
+                "version": 3,
+                "sections": [{
+                    "offset": { "line": offset_line, "column": 0 },
+                    "map": { "version": 3, "sources": ["a.js"], "names": [], "mappings": "AAAA" }
+                }]
+            }),
+        }
+    }
+
+    #[test]
+    fn a_section_past_the_generated_lines_is_not_parsed() {
+        // The map parser sizes its line table from the largest generated
+        // line, so this one-line script would cost a table of 2^24 lines.
+        assert!(GeneratedScript::parse(&indexed_entry((1 << 24) - 1, vec![1])).is_none());
+        assert!(GeneratedScript::parse(&indexed_entry(2, vec![1, 1])).is_none());
+        assert!(GeneratedScript::parse(&indexed_entry(1, vec![1, 1])).is_some());
+
+        // With no line lengths, the lines of the generated text count.
+        let entry = indexed_entry(2, Vec::new());
+        assert!(entry.parse_map(None).is_none());
+        assert!(entry.parse_map(Some("a\r\nb\u{2028}c")).is_some());
+        assert!(entry.parse_map(Some("a\nb")).is_none());
     }
 
     #[test]

@@ -1040,8 +1040,8 @@ fn remap_script_with_source_map(
     script: &fallow_v8_coverage::ScriptCoverage,
     entry: &SourceMapCacheEntry,
 ) -> Option<RemappedScript> {
-    let sourcemap = SourceMap::from_json(&entry.data.to_string()).ok()?;
     let generated_source = coverage_inputs::generated_source(root, script);
+    let sourcemap = entry.parse_map(generated_source.as_deref())?;
     let positions = match generated_source.as_deref() {
         Some(source) => GeneratedPositionLookup::SourceText {
             offsets: Utf16OffsetIndex::new(source),
