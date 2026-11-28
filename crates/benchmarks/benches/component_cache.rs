@@ -17,9 +17,6 @@
 //! index, with import specifiers, imported symbol names, and relative paths
 //! drawn from small fixed vocabularies so the same strings repeat across
 //! modules the way they do in a real project.
-//!
-//! `component_cache_store_save` includes an fsync through the atomic-write
-//! path, so its local wall-clock numbers are noisier than the other two cases.
 
 use std::path::{Path, PathBuf};
 

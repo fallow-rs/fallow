@@ -2,11 +2,11 @@
 //! previously-built [`ModuleGraph`].
 //!
 //! Mirrors the extraction cache store (`fallow_extract::cache::store`): the
-//! payload is postcard-encoded, written atomically via a uniquely named temp
-//! file plus best-effort fsync and rename, and a `.gitignore` is written alongside
-//! so `.fallow/` is never committed. Every IO error is swallowed (the graph
-//! cache is best-effort and must never fail analysis); a corrupt or
-//! version-mismatched file misses and the graph is rebuilt fresh, but the
+//! payload is postcard-encoded. The store writes it to a uniquely named temp
+//! file and renames that file into place, without fsync. It also writes a
+//! `.gitignore`, so `.fallow/` is never committed. Every IO error is
+//! swallowed (the graph cache is best-effort and must never fail analysis); a
+//! corrupt or version-mismatched file misses and the graph is rebuilt fresh, but the
 //! loader names WHY it missed through [`CacheRejection`] so the run can report
 //! a refusal instead of leaving it indistinguishable from a first run.
 

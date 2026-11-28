@@ -239,7 +239,10 @@ fn write_atomic(target: CacheTarget<'_>, state: &ViewedState) -> std::io::Result
     };
     let json = serde_json::to_string_pretty(state)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-    target.with_dir(parent).write_file(name, json.as_bytes())
+    // The ledger holds marks of the user that fallow cannot build again.
+    target
+        .with_dir(parent)
+        .write_file_synced(name, json.as_bytes())
 }
 
 #[cfg(test)]
