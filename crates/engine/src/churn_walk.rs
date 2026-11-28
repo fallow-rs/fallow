@@ -100,8 +100,8 @@ mod tests {
     use std::path::Path;
 
     use super::super::{
-        ChurnCoverage, ChurnEventState, analyze_churn_cached, analyze_fresh_churn,
-        extend_churn_cache, get_head_sha, parse_since, read_churn_cache, save_churn_cache,
+        ChurnCoverage, analyze_churn_cached, analyze_fresh_churn, extend_churn_cache, get_head_sha,
+        parse_since, read_churn_cache,
     };
     use super::is_unknown_cutoff_filter;
     use fallow_types::path_guard::CacheTarget;
@@ -196,7 +196,7 @@ mod tests {
     #[test]
     #[cfg(unix)]
     fn churn_cache_reads_no_cache_file_link_out_of_the_cache_dir() {
-        let state = ChurnEventState {
+        let state = super::super::ChurnEventState {
             files: rustc_hash::FxHashMap::default(),
             author_pool: Vec::new(),
             commit_pool: Vec::new(),
@@ -207,7 +207,12 @@ mod tests {
             head_sha: "abc123".to_owned(),
             ..ChurnCoverage::default()
         };
-        save_churn_cache(CacheTarget::inside(outside.path()), "1y", &state, &coverage);
+        super::super::save_churn_cache(
+            CacheTarget::inside(outside.path()),
+            "1y",
+            &state,
+            &coverage,
+        );
         assert!(read_churn_cache(CacheTarget::inside(outside.path())).is_some());
 
         let cache_dir = tempfile::tempdir().expect("cache directory");
