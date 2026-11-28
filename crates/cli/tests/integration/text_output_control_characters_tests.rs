@@ -393,3 +393,53 @@ fn uncolored_health_values_drop_their_terminal_sequence_with_color_on() {
         );
     }
 }
+
+#[cfg(unix)]
+#[test]
+fn a_health_baseline_path_with_a_line_break_stays_on_its_stderr_line() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    write_package(root);
+    std::fs::write(root.join("src/index.ts"), "export const used = 1;\n").unwrap();
+    let name = "health\n::notice title=Note::text.json";
+    let baseline = root.join(name);
+    let baseline = baseline.to_str().unwrap();
+
+    let saved = run_fallow_in_root("health", root, &["--save-baseline", baseline]);
+    let output = run_fallow_in_root("health", root, &["--baseline", baseline]);
+    for run in [&saved, &output] {
+        assert_no_line_starts_with(&run.stderr, RUNNER_PREFIX, "health baseline");
+    }
+    assert!(
+        output.stderr.contains(&name.replace('\n', r"\n")),
+        "the baseline path must stay readable:\n{}",
+        output.stderr
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_markdown_clone_family_suggestion_keeps_its_file_name_on_its_line() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    write_package(root);
+    use std::fmt::Write as _;
+    let mut body = String::new();
+    for i in 0..8 {
+        let _ = write!(
+            body,
+            "export function f{i}(a: number, b: number) {{\n  const c = a * {i} + b;\n  \
+             if (c > {i}) {{ return c - a; }}\n  return c + b * {i};\n}}\n"
+        );
+    }
+    std::fs::write(root.join("src/a\n::notice title=Note::x.ts"), &body).unwrap();
+    std::fs::write(root.join("src/b.ts"), &body).unwrap();
+
+    let output = run_fallow_in_root("dupes", root, &["--format", "markdown"]);
+    assert!(
+        output.stdout.contains("Clone Families"),
+        "the fixture must give a clone family:\n{}",
+        output.stdout
+    );
+    assert_no_line_starts_with(&output.stdout, RUNNER_PREFIX, "dupes markdown");
+}

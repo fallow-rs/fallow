@@ -1370,13 +1370,13 @@ fn write_duplication_families(out: &mut String, report: &DuplicationReport, root
                 .collect::<Vec<_>>()
                 .join(", "),
         );
-        for suggestion in &family.suggestions {
-            let savings = if suggestion.estimated_savings > 0 {
-                format!(" (~{} lines saved)", suggestion.estimated_savings)
+        for s in &family.suggestions {
+            let savings = if s.estimated_savings > 0 {
+                format!(" (~{} lines saved)", s.estimated_savings)
             } else {
                 String::new()
             };
-            let _ = writeln!(out, "- {}{savings}", suggestion.description);
+            let _ = writeln!(out, "- {}{savings}", escape_markdown_prose(&s.description));
         }
         out.push('\n');
     }

@@ -8,6 +8,7 @@
 use crate::baseline::{BaselineKind, HealthBaselineData, HealthBaselineMode};
 
 use super::HealthError;
+use fallow_output::display_path;
 
 pub(super) struct HealthBaselineSaveInput<'a> {
     pub(super) save_path: &'a std::path::Path,
@@ -69,7 +70,7 @@ fn check_identity_overwrite(
              save would drop them, breaking later --baseline-mode identity runs. \
              Re-save with --baseline-mode identity to keep them, or pass \
              --baseline-mode count explicitly to downgrade the baseline",
-            save_path.display()
+            display_path(save_path)
         ),
         2,
     ))
@@ -124,7 +125,7 @@ pub(super) fn save_health_baseline(input: &HealthBaselineSaveInput<'_>) -> Resul
                 }
             }
             if !quiet {
-                eprintln!("Saved health baseline to {}", save_path.display());
+                eprintln!("Saved health baseline to {}", display_path(save_path));
             }
             crate::baseline_location::warn_if_in_cache_dir(save_path, cache_dir, config_root);
             Ok(())
@@ -179,8 +180,8 @@ pub(super) fn load_health_baseline(
                 "health baseline {} carries no finding identities, so --baseline-mode identity \
                  cannot compare against it. Re-save it with: --save-baseline {} \
                  --baseline-mode identity",
-                baseline_path.display(),
-                baseline_path.display()
+                display_path(baseline_path),
+                display_path(baseline_path)
             ),
             2,
         ));
@@ -193,7 +194,7 @@ pub(super) fn load_health_baseline(
     if !quiet {
         eprintln!(
             "Comparing against health baseline: {}",
-            baseline_path.display()
+            display_path(baseline_path)
         );
     }
     let counts = StalenessCounts {
