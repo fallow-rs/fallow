@@ -82,7 +82,7 @@ const TIMED_OUT: &str = "code mode execution timed out";
 /// Engine heap peak of one snippet above which its process ends after the
 /// snippet: half of the engine memory limit. A snippet that fills the engine
 /// memory passes it, whatever its error text.
-const REPLACE_ENGINE_PEAK_BYTES: usize = 16 * 1024 * 1024;
+const REPLACE_ENGINE_PEAK_BYTES: usize = super::MEMORY_LIMIT_BYTES / 2;
 
 /// How often the watchdog of a snippet process checks its parent and its time
 /// limit.

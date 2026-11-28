@@ -61,12 +61,17 @@ impl CountingAllocator {
     }
 
     /// The size that `ptr` counts for: zero for a null pointer.
-    fn size_of(ptr: *mut u8) -> usize {
+    ///
+    /// # Safety
+    ///
+    /// `ptr` must be null or a live allocation of `RustAllocator`, which
+    /// stores the size in front of each allocation.
+    unsafe fn size_of(ptr: *mut u8) -> usize {
         if ptr.is_null() {
             return 0;
         }
-        // SAFETY: `ptr` is not null and came from `RustAllocator`, which
-        // stores the size in front of each allocation.
+        // SAFETY: `ptr` is not null, and the caller guarantees that it is a
+        // live allocation of `RustAllocator`.
         unsafe { RustAllocator::usable_size(ptr) }
     }
 }
@@ -76,31 +81,39 @@ impl CountingAllocator {
 unsafe impl Allocator for CountingAllocator {
     fn alloc(&mut self, size: usize) -> *mut u8 {
         let ptr = RustAllocator.alloc(size);
-        Self::add(Self::size_of(ptr));
+        // SAFETY: `ptr` is null or the new allocation of `RustAllocator`.
+        Self::add(unsafe { Self::size_of(ptr) });
         ptr
     }
 
     fn calloc(&mut self, count: usize, size: usize) -> *mut u8 {
         let ptr = RustAllocator.calloc(count, size);
-        Self::add(Self::size_of(ptr));
+        // SAFETY: `ptr` is null or the new allocation of `RustAllocator`.
+        Self::add(unsafe { Self::size_of(ptr) });
         ptr
     }
 
     unsafe fn dealloc(&mut self, ptr: *mut u8) {
-        Self::remove(Self::size_of(ptr));
+        // SAFETY: the caller passes a live pointer of this allocator, so it
+        // came from `RustAllocator`.
+        Self::remove(unsafe { Self::size_of(ptr) });
         // SAFETY: the caller passes a pointer of this allocator, so it came
         // from `RustAllocator`.
         unsafe { RustAllocator.dealloc(ptr) };
     }
 
     unsafe fn realloc(&mut self, ptr: *mut u8, new_size: usize) -> *mut u8 {
-        let old = Self::size_of(ptr);
+        // SAFETY: the caller passes a null pointer or a live pointer of this
+        // allocator, so it came from `RustAllocator`.
+        let old = unsafe { Self::size_of(ptr) };
         // SAFETY: the caller passes a pointer of this allocator, so it came
         // from `RustAllocator`.
         let new_ptr = unsafe { RustAllocator.realloc(ptr, new_size) };
         if !new_ptr.is_null() {
             Self::remove(old);
-            Self::add(Self::size_of(new_ptr));
+            // SAFETY: `new_ptr` is the live allocation that `RustAllocator`
+            // just returned.
+            Self::add(unsafe { Self::size_of(new_ptr) });
         }
         new_ptr
     }
