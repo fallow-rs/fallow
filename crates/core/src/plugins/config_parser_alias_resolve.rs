@@ -17,11 +17,12 @@ use super::{
 /// allows an exponential number of reads.
 const MAX_ALIAS_RESOLVE_STEPS: usize = 4_096;
 
-/// Maximum pairs that one alias value, or one part of it, resolves to.
-/// Spreads of spreads multiply the pairs, so a short config can otherwise
-/// collect millions of copies. Real configs declare fewer than a hundred
-/// aliases.
-const MAX_ALIAS_PAIRS: usize = 512;
+/// Maximum pairs that a list takes from its spreads. Spreads of spreads
+/// multiply the pairs, so a short config can otherwise collect millions of
+/// copies. Pairs written out in the list itself do not count against this
+/// cap, because the source bounds them. Real configs declare fewer than a
+/// hundred aliases, and generated ones a few hundred.
+const MAX_ALIAS_PAIRS: usize = 4_096;
 
 /// One resolved alias: `(find, replacement, is_bare)`.
 type AliasPair = (String, String, bool);
@@ -51,7 +52,8 @@ impl AliasResolveState {
     }
 }
 
-/// Add `more` to `pairs`, up to [`MAX_ALIAS_PAIRS`] pairs in total.
+/// Add the pairs of a spread to `pairs`, up to [`MAX_ALIAS_PAIRS`] pairs in
+/// total.
 fn extend_alias_pairs(pairs: &mut Vec<(String, String, bool)>, more: Vec<(String, String, bool)>) {
     let room = MAX_ALIAS_PAIRS.saturating_sub(pairs.len());
     pairs.extend(more.into_iter().take(room));
@@ -124,7 +126,7 @@ fn resolve_object_alias_pairs_kinded(
                     && let Some((replacement, is_bare)) =
                         alias_replacement_kinded(&prop.value, PathScope::Program(program))
                 {
-                    extend_alias_pairs(&mut pairs, vec![(find, replacement, is_bare)]);
+                    pairs.push((find, replacement, is_bare));
                 }
             }
             // `{ ...sharedAliases, '@': './src' }`
@@ -171,7 +173,7 @@ fn resolve_array_alias_pairs_kinded(
                     && let Some(pair) =
                         alias_entry::object_alias_pair(obj, PathScope::Program(program))
                 {
-                    extend_alias_pairs(&mut pairs, vec![pair]);
+                    pairs.push(pair);
                 }
             }
         }
@@ -293,5 +295,34 @@ mod tests {
         );
         assert!(!got.is_empty());
         assert!(got.len() <= MAX_ALIAS_PAIRS, "{} pairs", got.len());
+    }
+
+    #[test]
+    fn aliases_written_out_in_full_are_all_kept() {
+        let entries = 600;
+        let object = (0..entries)
+            .map(|index| format!("'@a{index}': './src/a{index}'"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let source = format!("export default {{ resolve: {{ alias: {{ {object} }} }} }};");
+        let got = extract_config_aliases_kinded(
+            &source,
+            Path::new("vite.config.js"),
+            &["resolve", "alias"],
+        );
+        assert_eq!(got.len(), entries);
+        let array = (0..entries)
+            .map(|index| format!("{{ find: '@a{index}', replacement: './src/a{index}' }}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let source = format!(
+            "const shared = [{array}];\nexport default {{ resolve: {{ alias: [...shared] }} }};"
+        );
+        let got = extract_config_aliases_kinded(
+            &source,
+            Path::new("vite.config.js"),
+            &["resolve", "alias"],
+        );
+        assert_eq!(got.len(), entries);
     }
 }
