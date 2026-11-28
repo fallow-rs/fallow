@@ -6,7 +6,9 @@ use std::sync::atomic::Ordering;
 
 use rustc_hash::FxHashSet;
 
-use super::RESOLUTION_STEPS;
+use super::{
+    MAX_STATIC_RESOLUTION_DEPTH, RESOLUTION_STEPS, StaticVisit, is_definitely_static_primitive,
+};
 use crate::css_in_js::{ConsumerQuery, css_in_js_consumer_scan};
 
 /// Constants where each one reads the previous constant twice.
@@ -56,4 +58,76 @@ fn a_long_doubling_chain_finishes_inside_the_step_budget() {
         let steps = resolution_steps(&doubling_chain(40, "1", call));
         assert!(steps <= 4_096, "resolution steps for {call}: {steps}");
     }
+}
+
+/// Check the arguments of the last statement, a call, in order with one
+/// resolution state, as the scan checks the arguments of one call.
+fn primitive_arguments(source: &str) -> Vec<bool> {
+    use oxc_allocator::Allocator;
+    use oxc_ast::ast::{BindingPattern, Expression, IdentifierReference, Statement};
+    use oxc_ast_visit::Visit;
+    use oxc_parser::Parser;
+    use oxc_span::{SourceType, Span};
+    use rustc_hash::FxHashMap;
+
+    #[derive(Default)]
+    struct References(FxHashSet<Span>);
+    impl Visit<'_> for References {
+        fn visit_identifier_reference(&mut self, identifier: &IdentifierReference<'_>) {
+            self.0.insert(identifier.span);
+        }
+    }
+
+    let allocator = Allocator::default();
+    let program = Parser::new(&allocator, source, SourceType::mjs())
+        .parse()
+        .program;
+    let mut static_values: FxHashMap<&str, (u32, &Expression<'_>)> = FxHashMap::default();
+    for statement in &program.body {
+        if let Statement::VariableDeclaration(declaration) = statement {
+            for declarator in &declaration.declarations {
+                if let (BindingPattern::BindingIdentifier(binding), Some(init)) =
+                    (&declarator.id, &declarator.init)
+                {
+                    static_values.insert(binding.name.as_str(), (declarator.span.start, init));
+                }
+            }
+        }
+    }
+    let mut references = References::default();
+    references.visit_program(&program);
+    let Some(Statement::ExpressionStatement(statement)) = program.body.last() else {
+        panic!("the source must end with a call");
+    };
+    let Expression::CallExpression(call) = &statement.expression else {
+        panic!("the source must end with a call");
+    };
+    let mut visiting = StaticVisit::default();
+    call.arguments
+        .iter()
+        .map(|argument| {
+            is_definitely_static_primitive(
+                argument.to_expression(),
+                statement.span.start,
+                &static_values,
+                &references.0,
+                &mut visiting,
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn a_result_cut_by_the_depth_limit_is_not_memoized() {
+    let length = MAX_STATIC_RESOLUTION_DEPTH + 6;
+    let mut source = String::from("const k0 = 1;\n");
+    for index in 1..=length {
+        let previous = index - 1;
+        writeln!(source, "const k{index} = k{previous} + 1;").unwrap();
+    }
+    writeln!(source, "String(k{length}, k10);").unwrap();
+
+    // The long chain passes the depth limit and is not known to be static.
+    // `k10` is on that chain, but on its own it is well inside the limit.
+    assert_eq!(primitive_arguments(&source), [false, true]);
 }

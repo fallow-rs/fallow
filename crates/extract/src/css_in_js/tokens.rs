@@ -66,7 +66,9 @@ use oxc_span::{GetSpan, SourceType, Span};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::object::{Lib, module_library};
-use super::static_resolution::{StaticVisit, is_definitely_static_primitive};
+use super::static_resolution::{
+    StaticVisit, is_definitely_static_primitive, is_static_stylex_theme_override_binding,
+};
 use crate::js_text::JsText;
 use crate::visitor::MAX_RECORDED_CHAIN_LINKS;
 
@@ -1105,7 +1107,7 @@ fn call_receiver_expression<'a, 'b: 'a>(callee: &'a Expression<'b>) -> Option<&'
     }
 }
 
-fn is_static_stylex_theme_override<'a>(
+pub(super) fn is_static_stylex_theme_override<'a>(
     expression: &'a Expression<'a>,
     before: u32,
     static_values: &FxHashMap<&'a str, (u32, &'a Expression<'a>)>,
@@ -1193,43 +1195,6 @@ fn is_static_stylex_theme_override<'a>(
         ),
         _ => false,
     }
-}
-
-fn is_static_stylex_theme_override_binding<'a>(
-    identifier: &IdentifierReference<'a>,
-    before: u32,
-    static_values: &FxHashMap<&'a str, (u32, &'a Expression<'a>)>,
-    imports: &FxHashMap<&'a str, (Lib, &'a str)>,
-    root_reference_spans: &FxHashSet<Span>,
-    visiting: &mut StaticVisit<'a>,
-) -> bool {
-    if !root_reference_spans.contains(&identifier.span) {
-        return false;
-    }
-    let name = identifier.name.as_str();
-    let Some(&(declaration_start, value)) = static_values.get(name) else {
-        return false;
-    };
-    if declaration_start >= before {
-        return false;
-    }
-    if let Some(&is_static) = visiting.theme_override.get(name) {
-        return is_static;
-    }
-    if !visiting.insert(name) {
-        return false;
-    }
-    let is_static = is_static_stylex_theme_override(
-        value,
-        declaration_start,
-        static_values,
-        imports,
-        root_reference_spans,
-        visiting,
-    );
-    visiting.remove(name);
-    visiting.theme_override.insert(name, is_static);
-    is_static
 }
 
 fn is_static_stylex_composite_expression<'a>(
@@ -1803,6 +1768,7 @@ fn is_static_stylex_bigint_value_with_context<'a>(
             if !visiting.insert(name) {
                 return false;
             }
+            let outer_capped = visiting.start_check();
             let nested_context = StyleXBigIntContext {
                 before: declaration_start,
                 ..*context
@@ -1810,7 +1776,7 @@ fn is_static_stylex_bigint_value_with_context<'a>(
             let is_bigint =
                 is_static_stylex_bigint_value_with_context(value, &nested_context, visiting);
             visiting.remove(name);
-            if memoizable {
+            if visiting.finish_check(outer_capped) && memoizable {
                 visiting.bigint.insert(name, is_bigint);
             }
             is_bigint

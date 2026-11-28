@@ -1,10 +1,11 @@
 //! Static value resolution state for the StyleX consumer scan.
 
-use oxc_ast::ast::Expression;
+use oxc_ast::ast::{Expression, IdentifierReference};
 use oxc_span::Span;
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use super::tokens::unwrap_transparent_expression;
+use super::object::Lib;
+use super::tokens::{is_static_stylex_theme_override, unwrap_transparent_expression};
 
 #[cfg(test)]
 static RESOLUTION_STEPS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
@@ -25,12 +26,15 @@ const MAX_STATIC_RESOLUTION_DEPTH: usize = 64;
 /// budget and memos of finished checks.
 ///
 /// A constant can only read constants declared before it, so a finished
-/// check of a constant does not depend on the expansion that reached it.
+/// check of a constant does not depend on the expansion that reached it. A
+/// check that reached a limit depends on it, so the memos skip that result.
 #[derive(Clone, Default)]
 pub(super) struct StaticVisit<'a> {
     active: FxHashSet<&'a str>,
     /// Expansions so far. Clones share the count.
     steps: std::rc::Rc<std::cell::Cell<usize>>,
+    /// The current check reached a limit. Clones share the flag.
+    capped: std::rc::Rc<std::cell::Cell<bool>>,
     primitive: FxHashMap<&'a str, bool>,
     pub(super) bigint: FxHashMap<&'a str, bool>,
     pub(super) theme_override: FxHashMap<&'a str, bool>,
@@ -45,10 +49,25 @@ impl<'a> StaticVisit<'a> {
         let steps = self.steps.get();
         if steps >= MAX_STATIC_RESOLUTION_STEPS || self.active.len() >= MAX_STATIC_RESOLUTION_DEPTH
         {
+            self.capped.set(true);
             return false;
         }
         self.steps.set(steps + 1);
         self.active.insert(name)
+    }
+
+    /// Start a check whose result can go in a memo. Returns the limit state
+    /// of the enclosing check, for [`Self::finish_check`].
+    pub(super) fn start_check(&self) -> bool {
+        self.capped.replace(false)
+    }
+
+    /// Finish the check that [`Self::start_check`] started. Returns `true`
+    /// when the check reached no limit, so its result can go in a memo.
+    pub(super) fn finish_check(&self, outer_capped: bool) -> bool {
+        let capped = self.capped.get();
+        self.capped.set(outer_capped || capped);
+        !capped
     }
 
     pub(super) fn remove(&mut self, name: &str) {
@@ -140,6 +159,7 @@ pub(super) fn is_definitely_static_primitive<'a>(
             if !visiting.insert(name) {
                 return false;
             }
+            let outer_capped = visiting.start_check();
             let is_primitive = is_definitely_static_primitive(
                 value,
                 declaration_start,
@@ -148,7 +168,9 @@ pub(super) fn is_definitely_static_primitive<'a>(
                 visiting,
             );
             visiting.remove(name);
-            visiting.primitive.insert(name, is_primitive);
+            if visiting.finish_check(outer_capped) {
+                visiting.primitive.insert(name, is_primitive);
+            }
             is_primitive
         }
         _ => false,
@@ -171,4 +193,44 @@ fn is_static_stylex_primitive_pair<'a>(
             root_reference_spans,
             visiting,
         )
+}
+
+pub(super) fn is_static_stylex_theme_override_binding<'a>(
+    identifier: &IdentifierReference<'a>,
+    before: u32,
+    static_values: &FxHashMap<&'a str, (u32, &'a Expression<'a>)>,
+    imports: &FxHashMap<&'a str, (Lib, &'a str)>,
+    root_reference_spans: &FxHashSet<Span>,
+    visiting: &mut StaticVisit<'a>,
+) -> bool {
+    if !root_reference_spans.contains(&identifier.span) {
+        return false;
+    }
+    let name = identifier.name.as_str();
+    let Some(&(declaration_start, value)) = static_values.get(name) else {
+        return false;
+    };
+    if declaration_start >= before {
+        return false;
+    }
+    if let Some(&is_static) = visiting.theme_override.get(name) {
+        return is_static;
+    }
+    if !visiting.insert(name) {
+        return false;
+    }
+    let outer_capped = visiting.start_check();
+    let is_static = is_static_stylex_theme_override(
+        value,
+        declaration_start,
+        static_values,
+        imports,
+        root_reference_spans,
+        visiting,
+    );
+    visiting.remove(name);
+    if visiting.finish_check(outer_capped) {
+        visiting.theme_override.insert(name, is_static);
+    }
+    is_static
 }
