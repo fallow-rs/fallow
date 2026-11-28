@@ -6,6 +6,7 @@ mod es_modules;
 mod expressions;
 mod ignore_imports;
 mod jsx;
+mod nested_param_defaults;
 mod operators;
 mod proptests;
 mod statements;

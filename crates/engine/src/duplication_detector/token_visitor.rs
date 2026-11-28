@@ -15,6 +15,14 @@ use super::token_types::{
     KeywordType, OperatorType, PunctuationType, SourceToken, TokenKind, point_span,
 };
 
+/// Nesting of parameter lists below which the function walk tokenizes the
+/// parameter patterns a second time. The function visitors tokenize each
+/// parameter pattern before the walk, and the walk tokenizes it again. A
+/// default value in a pattern can hold another function, so each nested level
+/// doubles the tokens of the functions inside it. A function nested this deep
+/// in parameter lists tokenizes its patterns once.
+const MAX_PARAM_REPLAY_DEPTH: u32 = 4;
+
 /// AST visitor that extracts a flat sequence of normalized tokens.
 pub(super) struct TokenExtractor<'s> {
     /// The text that the parser read. Token spans index into it.
@@ -29,6 +37,11 @@ pub(super) struct TokenExtractor<'s> {
     /// When true, skip all `import` declarations from the token stream to reduce
     /// noise from sorted import blocks that naturally look similar across files.
     skip_imports: bool,
+    /// The parameters of the function whose walk starts next, and whether the
+    /// walk tokenizes their patterns again.
+    replayed_params: Option<(Span, bool)>,
+    /// Nesting of the parameter lists that the visitor is inside.
+    param_depth: u32,
 }
 
 impl<'s> TokenExtractor<'s> {
@@ -41,6 +54,8 @@ impl<'s> TokenExtractor<'s> {
             literal_argument_spans: Vec::new(),
             strip_types,
             skip_imports,
+            replayed_params: None,
+            param_depth: 0,
         }
     }
 
@@ -757,10 +772,12 @@ impl<'a> Visit<'a> for TokenExtractor<'_> {
         }
         let params_span = expr.params.span;
         self.push_punc(PunctuationType::OpenParen, point_span(params_span.start));
+        self.param_depth += 1;
         for param in &expr.params.items {
             self.visit_binding_pattern(&param.pattern);
             self.push_op(OperatorType::Comma, point_span(param.span.end));
         }
+        self.param_depth -= 1;
         self.push_punc(
             PunctuationType::CloseParen,
             point_span(params_span.end.saturating_sub(1)),
@@ -768,7 +785,37 @@ impl<'a> Visit<'a> for TokenExtractor<'_> {
         // The return type tokens come after the arrow token, so with a return
         // type the arrow keeps an empty span at the end of the parameters.
         self.push_op(OperatorType::Arrow, self.next_text(params_span.end, "=>"));
+        self.replayed_params = Some((params_span, self.param_depth < MAX_PARAM_REPLAY_DEPTH));
         walk::walk_arrow_function_expression(self, expr);
+    }
+
+    fn visit_formal_parameters(&mut self, params: &FormalParameters<'a>) {
+        let Some((_, replay)) = self
+            .replayed_params
+            .filter(|&(span, _)| span == params.span)
+        else {
+            walk::walk_formal_parameters(self, params);
+            return;
+        };
+        self.replayed_params = None;
+        self.param_depth += 1;
+        if replay {
+            walk::walk_formal_parameters(self, params);
+        } else {
+            for param in &params.items {
+                self.visit_decorators(&param.decorators);
+                if let Some(annotation) = &param.type_annotation {
+                    self.visit_ts_type_annotation(annotation);
+                }
+                if let Some(initializer) = &param.initializer {
+                    self.visit_expression(initializer);
+                }
+            }
+            if let Some(rest) = &params.rest {
+                self.visit_formal_parameter_rest(rest);
+            }
+        }
+        self.param_depth -= 1;
     }
 
     fn visit_yield_expression(&mut self, expr: &YieldExpression<'a>) {
@@ -818,14 +865,17 @@ impl<'a> Visit<'a> for TokenExtractor<'_> {
         }
         let params_span = func.params.span;
         self.push_punc(PunctuationType::OpenParen, point_span(params_span.start));
+        self.param_depth += 1;
         for param in &func.params.items {
             self.visit_binding_pattern(&param.pattern);
             self.push_op(OperatorType::Comma, point_span(param.span.end));
         }
+        self.param_depth -= 1;
         self.push_punc(
             PunctuationType::CloseParen,
             point_span(params_span.end.saturating_sub(1)),
         );
+        self.replayed_params = Some((params_span, self.param_depth < MAX_PARAM_REPLAY_DEPTH));
         walk::walk_function(self, func, flags);
     }
 
