@@ -150,7 +150,7 @@ impl PackageManager {
         ];
         LOCKFILES
             .iter()
-            .find(|(lockfile, _)| root.join(lockfile).exists())
+            .find(|(lockfile, _)| is_local_file(root, &root.join(lockfile)))
             .map(|&(_, manager)| manager)
     }
 }
@@ -160,11 +160,27 @@ impl PackageManager {
 const YARN_CLASSIC_LOCKFILE_HEADER: &str = "# yarn lockfile v1";
 const LOCKFILE_HEADER_BYTES: u64 = 512;
 
+/// Whether `path` is a regular file of the project in `dir`. A link counts
+/// only when it resolves to a regular file inside the read scope of `dir`
+/// (see [`crate::project_scope_base`]). The check of a link comes before any
+/// probe of its target, so a link out of the project counts as missing,
+/// whether its target exists or not.
+fn is_local_file(dir: &Path, path: &Path) -> bool {
+    match path.symlink_metadata() {
+        Ok(meta) if meta.file_type().is_symlink() => {
+            fallow_types::read_guard::is_inside_root(&crate::project_scope_base(dir), path)
+                && path.is_file()
+        }
+        Ok(meta) => meta.is_file(),
+        Err(_) => false,
+    }
+}
+
 fn has_yarn_classic_lockfile(dir: &Path) -> bool {
     use std::io::Read as _;
     let lockfile = dir.join("yarn.lock");
     // A FIFO named `yarn.lock` would block the read.
-    if !lockfile.is_file() {
+    if !is_local_file(dir, &lockfile) {
         return false;
     }
     let Ok(file) = std::fs::File::open(lockfile) else {
@@ -466,6 +482,44 @@ mod tests {
         assert_eq!(
             PackageManager::Pnpm.add_dev_command(root.path(), "x"),
             "pnpm add -D x"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn lockfile_link_out_of_the_project_does_not_count() {
+        let outside = tempfile::tempdir().expect("temp outside");
+        std::fs::write(outside.path().join("pnpm-lock.yaml"), "").expect("write lockfile");
+        std::fs::write(outside.path().join("yarn.lock"), YARN_CLASSIC_LOCKFILE)
+            .expect("write lockfile");
+        let root = tempfile::tempdir().expect("temp root");
+        std::fs::write(
+            root.path().join("package.json"),
+            r#"{"workspaces":["packages/*"]}"#,
+        )
+        .expect("write package.json");
+        for lockfile in ["pnpm-lock.yaml", "yarn.lock"] {
+            std::os::unix::fs::symlink(outside.path().join(lockfile), root.path().join(lockfile))
+                .expect("link lockfile");
+        }
+        assert_eq!(PackageManager::detect(root.path()), None);
+        assert!(!PackageManager::Yarn.needs_workspace_root_flag(root.path()));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn lockfile_link_inside_the_project_counts() {
+        let root = tempfile::tempdir().expect("temp root");
+        std::fs::create_dir(root.path().join("shared")).expect("create dir");
+        std::fs::write(root.path().join("shared/pnpm-lock.yaml"), "").expect("write lockfile");
+        std::os::unix::fs::symlink(
+            root.path().join("shared/pnpm-lock.yaml"),
+            root.path().join("pnpm-lock.yaml"),
+        )
+        .expect("link lockfile");
+        assert_eq!(
+            PackageManager::detect(root.path()),
+            Some(PackageManager::Pnpm)
         );
     }
 }
