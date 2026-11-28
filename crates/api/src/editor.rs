@@ -107,6 +107,7 @@ impl ChangedFilesError {
                 if lower.contains("not a valid object name")
                     || lower.contains("unknown revision")
                     || lower.contains("ambiguous argument")
+                    || lower.contains("bad revision")
                 {
                     format!(
                         "{stderr} (shallow clone? try `git fetch --unshallow`, or set `fetch-depth: 0` on actions/checkout / `GIT_DEPTH: 0` in GitLab CI)"

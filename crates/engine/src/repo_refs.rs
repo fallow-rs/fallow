@@ -628,13 +628,7 @@ fn resolve_registered_commit(destination: &Path, base_ref: &str) -> EngineResult
 }
 
 fn populate_worktree_index(destination: &Path, commit: &str) -> EngineResult<()> {
-    let disabled_hooks_path = destination.join(".fallow-disabled-git-hooks");
     let output = git_command(destination)
-        .env("GIT_CONFIG_COUNT", "2")
-        .env("GIT_CONFIG_KEY_0", "core.hooksPath")
-        .env("GIT_CONFIG_VALUE_0", disabled_hooks_path)
-        .env("GIT_CONFIG_KEY_1", "core.fsmonitor")
-        .env("GIT_CONFIG_VALUE_1", "false")
         .args(["read-tree", "--reset", commit])
         .output()
         .map_err(|error| {

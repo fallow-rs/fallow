@@ -230,7 +230,11 @@ fn refresh_blame(cache: &mut AgeCache, rows: &[RetirementFlag], root: &Path) -> 
 /// Commit of each of `lines` in `path`. A line that no commit holds (an
 /// uncommitted change, or an untracked file) maps to `None`.
 fn blame_lines(root: &Path, path: &str, lines: &[u32]) -> FxHashMap<u32, Option<CommitStamp>> {
-    let mut args: Vec<String> = vec!["blame".to_string(), "--porcelain".to_string()];
+    let mut args: Vec<String> = vec![
+        "blame".to_string(),
+        "--porcelain".to_string(),
+        "--no-textconv".to_string(),
+    ];
     for line in lines {
         args.push("-L".to_string());
         args.push(format!("{line},{line}"));
@@ -341,6 +345,7 @@ fn first_commit_with(root: &Path, name: &str) -> Option<CommitStamp> {
         root,
         &[
             "log",
+            "--no-textconv",
             pickaxe.as_str(),
             "--reverse",
             "--format=%H %ct",
@@ -602,6 +607,35 @@ mod tests {
             row.first_seen.as_ref().map(|c| c.date.as_str()),
             Some("2023-11-14")
         );
+    }
+
+    /// A textconv filter changes the lines that blame and the pickaxe
+    /// search read, so both read the committed text.
+    #[cfg(unix)]
+    #[test]
+    fn ages_ignore_a_textconv_filter() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let (dir, root) = fixture();
+        let filter = dir.path().join("one-line.sh");
+        std::fs::write(&filter, "#!/bin/sh\necho converted\n").expect("filter");
+        std::fs::set_permissions(&filter, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+        git(
+            &root,
+            &[
+                "config",
+                "diff.oneline.textconv",
+                filter.to_str().expect("utf-8 path"),
+            ],
+            None,
+        );
+        std::fs::write(root.join(".git/info/attributes"), "*.ts diff=oneline\n")
+            .expect("attributes");
+
+        let (rows, _) = measure(&root, FlagAgeMode::Blame, None);
+        assert_eq!(rows[0].age_days, Some(90), "blame age");
+        let (rows, _) = measure(&root, FlagAgeMode::Pickaxe, None);
+        assert_eq!(rows[0].age_days, Some(100), "pickaxe age");
     }
 
     #[test]

@@ -2779,8 +2779,10 @@ fn audit_demotion_shared_diff_source_takes_precedence_over_worktree_diff() {
 
 /// When no diff can be obtained at all the demotion check is skipped, every
 /// introduced clone group keeps gating, and `--explain` says so (issue #2220,
-/// `DupeDemotionDiffSource::Skipped`). A missing external diff command makes
-/// the merge-base worktree diff fail while changed-file discovery still runs.
+/// `DupeDemotionDiffSource::Skipped`). A `git` wrapper that refuses each
+/// patch diff (`--unified=0`) makes the merge-base worktree diff fail while
+/// changed-file discovery still runs.
+#[cfg(unix)]
 #[test]
 fn audit_demotion_skipped_diff_source_prints_explain_line() {
     let tmp = TempDir::new().expect("failed to create temp dir");
@@ -2814,10 +2816,8 @@ fn audit_demotion_skipped_diff_source_prints_explain_line() {
         "import { selfTest as a } from './a';\nimport { selfTest as b } from './b';\na();\nb();\n",
     )
     .unwrap();
-    // `--name-only` does not invoke an external diff, so changed-file
-    // discovery succeeds. Reading the actual diff does invoke it and fails.
-    let missing_external_diff = dir.join("missing-external-diff");
-    let diff_env = [("GIT_EXTERNAL_DIFF", missing_external_diff.as_path())];
+    let wrapper_path = git_wrapper_refusing_patch_diffs(tmp.path());
+    let diff_env = [("PATH", Path::new(&wrapper_path))];
 
     let output = run_fallow_raw_with_env(
         &[
@@ -2867,6 +2867,32 @@ fn audit_demotion_skipped_diff_source_prints_explain_line() {
     let json = parse_json(&json_run);
     assert_eq!(json["attribution"]["duplication_demoted"], 0);
     assert_eq!(json["attribution"]["duplication_introduced"], 1);
+}
+
+/// A `PATH` whose first folder holds a `git` script that fails for each
+/// command with `--unified=0` and runs the real `git` for each other command.
+#[cfg(unix)]
+fn git_wrapper_refusing_patch_diffs(dir: &Path) -> std::ffi::OsString {
+    use std::os::unix::fs::PermissionsExt;
+
+    let path = std::env::var_os("PATH").unwrap_or_default();
+    let real_git = std::env::split_paths(&path)
+        .map(|folder| folder.join("git"))
+        .find(|candidate| candidate.is_file())
+        .expect("git on PATH");
+    let bin = dir.join("git-wrapper-bin");
+    fs::create_dir_all(&bin).unwrap();
+    let script = bin.join("git");
+    fs::write(
+        &script,
+        format!(
+            "#!/bin/sh\nfor arg in \"$@\"; do\n  if [ \"$arg\" = --unified=0 ]; then\n    echo 'fatal: patch diff refused' >&2\n    exit 128\n  fi\ndone\nexec '{}' \"$@\"\n",
+            real_git.display()
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
+    std::env::join_paths(std::iter::once(bin).chain(std::env::split_paths(&path))).unwrap()
 }
 
 #[test]
