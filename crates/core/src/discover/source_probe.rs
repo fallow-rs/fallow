@@ -10,15 +10,16 @@ const RUNNABLE_EXTENSIONS: &[&str] = &["ts", "tsx", "mts", "cts", "js", "jsx", "
 
 /// The source file that a package entry (`main`, `bin`, `exports`) names:
 /// the exact file, or the path with its extension replaced by a source
-/// extension (`lib/index.js` to `lib/index.ts`).
-pub fn probe_source_file(resolved: &Path) -> Option<PathBuf> {
-    if resolved.is_file() {
+/// extension (`lib/index.js` to `lib/index.ts`). `is_file` is the test of
+/// each candidate.
+pub fn probe_source_file(resolved: &Path, is_file: impl Fn(&Path) -> bool) -> Option<PathBuf> {
+    if is_file(resolved) {
         return Some(resolved.to_path_buf());
     }
     SOURCE_EXTENSIONS
         .iter()
         .map(|ext| resolved.with_extension(ext))
-        .find(|candidate| candidate.is_file())
+        .find(|candidate| is_file(candidate))
 }
 
 /// The module that a file argument of a script, task or CI command runs, as
@@ -36,7 +37,15 @@ pub fn probe_source_file(resolved: &Path) -> Option<PathBuf> {
 /// directory as a filter (`vitest run src/lib/`), and then the index file is
 /// not a module that the command runs.
 pub fn probe_runnable_file(resolved: &Path) -> Option<PathBuf> {
-    if resolved.is_file() {
+    probe_runnable_file_where(resolved, Path::is_file)
+}
+
+/// [`probe_runnable_file`] with `is_file` as the test of each candidate.
+pub fn probe_runnable_file_where(
+    resolved: &Path,
+    is_file: impl Fn(&Path) -> bool,
+) -> Option<PathBuf> {
+    if is_file(resolved) {
         return Some(resolved.to_path_buf());
     }
     let has_runnable_extension = resolved
@@ -54,7 +63,7 @@ pub fn probe_runnable_file(resolved: &Path) -> Option<PathBuf> {
             name.push(ext);
             PathBuf::from(name)
         })
-        .find(|candidate| candidate.is_file())
+        .find(|candidate| is_file(candidate))
 }
 
 /// Whether `path` has an extension that is not a runnable extension
@@ -71,6 +80,17 @@ pub fn probe_directory_index(resolved: &Path) -> Option<PathBuf> {
     fallow_graph::resolve::directory_index_entry(resolved, SOURCE_EXTENSIONS)
 }
 
+/// [`probe_directory_index`] with `is_file` as the test of each candidate.
+pub fn probe_directory_index_where(
+    resolved: &Path,
+    is_file: impl Fn(&Path) -> bool,
+) -> Option<PathBuf> {
+    SOURCE_EXTENSIONS
+        .iter()
+        .map(|ext| resolved.join(format!("index.{ext}")))
+        .find(|candidate| is_file(candidate))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -85,7 +105,7 @@ mod tests {
         }
 
         assert_eq!(
-            probe_source_file(&lib.join("index.json")),
+            probe_source_file(&lib.join("index.json"), Path::is_file),
             Some(lib.join("index.ts"))
         );
         assert_eq!(probe_runnable_file(&lib.join("index.json")), None);

@@ -1254,3 +1254,28 @@ fn confirmation_at_end_of_input_is_no_even_with_a_yes_default() {
     assert_eq!(read_confirmation(&mut &b"y\n"[..], false), Ok(true));
     assert_eq!(read_confirmation(&mut &b"n"[..], true), Ok(false));
 }
+
+#[test]
+fn node_entry_path_skips_a_package_entry_out_of_the_project() {
+    let sandbox = tempfile::tempdir().expect("create sandbox");
+    let root = sandbox.path().join("project");
+    std::fs::create_dir_all(&root).expect("create root");
+    std::fs::create_dir_all(sandbox.path().join("other")).expect("create other");
+    std::fs::write(sandbox.path().join("other/server.js"), "").expect("write server");
+    std::fs::write(root.join("app.js"), "").expect("write app");
+    let outside = sandbox.path().join("other/server.js");
+    for main in [outside.to_str().expect("utf-8 path"), "../other/server.js"] {
+        let package_json: fallow_config::PackageJson =
+            serde_json::from_value(serde_json::json!({ "main": main })).expect("package.json");
+        assert_eq!(
+            super::detect_node_entry_path(&root, Some(&package_json)),
+            "src/server.ts"
+        );
+    }
+    let package_json: fallow_config::PackageJson =
+        serde_json::from_value(serde_json::json!({ "main": "./app.js" })).expect("package.json");
+    assert_eq!(
+        super::detect_node_entry_path(&root, Some(&package_json)),
+        "app.js"
+    );
+}
