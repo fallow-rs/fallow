@@ -345,6 +345,19 @@ pub fn report_relative_path(file: &str) -> Result<&Path, fallow_api::Programmati
     Ok(relative)
 }
 
+/// Reads the source file `relative` of a report below `root`. `None` for a
+/// file that is missing, that resolves outside the root, that is not a
+/// regular file, or that is too large.
+#[must_use]
+pub fn read_report_source(root: &Path, relative: &Path) -> Option<Vec<u8>> {
+    fallow_types::read_guard::read_bytes_inside(
+        root,
+        relative,
+        fallow_types::read_guard::DEFAULT_MAX_READ_BYTES,
+    )
+    .ok()
+}
+
 /// The source without its leading UTF-8 byte order mark. The run strips the
 /// mark before it instruments a file, so the report spans count from the end
 /// of the mark.
@@ -427,7 +440,7 @@ pub fn inspect(
     let relative = report_relative_path(&mutant.file)?;
     let saved_file = report.saved_file(&mutant.file);
     let report_sha256 = saved_file.map(|file| file.source_sha256.clone());
-    let current = std::fs::read(root.join(relative)).ok();
+    let current = read_report_source(root, relative);
     let current_sha256 = current.as_deref().map(sha256_hex);
     let code = || {
         mutant_code(
@@ -487,6 +500,30 @@ mod tests {
         let error = read_saved_report(dir.path(), &link).err().unwrap();
 
         assert!(error.message.contains("outside"), "{}", error.message);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn a_source_link_out_of_the_root_has_no_current_digest() {
+        let mutant = arithmetic_mutant(SOURCE);
+        let dir = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let target = outside.path().join("math.ts");
+        std::fs::write(&target, SOURCE).unwrap();
+        std::fs::create_dir_all(dir.path().join("src")).unwrap();
+        std::os::unix::fs::symlink(&target, dir.path().join("src/math.ts")).unwrap();
+        let report = parse_saved_report(&report_json(
+            mutant.id.as_str(),
+            mutant.span,
+            &sha256_hex(SOURCE.as_bytes()),
+        ))
+        .unwrap();
+
+        let packet = inspect(&report, mutant.id.as_str(), dir.path()).unwrap();
+
+        assert_eq!(packet.current_sha256, None);
+        assert_eq!(packet.status, MutationInspectStatus::Stale);
+        assert!(packet.code.is_none());
     }
 
     fn arithmetic_mutant(source: &str) -> fallow_mutation::Mutant {

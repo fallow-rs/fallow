@@ -34604,7 +34604,7 @@
             "string",
             "null"
           ],
-          "description": "The SHA-256 digest of the current file. `null` when the file is\nmissing."
+          "description": "The SHA-256 digest of the current file. `null` when the file is\nmissing, resolves outside the project root, is not a regular file,\nor is too large to read."
         },
         "code": {
           "anyOf": [

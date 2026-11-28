@@ -233,9 +233,8 @@ fn guard_unchanged(report: &SavedReport, root: &Path, file: &str) -> Result<(), 
     let expected = report
         .saved_file(file)
         .map(|saved| saved.source_sha256.as_str());
-    let current = std::fs::read(root.join(relative))
-        .ok()
-        .map(|bytes| sha256_hex(&bytes));
+    let current =
+        crate::mutation_inspect::read_report_source(root, relative).map(|bytes| sha256_hex(&bytes));
     if expected.is_some() && current.as_deref() == expected {
         return Ok(());
     }
