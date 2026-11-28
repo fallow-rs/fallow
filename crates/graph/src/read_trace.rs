@@ -100,9 +100,58 @@ pub(crate) fn read_to_string(path: impl AsRef<Path>) -> io::Result<String> {
 pub(crate) fn canonicalize(path: impl AsRef<Path>) -> io::Result<PathBuf> {
     let path = path.as_ref();
     note(path, ReadKind::File);
-    let result = dunce::canonicalize(path);
+    let result = realpath(path);
     missed_probes::note_if_missing(path, &result);
     result
+}
+
+/// [`dunce::canonicalize`] of a directory, not recorded. The caller records
+/// each file that it resolves below the directory, so the read trace keeps
+/// the same paths as a [`canonicalize`] of each file.
+pub(crate) fn canonicalize_dir_untraced(dir: &Path) -> io::Result<PathBuf> {
+    realpath(dir)
+}
+
+fn realpath(path: &Path) -> io::Result<PathBuf> {
+    #[cfg(test)]
+    REALPATH_CALLS.with(|calls| calls.set(calls.get() + 1));
+    dunce::canonicalize(path)
+}
+
+/// [`canonicalize`] for a path that resolution only probes, which often does
+/// not exist. `realpath` makes one system call for each path component
+/// before it reaches a missing leaf. One `lstat` finds the miss in a single
+/// system call.
+pub(crate) fn canonicalize_probe(path: &Path) -> io::Result<PathBuf> {
+    if let Err(error) = std::fs::symlink_metadata(path)
+        && matches!(
+            error.kind(),
+            io::ErrorKind::NotFound | io::ErrorKind::NotADirectory
+        )
+    {
+        note(path, ReadKind::File);
+        let result = Err(error);
+        missed_probes::note_if_missing(path, &result);
+        return result;
+    }
+    canonicalize(path)
+}
+
+/// Record that a step learned that `path` exists, as a [`ReadKind::File`]
+/// read, when it found the path without a call to [`canonicalize`].
+pub(crate) fn note_existing_file(path: &Path) {
+    note(path, ReadKind::File);
+}
+
+#[cfg(test)]
+thread_local! {
+    static REALPATH_CALLS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// The number of `realpath` calls on this thread.
+#[cfg(test)]
+pub(crate) fn realpath_calls() -> u64 {
+    REALPATH_CALLS.with(std::cell::Cell::get)
 }
 
 /// The operating system file system of the resolver. Each call that finds
