@@ -466,7 +466,7 @@ impl CanonicalizeCache {
         if let Some(value) = self.map.get(path) {
             return value.clone();
         }
-        let value = crate::read_trace::canonicalize(path).ok();
+        let value = crate::read_trace::canonicalize_probe(path).ok();
         self.map.insert(path.to_path_buf(), value.clone());
         value
     }
@@ -588,14 +588,7 @@ impl<'a> CanonicalFallback<'a> {
                 "intra-project symlinks detected, building canonical path index ({} files)",
                 self.files.len()
             );
-            self.files
-                .iter()
-                .filter_map(|f| {
-                    crate::read_trace::canonicalize(&f.path)
-                        .ok()
-                        .map(|canonical| (canonical, f.id))
-                })
-                .collect()
+            super::canonical_index::canonical_file_index(self.files)
         });
         map.get(canonical).copied()
     }

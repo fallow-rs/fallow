@@ -17,6 +17,7 @@
 
 mod auto_imports;
 mod base_url_directory;
+mod canonical_index;
 mod dynamic_imports;
 mod extension_alias;
 pub(crate) mod fallbacks;
