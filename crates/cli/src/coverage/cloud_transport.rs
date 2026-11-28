@@ -45,11 +45,10 @@ pub const AGENT_SOURCE_HEADER: &str = "x-fallow-agent-source";
 const MAX_WIRE_BODY_BYTES: u64 = 64 * 1024 * 1024;
 /// Upper limit on the bytes of a response body after gzip decoding.
 const MAX_DECODED_BODY_BYTES: u64 = 256 * 1024 * 1024;
-/// Upper limit on the JSON values in one response body, so in each page of a
-/// paged read. A parse into `serde_json::Value` uses about 190 bytes per
-/// value, so a small body of many tiny values would otherwise fill the
-/// memory. The runtime-context read of a large repository passes this limit
-/// in one answer, so it then reads the rows in pages.
+/// Upper limit on the JSON values in one response body. A parse into
+/// `serde_json::Value` uses about 190 bytes per value, so a small body of many
+/// tiny values would otherwise fill the memory. A real answer is paged and
+/// holds far fewer values.
 const MAX_JSON_VALUES: usize = 2_000_000;
 /// Number of attempts for a status that [`is_retryable_status`] accepts.
 const MAX_ATTEMPTS: u8 = 2;
@@ -347,7 +346,7 @@ fn decode_body(bytes: &[u8], gzip: bool, operation: &str) -> Result<String, Clou
         })?
     };
     if json_value_count_exceeds(&decoded, MAX_JSON_VALUES) {
-        return Err(CloudError::TooManyValues(format!(
+        return Err(CloudError::Server(format!(
             "{operation} response has more than {MAX_JSON_VALUES} JSON values"
         )));
     }
@@ -716,7 +715,7 @@ mod tests {
         let compressed = encoder.finish().expect("finish gzip");
 
         for (bytes, gzip) in [(text.as_bytes(), false), (compressed.as_slice(), true)] {
-            let Err(CloudError::TooManyValues(message)) = decode_body(bytes, gzip, "test") else {
+            let Err(CloudError::Server(message)) = decode_body(bytes, gzip, "test") else {
                 panic!("an answer with too many JSON values must be refused");
             };
             assert!(message.contains("JSON values"), "{message}");
