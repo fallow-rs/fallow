@@ -19,7 +19,7 @@
 
 use std::borrow::Cow;
 use std::fmt;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Component, Path};
 
 use globset::{Glob, GlobBuilder, GlobMatcher};
 
@@ -774,8 +774,8 @@ pub fn expand_disk_glob(
 ) -> Option<impl Iterator<Item = glob::GlobResult> + use<>> {
     let pattern = pattern_below_root(pattern)?;
     if pattern.split(['/', '\\']).any(|segment| segment == "**") {
-        let matches = disk_walk::walk_recursive_glob(root, &pattern)?;
-        return Some(DiskGlobPaths::Walk(matches.into_iter()));
+        let walk = disk_walk::walk_recursive_glob(root, &pattern)?;
+        return Some(DiskGlobPaths::Walk(walk));
     }
     let full = format!("{}/{}", escaped_root(root), disk_glob_pattern(&pattern));
     glob::glob(&full).ok().map(DiskGlobPaths::Glob)
@@ -785,7 +785,7 @@ pub fn expand_disk_glob(
 /// bounded walk for a pattern with a `**` segment.
 enum DiskGlobPaths {
     Glob(glob::Paths),
-    Walk(std::vec::IntoIter<PathBuf>),
+    Walk(disk_walk::RecursiveGlobWalk),
 }
 
 impl Iterator for DiskGlobPaths {

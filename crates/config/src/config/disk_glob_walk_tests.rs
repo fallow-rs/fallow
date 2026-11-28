@@ -104,3 +104,82 @@ fn recursive_walk_ends_on_a_folder_link_loop() {
     assert!(hits.contains(&dir.path().join("a/m.json")));
     assert!(start.elapsed() < EXPAND_BOUND);
 }
+
+#[cfg(unix)]
+#[test]
+#[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+fn recursive_walk_follows_a_link_inside_the_checkout_above_the_root() {
+    let dir = tempfile::tempdir().unwrap();
+    let repo = dunce::canonicalize(dir.path()).unwrap();
+    std::fs::create_dir(repo.join(".git")).unwrap();
+    let root = repo.join("packages/app");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::create_dir_all(repo.join("shared/cfg/x")).unwrap();
+    std::fs::write(repo.join("shared/cfg/x/marker.json"), "").unwrap();
+    std::os::unix::fs::symlink("../../shared/cfg", root.join("cfg")).unwrap();
+
+    let hits = expanded(&root, "cfg/**/marker.json");
+
+    assert_eq!(hits, vec![root.join("cfg/x/marker.json")]);
+}
+
+/// Whether the file system of `dir` finds a file by a name in other letter
+/// case.
+fn case_insensitive_file_system(dir: &Path) -> bool {
+    let probe = dir.join("CaseProbe");
+    std::fs::write(&probe, "").unwrap();
+    let insensitive = dir.join("caseprobe").exists();
+    std::fs::remove_file(probe).unwrap();
+    insensitive
+}
+
+#[test]
+#[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+fn a_literal_segment_after_a_recursive_segment_compares_letter_case() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dunce::canonicalize(dir.path()).unwrap();
+    if !case_insensitive_file_system(&root) {
+        return;
+    }
+    std::fs::create_dir_all(root.join("a")).unwrap();
+    std::fs::write(root.join("a/README.md"), "").unwrap();
+    std::fs::write(root.join("README.md"), "").unwrap();
+
+    assert!(expanded(&root, "**/readme.md").is_empty());
+    assert_eq!(
+        expanded(&root, "**/README.md"),
+        vec![root.join("README.md"), root.join("a/README.md")]
+    );
+}
+
+#[test]
+#[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+fn the_first_match_comes_before_the_walk_reads_the_full_tree() {
+    const FOLDERS: usize = 4_000;
+    let dir = tempfile::tempdir().unwrap();
+    let root = dunce::canonicalize(dir.path()).unwrap();
+    std::fs::create_dir_all(root.join("a")).unwrap();
+    std::fs::write(root.join("a/m.json"), "").unwrap();
+    for index in 0..FOLDERS {
+        std::fs::create_dir_all(root.join(format!("z/{}/{index}", index % 40))).unwrap();
+    }
+
+    let start = Instant::now();
+    let first = expand_disk_glob(&root, "**/m.json")
+        .unwrap()
+        .find_map(Result::ok);
+    let first_elapsed = start.elapsed();
+    let start = Instant::now();
+    let all = expand_disk_glob(&root, "**/m.json")
+        .unwrap()
+        .filter_map(Result::ok)
+        .count();
+    let all_elapsed = start.elapsed();
+
+    assert_eq!(first, Some(root.join("a/m.json")));
+    assert_eq!(all, 1);
+    assert!(
+        first_elapsed * 10 < all_elapsed,
+        "first match {first_elapsed:?}, full walk {all_elapsed:?}"
+    );
+}
