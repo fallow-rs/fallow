@@ -17,6 +17,7 @@ mod workspace_config;
 
 use std::path::{Path, PathBuf};
 
+use crate::glob_validation::try_compile_matcher;
 use crate::permutation::{PermutationSite, permute};
 pub use deno_json::{
     DirManifestProbe, dir_has_deno_json, dir_has_package_manifest, is_deno_without_node_modules,
@@ -68,10 +69,9 @@ pub struct WorkspaceInfo {
 /// patterns do not match, preserving the existing fail-closed behavior.
 #[must_use]
 pub fn workspace_is_public(name: &str, public_packages: &[String]) -> bool {
-    public_packages.iter().any(|pattern| {
-        name == pattern
-            || globset::Glob::new(pattern).is_ok_and(|glob| glob.compile_matcher().is_match(name))
-    })
+    let selects = |glob: globset::Glob| try_compile_matcher(&glob).is_ok_and(|m| m.is_match(name));
+    let glob_selects = |pattern: &String| globset::Glob::new(pattern).is_ok_and(selects);
+    public_packages.iter().any(|p| name == p || glob_selects(p))
 }
 
 /// Discover all workspace packages in a monorepo.

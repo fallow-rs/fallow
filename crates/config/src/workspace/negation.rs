@@ -6,14 +6,15 @@ use std::path::Path;
 pub(super) struct NegatedPatterns(Vec<globset::GlobMatcher>);
 
 impl NegatedPatterns {
-    /// Compile each pattern that starts with `!`. Other patterns are skipped.
+    /// Compile each pattern that starts with `!`. Other patterns are skipped,
+    /// and so is a pattern whose matcher does not compile.
     pub(super) fn new<'a>(patterns: impl IntoIterator<Item = &'a str>) -> Self {
         Self(
             patterns
                 .into_iter()
                 .filter_map(|p| p.strip_prefix('!'))
                 .filter_map(|p| crate::glob_validation::compile_path_glob(p).ok())
-                .map(|g| g.compile_matcher())
+                .filter_map(|g| crate::glob_validation::try_compile_matcher(&g).ok())
                 .collect(),
         )
     }
@@ -27,5 +28,28 @@ impl NegatedPatterns {
         let relative = dir.strip_prefix(root).unwrap_or(dir);
         let relative_str = relative.to_string_lossy().replace('\\', "/");
         self.0.iter().any(|m| m.is_match(relative_str.as_str()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::NegatedPatterns;
+
+    /// A glob that parses, but whose regex nests too deep to compile.
+    fn deeply_nested_glob() -> String {
+        format!("{}b{}", "a{".repeat(130), "}".repeat(130))
+    }
+
+    #[test]
+    fn a_negated_pattern_that_does_not_compile_excludes_nothing() {
+        let negated = format!("!{}", deeply_nested_glob());
+        let patterns = NegatedPatterns::new([negated.as_str(), "packages/*"]);
+        let root = std::path::Path::new("/p");
+        assert!(!patterns.excludes(root, &root.join("packages/a")));
+    }
+
+    #[test]
+    fn a_public_package_glob_that_does_not_compile_selects_nothing() {
+        assert!(!crate::workspace_is_public("ab", &[deeply_nested_glob()]));
     }
 }
