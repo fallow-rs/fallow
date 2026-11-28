@@ -972,7 +972,7 @@ fn resolve_path_policy_settings(
 }
 
 fn compile_unused_component_props_ignore(pattern: Option<&str>) -> Option<regex::Regex> {
-    pattern.and_then(|pattern| match regex::Regex::new(pattern) {
+    pattern.and_then(|pattern| match crate::compile_config_regex(pattern) {
         Ok(re) => Some(re),
         Err(error) => {
             tracing::warn!(
@@ -989,7 +989,7 @@ fn compile_tailwind_ignores(health: &HealthConfig) -> Vec<regex::Regex> {
     health
         .tailwind_ignore_patterns
         .iter()
-        .filter_map(|pattern| match regex::Regex::new(pattern) {
+        .filter_map(|pattern| match crate::compile_config_regex(pattern) {
             Ok(re) => Some(re),
             Err(error) => {
                 tracing::warn!(

@@ -1060,18 +1060,20 @@ fn compile_excluded_regexes(
 ) -> Vec<Regex> {
     patterns
         .iter()
-        .filter_map(|pattern| match Regex::new(pattern) {
-            Ok(regex) => Some(regex),
-            Err(err) => {
-                tracing::warn!(
-                    "skipping invalid excluded regex '{}' for {} '{}': {err}",
-                    pattern,
-                    rule_kind,
-                    rule_pattern
-                );
-                None
-            }
-        })
+        .filter_map(
+            |pattern| match fallow_config::compile_config_regex(pattern) {
+                Ok(regex) => Some(regex),
+                Err(err) => {
+                    tracing::warn!(
+                        "skipping invalid excluded regex '{}' for {} '{}': {err}",
+                        pattern,
+                        rule_kind,
+                        rule_pattern
+                    );
+                    None
+                }
+            },
+        )
         .collect()
 }
 
@@ -1082,18 +1084,20 @@ fn compile_excluded_segment_regexes(
 ) -> Vec<Regex> {
     patterns
         .iter()
-        .filter_map(|pattern| match Regex::new(pattern) {
-            Ok(regex) => Some(regex),
-            Err(err) => {
-                tracing::warn!(
-                    "skipping invalid excluded segment regex '{}' for {} '{}': {err}",
-                    pattern,
-                    rule_kind,
-                    rule_pattern
-                );
-                None
-            }
-        })
+        .filter_map(
+            |pattern| match fallow_config::compile_config_regex(pattern) {
+                Ok(regex) => Some(regex),
+                Err(err) => {
+                    tracing::warn!(
+                        "skipping invalid excluded segment regex '{}' for {} '{}': {err}",
+                        pattern,
+                        rule_kind,
+                        rule_pattern
+                    );
+                    None
+                }
+            },
+        )
         .collect()
 }
 

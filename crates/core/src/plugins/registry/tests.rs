@@ -3713,6 +3713,23 @@ fn process_config_result_rejects_invalid_regex_in_used_exports() {
 }
 
 #[test]
+fn process_config_result_rejects_a_regex_with_a_large_program() {
+    let mut aggregated = AggregatedPluginResult::default();
+    let rule = PathRule::new("src/**/*.ts").with_excluded_regexes([r"(?:\B|\B|\B|\B|a){40000}$"]);
+    let config_result = PluginResult {
+        entry_patterns: vec![rule],
+        ..Default::default()
+    };
+
+    let errors =
+        process_config_result("test-plugin", config_result, &mut aggregated, None).unwrap_err();
+
+    assert!(aggregated.entry_patterns.is_empty());
+    assert_eq!(errors.len(), 1);
+    assert!(format_plugin_regex_errors(&errors).contains("size limit"));
+}
+
+#[test]
 fn tanstack_route_file_ignore_pattern_unsupported_patterns_are_hard_errors() {
     let unsupported_patterns = [
         "^(?!layout\\.tsx$|__root\\.tsx$).+\\.tsx$",

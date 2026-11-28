@@ -1464,8 +1464,15 @@ impl FallowConfig {
         let mut health_errors = config.health.threshold_override_errors();
         health_errors.extend(config.health.change_coupling.errors());
         health_errors.extend(config.health.shallow_directories.errors());
+        let tailwind_count = config.health.tailwind_ignore_patterns.len();
+        if tailwind_count > super::config_regex::MAX_CONFIG_REGEX_LIST {
+            health_errors.push(format!(
+                "health.tailwindIgnorePatterns lists {tailwind_count} patterns; the limit is {}",
+                super::config_regex::MAX_CONFIG_REGEX_LIST
+            ));
+        }
         for (index, pattern) in config.health.tailwind_ignore_patterns.iter().enumerate() {
-            if let Err(error) = regex::Regex::new(pattern) {
+            if let Err(error) = crate::compile_config_regex(pattern) {
                 health_errors.push(format!(
                     "health.tailwindIgnorePatterns[{index}] is not a valid regex: {error}"
                 ));
@@ -1479,7 +1486,7 @@ impl FallowConfig {
             return Err(invalid(allow_errors));
         }
         if let Some(pattern) = &config.unused_component_props.ignore_pattern
-            && let Err(e) = regex::Regex::new(pattern)
+            && let Err(e) = crate::compile_config_regex(pattern)
         {
             return Err(invalid(vec![format!(
                 "unusedComponentProps.ignorePattern is not a valid regex: {e}"
