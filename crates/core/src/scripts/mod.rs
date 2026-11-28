@@ -20,6 +20,8 @@ mod command_args;
 #[cfg(test)]
 mod command_forms_tests;
 mod command_wrappers;
+mod expansion;
+use expansion::{ExpansionBudget, ScriptExpansion};
 mod config_tasks;
 mod file_target_tools;
 mod flag_credits;
@@ -731,6 +733,8 @@ pub struct ScriptCatalog {
     package_dir: String,
     /// The directory in which the commands run, for the shell helpers they name.
     helper_base: shell_helpers::HelperBase,
+    /// What the commands of this catalog and its clones may still expand.
+    expansion_budget: ExpansionBudget,
 }
 
 impl ScriptCatalog {
@@ -743,6 +747,7 @@ impl ScriptCatalog {
         workspaces: None,
         package_dir: String::new(),
         helper_base: shell_helpers::HelperBase::Package,
+        expansion_budget: ExpansionBudget::NONE,
     };
 
     /// Attach the workspace packages of the project. `package_dir` is the
@@ -817,7 +822,8 @@ impl ScriptCatalog {
     /// The catalog of a selected workspace package: its own scripts, with the
     /// same workspace packages.
     fn package_catalog(&self, package: &WorkspacePackage) -> Self {
-        let catalog = Self::from_scripts(package.scripts());
+        let mut catalog = Self::from_scripts(package.scripts());
+        catalog.expansion_budget = self.expansion_budget.clone();
         match &self.workspaces {
             Some(workspaces) => catalog.with_workspaces(Arc::clone(workspaces), package.dir()),
             None => catalog,
@@ -936,30 +942,6 @@ impl ScriptCatalog {
             return None;
         }
         self.bodies.get(name)
-    }
-}
-
-/// Bookkeeping for one top-level command while script indirection is followed.
-struct ScriptExpansion {
-    /// Script names on the current expansion path, for the cycle guard.
-    active: Vec<String>,
-    /// Bodies expanded so far, bounded by [`MAX_SCRIPT_EXPANSIONS`].
-    expansions: usize,
-    /// `false` once a body from another workspace package has been entered.
-    local_paths: bool,
-    /// Command substitutions on the current path, bounded by
-    /// [`MAX_SUBSTITUTION_DEPTH`].
-    substitution_depth: usize,
-}
-
-impl ScriptExpansion {
-    fn new() -> Self {
-        Self {
-            active: Vec::new(),
-            expansions: 0,
-            local_paths: true,
-            substitution_depth: 0,
-        }
     }
 }
 
@@ -1578,7 +1560,7 @@ pub fn parse_script(script: &str) -> Vec<ScriptCommand> {
 #[must_use]
 pub fn parse_script_with_catalog(script: &str, catalog: &ScriptCatalog) -> Vec<ScriptCommand> {
     let mut commands = Vec::new();
-    let mut state = ScriptExpansion::new();
+    let mut state = ScriptExpansion::new(&catalog.expansion_budget);
     parse_script_internal(
         script,
         &|tokens, idx, catalog| {
@@ -1701,7 +1683,7 @@ fn parse_script_with_context(
     context: &ScriptCommandContext<'_>,
 ) -> Vec<ScriptCommand> {
     let mut commands = Vec::new();
-    let mut state = ScriptExpansion::new();
+    let mut state = ScriptExpansion::new(&context.scripts.expansion_budget);
     parse_script_internal(
         script,
         &|tokens, idx, catalog| {
@@ -1811,10 +1793,12 @@ fn parse_script_internal(
 /// `npm run lint -- --fix` cannot enter a dev-only body that script filtering
 /// deliberately skipped.
 ///
-/// Expansion is bounded twice: [`MAX_SCRIPT_INDIRECTION_DEPTH`] bounds a single
-/// path, [`MAX_SCRIPT_EXPANSIONS`] bounds the total number of bodies expanded
-/// for one command, because the cycle guard only rejects names on the current
-/// path and mutually calling scripts otherwise fan out per path.
+/// Expansion is bounded three times: [`MAX_SCRIPT_INDIRECTION_DEPTH`] bounds a
+/// single path, [`MAX_SCRIPT_EXPANSIONS`] bounds the total number of bodies
+/// expanded for one command, because the cycle guard only rejects names on the
+/// current path and mutually calling scripts otherwise fan out per path. The
+/// expansion budget of the catalog bounds the text that all its commands
+/// expand together, because each command starts with a fresh count.
 fn resolve_script_call(
     name: &str,
     extra_args: &str,
@@ -1832,7 +1816,9 @@ fn resolve_script_call(
     let Some(entry) = catalog.body(name) else {
         return;
     };
-    if state.active.iter().any(|active_name| active_name == name) {
+    if state.active.iter().any(|active_name| active_name == name)
+        || !state.budget.take(entry.body.len() + 1 + extra_args.len())
+    {
         return;
     }
 
