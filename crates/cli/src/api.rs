@@ -17,6 +17,7 @@ use std::time::{Duration, SystemTime};
 
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
+use ureq::config::RedirectAuthHeaders;
 use ureq::tls::{PemItem, RootCerts, TlsConfig};
 
 /// Default Fallow Cloud API base URL.
@@ -80,8 +81,21 @@ pub fn try_api_agent_with_timeout(
         .timeout_connect(Some(Duration::from_secs(connect_timeout_secs)))
         .timeout_global(Some(Duration::from_secs(total_timeout_secs)))
         .http_status_as_error(false)
+        .redirect_auth_headers(RedirectAuthHeaders::SameHost)
         .build()
         .new_agent())
+}
+
+/// Turn off redirects for one request.
+///
+/// The agent follows redirects. On a redirect it drops `Cookie`, and it keeps
+/// `Authorization` only for the same host on the same or a more secure
+/// scheme. It keeps every other header. Send a credential in `Authorization`.
+/// The telemetry request sends the install id in a custom header, so it goes
+/// through this function and the id never reaches the host of a redirect
+/// target.
+pub fn without_redirects<B>(request: ureq::RequestBuilder<B>) -> ureq::RequestBuilder<B> {
+    request.config().max_redirects(0).build()
 }
 
 /// Error raised while constructing the shared API client.
@@ -827,13 +841,13 @@ mod tests {
 
         assert_eq!(
             count_occurrences(CI, ".header(\"Authorization\""),
-            4,
-            "update this guard when GitHub CI auth paths change"
+            7,
+            "update this guard when GitHub or GitLab CI auth paths change"
         );
         assert_eq!(
             count_occurrences(CI, ".header(\"PRIVATE-TOKEN\""),
-            3,
-            "update this guard when GitLab reconciliation auth paths change"
+            0,
+            "a custom token header survives a redirect; send it as Authorization"
         );
         assert_contains(
             CI,
@@ -922,6 +936,98 @@ mod tests {
         assert_eq!(
             api_url_with_base(Some("http://127.0.0.1:3000/"), "/v1/coverage/a/inventory"),
             "http://127.0.0.1:3000/v1/coverage/a/inventory",
+        );
+    }
+
+    /// Serve one request on a local port and send its header block to the
+    /// returned channel. The reply is the given raw response.
+    fn serve_one(reply: String) -> (u16, std::sync::mpsc::Receiver<String>) {
+        use std::io::{BufRead as _, BufReader, Write as _};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind local server");
+        let port = listener.local_addr().expect("local address").port();
+        let (sender, receiver) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let Ok((stream, _)) = listener.accept() else {
+                return;
+            };
+            let mut reader = BufReader::new(stream.try_clone().expect("clone stream"));
+            let mut head = String::new();
+            let mut line = String::new();
+            while reader.read_line(&mut line).is_ok_and(|read| read > 2) {
+                head.push_str(&line);
+                line.clear();
+            }
+            let _ = sender.send(head.to_ascii_lowercase());
+            let mut stream = stream;
+            let _ = write!(stream, "{reply}");
+        });
+        (port, receiver)
+    }
+
+    const EMPTY_OK: &str = "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+
+    fn redirect_to(host: &str, port: u16) -> String {
+        format!(
+            "HTTP/1.1 302 Found\r\nLocation: http://{host}:{port}/next\r\n\
+             Content-Length: 0\r\nConnection: close\r\n\r\n"
+        )
+    }
+
+    fn header_block(receiver: &std::sync::mpsc::Receiver<String>) -> String {
+        receiver
+            .recv_timeout(Duration::from_secs(5))
+            .expect("the request reached the server")
+    }
+
+    #[test]
+    fn api_agent_drops_the_authorization_on_a_redirect_to_another_host() {
+        let (other_port, other_host) = serve_one(EMPTY_OK.to_owned());
+        let (port, first_host) = serve_one(redirect_to("localhost", other_port));
+
+        let response = try_api_agent()
+            .expect("agent")
+            .get(&format!("http://127.0.0.1:{port}/start"))
+            .header("Authorization", "Bearer abc123")
+            .call()
+            .expect("the redirect target");
+
+        assert_eq!(response.status().as_u16(), 200);
+        assert!(header_block(&first_host).contains("authorization: bearer abc123"));
+        assert!(!header_block(&other_host).contains("abc123"));
+    }
+
+    #[test]
+    fn api_agent_keeps_the_authorization_on_a_same_host_redirect() {
+        let (other_port, other_host) = serve_one(EMPTY_OK.to_owned());
+        let (port, _first_host) = serve_one(redirect_to("127.0.0.1", other_port));
+
+        let response = try_api_agent()
+            .expect("agent")
+            .get(&format!("http://127.0.0.1:{port}/start"))
+            .header("Authorization", "Bearer abc123")
+            .call()
+            .expect("the redirect target");
+
+        assert_eq!(response.status().as_u16(), 200);
+        assert!(header_block(&other_host).contains("authorization: bearer abc123"));
+    }
+
+    #[test]
+    fn without_redirects_keeps_a_custom_header_on_the_first_host() {
+        let (other_port, other_host) = serve_one(EMPTY_OK.to_owned());
+        let (port, first_host) = serve_one(redirect_to("localhost", other_port));
+
+        let request = try_api_agent()
+            .expect("agent")
+            .get(&format!("http://127.0.0.1:{port}/start"))
+            .header("X-Fallow-Install", "inst_abc123");
+        let response = without_redirects(request).call().expect("the redirect");
+
+        assert_eq!(response.status().as_u16(), 302);
+        assert!(header_block(&first_host).contains("x-fallow-install: inst_abc123"));
+        assert!(
+            other_host.recv_timeout(Duration::from_millis(500)).is_err(),
+            "the request followed the redirect"
         );
     }
 }

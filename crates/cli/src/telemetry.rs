@@ -16,7 +16,7 @@ use fallow_engine::module_graph::RetainedModuleGraph;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::api::{api_url, try_api_agent_with_timeout};
+use crate::api::{api_url, try_api_agent_with_timeout, without_redirects};
 use crate::{exit_codes, json_style::JsonStyle};
 
 #[path = "telemetry_mcp_record.rs"]
@@ -2011,7 +2011,7 @@ fn post_telemetry_payload(
     let agent = try_api_agent_with_timeout(CONNECT_TIMEOUT_SECS, TOTAL_TIMEOUT_SECS)
         .map_err(|err| err.to_string())?;
     let url = api_url(TELEMETRY_PATH);
-    let request = agent.post(&url);
+    let request = without_redirects(agent.post(&url));
     let request = if let Some(parent_run) = parent_run {
         request.header(PARENT_RUN_HEADER, parent_run)
     } else {

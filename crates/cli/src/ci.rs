@@ -1968,7 +1968,7 @@ fn gitlab_get_page(
         || {
             agent
                 .get(url)
-                .header("PRIVATE-TOKEN", token)
+                .header("Authorization", &format!("Bearer {token}"))
                 .header("User-Agent", "fallow-cli")
                 .call()
         },
@@ -2007,7 +2007,7 @@ fn gitlab_create_json(
         || {
             agent
                 .post(url)
-                .header("PRIVATE-TOKEN", token)
+                .header("Authorization", &format!("Bearer {token}"))
                 .header("Content-Type", "application/json")
                 .header("User-Agent", "fallow-cli")
                 .send_json(payload)
@@ -2024,7 +2024,7 @@ fn gitlab_put_json(
     with_rate_limit_retry("GitLab", || {
         agent
             .put(url)
-            .header("PRIVATE-TOKEN", token)
+            .header("Authorization", &format!("Bearer {token}"))
             .header("Content-Type", "application/json")
             .header("User-Agent", "fallow-cli")
             .send_json(payload)

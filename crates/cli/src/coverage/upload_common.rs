@@ -241,8 +241,11 @@ fn git_origin_project_id(root: &Path) -> Option<String> {
 /// Parse common git remote URL shapes into `owner/repo`. Covers HTTPS
 /// (`https://github.com/owner/repo(.git)?`), SSH
 /// (`git@github.com:owner/repo(.git)?`), and `ssh://` / `git://` variants.
+/// The userinfo part (`user:password@`) is dropped first, so a credential in
+/// the remote URL never becomes part of the project id.
 pub(super) fn parse_git_remote_to_project_id(url: &str) -> Option<String> {
-    let stripped_suffix = url.trim().trim_end_matches(".git");
+    let url = strip_url_userinfo(url.trim());
+    let stripped_suffix = url.trim_end_matches(".git");
     if let Some((_, path)) = stripped_suffix.split_once(':')
         && let Some(project_id) = take_last_two_segments(path)
     {
@@ -255,6 +258,24 @@ pub(super) fn parse_git_remote_to_project_id(url: &str) -> Option<String> {
         return Some(project_id);
     }
     None
+}
+
+/// Drop the `user[:password]@` part of a URL or an scp-like git remote
+/// (`user@host:path`). Only the authority part is checked, so an `@` in the
+/// path stays.
+pub(super) fn strip_url_userinfo(url: &str) -> String {
+    let (scheme, rest) = match url.split_once("://") {
+        Some((scheme, rest)) => (Some(scheme), rest),
+        None => (None, url),
+    };
+    let authority_end = rest.find('/').unwrap_or(rest.len());
+    let rest = rest[..authority_end]
+        .rfind('@')
+        .map_or(rest, |at| &rest[at + 1..]);
+    match scheme {
+        Some(scheme) => format!("{scheme}://{rest}"),
+        None => rest.to_owned(),
+    }
 }
 
 pub(super) fn take_last_two_segments(path: &str) -> Option<String> {
@@ -732,6 +753,40 @@ mod tests {
         assert_eq!(parse_git_remote_to_project_id("git@github.com:owner"), None);
         assert_eq!(parse_git_remote_to_project_id("https://github.com"), None);
         assert_eq!(parse_git_remote_to_project_id("not a remote"), None);
+    }
+
+    #[test]
+    fn parse_git_remote_drops_userinfo() {
+        for (with_userinfo, plain) in [
+            (
+                "https://ci-user:abc123@example.com/app.git",
+                "https://example.com/app.git",
+            ),
+            (
+                "https://ci-user:abc123@gitlab.com/acme/widgets.git",
+                "https://gitlab.com/acme/widgets.git",
+            ),
+            (
+                "ssh://ci-user:abc123@example.com/app.git",
+                "ssh://example.com/app.git",
+            ),
+            (
+                "ci-user@example.com:acme/app.git",
+                "example.com:acme/app.git",
+            ),
+        ] {
+            let parsed = parse_git_remote_to_project_id(with_userinfo);
+            assert_eq!(
+                parsed,
+                parse_git_remote_to_project_id(plain),
+                "{with_userinfo}"
+            );
+            assert!(
+                !parsed.as_deref().unwrap_or_default().contains("abc123")
+                    && !parsed.as_deref().unwrap_or_default().contains("ci-user"),
+                "{with_userinfo} gave {parsed:?}"
+            );
+        }
     }
 
     #[test]

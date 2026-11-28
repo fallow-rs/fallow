@@ -74,6 +74,7 @@ mod check_tests;
 mod ci_command_routing_tests;
 mod ci_format_tests;
 mod ci_input_file_tests;
+mod ci_provider_auth_tests;
 mod ci_template_tests;
 mod circular_dependencies_allow_tests;
 mod circular_dependency_edge_tests;

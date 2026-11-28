@@ -26,7 +26,7 @@ use crate::coverage::source_map_sources::{
     UnresolvedMap, find_unresolved_map, warn_unresolved_maps,
 };
 use crate::coverage::upload_common::{
-    self, take_last_two_segments, to_posix_string, url_encode_path_segment,
+    self, strip_url_userinfo, take_last_two_segments, to_posix_string, url_encode_path_segment,
 };
 use crate::exit_codes::exit_invalid_input;
 use crate::report::format_bytes;
@@ -251,8 +251,8 @@ fn git_origin_repo_name(root: &Path) -> Option<String> {
 }
 
 fn parse_repo_name_from_url(url: &str) -> Option<String> {
+    let url = strip_url_userinfo(url.trim());
     let stripped_suffix = url
-        .trim()
         .trim_end_matches('/')
         .trim_end_matches(".git")
         .trim_end_matches('/');
@@ -1281,6 +1281,18 @@ mod tests {
         );
         assert_eq!(
             parse_repo_name_from_url("acme/widgets"),
+            Some("acme/widgets".to_owned())
+        );
+    }
+
+    #[test]
+    fn repo_name_drops_userinfo() {
+        assert_eq!(
+            parse_repo_name_from_url("https://ci-user:abc123@example.com/app.git"),
+            parse_repo_name_from_url("https://example.com/app.git")
+        );
+        assert_eq!(
+            parse_repo_name_from_url("https://ci-user:abc123@github.com/acme/widgets.git"),
             Some("acme/widgets".to_owned())
         );
     }
