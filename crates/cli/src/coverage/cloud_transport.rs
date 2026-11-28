@@ -45,11 +45,16 @@ pub const AGENT_SOURCE_HEADER: &str = "x-fallow-agent-source";
 const MAX_WIRE_BODY_BYTES: u64 = 64 * 1024 * 1024;
 /// Upper limit on the bytes of a response body after gzip decoding.
 const MAX_DECODED_BODY_BYTES: u64 = 256 * 1024 * 1024;
-/// Upper limit on the JSON values in one response body. A parse into
-/// `serde_json::Value` uses about 190 bytes per value, so a small body of many
-/// tiny values would otherwise fill the memory. A real answer is paged and
-/// holds far fewer values.
-const MAX_JSON_VALUES: usize = 2_000_000;
+/// Upper limit on the JSON values in one response body. The parse of an
+/// answer uses memory per value, not per byte, so this limit bounds the
+/// memory of a body of many tiny values.
+///
+/// A real runtime-context answer has about 11 bytes of text per value, so
+/// the largest real answer that the decoded byte limit lets through holds
+/// about 24 million values. This limit is twice that. A value takes at least
+/// 2 bytes of text (`0,`), so the wire byte limit binds first for a plain
+/// body, and this limit binds first for a gzip body.
+const MAX_JSON_VALUES: usize = 48_000_000;
 /// Number of attempts for a status that [`is_retryable_status`] accepts.
 const MAX_ATTEMPTS: u8 = 2;
 /// Upper limit on the delay before the second attempt.
@@ -703,8 +708,8 @@ mod tests {
         use flate2::write::GzEncoder;
         use std::io::Write;
 
-        // Each `[0]` item is two JSON values in 4 bytes of text. A parse
-        // into `serde_json::Value` needs about 190 bytes per value.
+        // Each `[0]` item is two JSON values in 4 bytes of text, the densest
+        // form of a value. The gzip form stays far below the wire limit.
         let items = MAX_JSON_VALUES / 2 + 1;
         let mut text = String::with_capacity(items * 4 + 10);
         text.push_str("{\"data\":[");
@@ -713,18 +718,58 @@ mod tests {
         let mut encoder = GzEncoder::new(Vec::new(), Compression::fast());
         encoder.write_all(text.as_bytes()).expect("write gzip");
         let compressed = encoder.finish().expect("finish gzip");
+        assert!((compressed.len() as u64) < MAX_WIRE_BODY_BYTES);
+        assert!((text.len() as u64) < MAX_DECODED_BODY_BYTES);
 
-        for (bytes, gzip) in [(text.as_bytes(), false), (compressed.as_slice(), true)] {
-            let Err(CloudError::Server(message)) = decode_body(bytes, gzip, "test") else {
-                panic!("an answer with too many JSON values must be refused");
-            };
-            assert!(message.contains("JSON values"), "{message}");
+        let Err(CloudError::Server(message)) = decode_body(&compressed, true, "test") else {
+            panic!("an answer with too many JSON values must be refused");
+        };
+        assert!(message.contains("JSON values"), "{message}");
+    }
+
+    #[test]
+    fn json_values_inside_strings_do_not_count() {
+        assert!(!json_value_count_exceeds(
+            r#"["[0],[0],[0]","{\"a\":[1,2]}"]"#,
+            3
+        ));
+        assert!(json_value_count_exceeds("[[0],[0],[0]]", 3));
+    }
+
+    /// The number of JSON values in `text`, by the count of the transport.
+    fn json_value_count(text: &str) -> usize {
+        let (mut low, mut high) = (1, text.len() + 1);
+        while low < high {
+            let mid = low + (high - low) / 2;
+            if json_value_count_exceeds(text, mid) {
+                low = mid + 1;
+            } else {
+                high = mid;
+            }
         }
+        low
+    }
 
-        let strings = format!("[\"{}\",\"[0],[0]\"]", "[0],".repeat(items));
-        assert_eq!(
-            decode_body(strings.as_bytes(), false, "test").expect("strings count once"),
-            strings
+    #[test]
+    fn the_largest_real_answer_holds_half_the_json_value_limit() {
+        // The answer that the cloud sends, in compact form. An answer of the
+        // same density that fills the decoded byte limit is the largest real
+        // answer that a read accepts. The value limit holds twice its values.
+        let recorded: serde_json::Value = serde_json::from_str(include_str!(
+            "../../tests/integration/fixtures/cloud-runtime-context-recorded.json"
+        ))
+        .expect("parse the recorded answer");
+        let text = recorded.to_string();
+        let largest = MAX_DECODED_BODY_BYTES as usize / text.len() * json_value_count(&text);
+        assert!(
+            largest * 2 <= MAX_JSON_VALUES,
+            "the largest real answer holds {largest} JSON values"
         );
+        assert!(decode_body(text.as_bytes(), false, "test").is_ok());
+
+        // A value takes at least 2 bytes of text. A plain body stops at the
+        // wire limit first, and a gzip body stops at the value limit first.
+        assert!(MAX_WIRE_BODY_BYTES as usize / 2 < MAX_JSON_VALUES);
+        assert!(MAX_DECODED_BODY_BYTES as usize / 2 > MAX_JSON_VALUES);
     }
 }
