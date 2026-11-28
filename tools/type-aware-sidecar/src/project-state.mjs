@@ -240,39 +240,135 @@ const readConfigDocument = (fileName) => {
   }
 };
 
-const resolveConfigDocument = (configFileName, specifier) => {
-  if (typeof specifier !== "string") return undefined;
-  if (!path.isAbsolute(specifier) && !specifier.startsWith(".")) return undefined;
-  const target = path.resolve(path.dirname(configFileName), specifier);
-  const candidates = path.extname(target)
-    ? [target]
-    : [path.join(target, "tsconfig.json"), `${target}.json`, target];
-  return candidates.find((candidate) => existsSync(candidate) && readConfigDocument(candidate));
+const configDigest = (value) =>
+  `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`;
+
+// The limits of the expanded walk: config visits, and the JSON text of the
+// config documents in the tree. The expanded walk visits a config once for
+// each path that reaches it, so shared `extends` or `references` targets can
+// make both grow exponentially.
+const MAX_EXPANDED_CONFIG_VISITS = 20_000;
+const MAX_EXPANDED_CONFIG_TEXT_LENGTH = 16 * 1024 * 1024;
+
+const EXPANDED_WALK_STOPPED = Symbol("expanded config walk stopped");
+
+// Reads each config file of one hash at most once.
+const createConfigReader = () => {
+  const documents = new Map();
+  const read = (fileName) => {
+    if (!documents.has(fileName)) documents.set(fileName, readConfigDocument(fileName));
+    return documents.get(fileName);
+  };
+  const resolve = (configFileName, specifier) => {
+    if (typeof specifier !== "string") return undefined;
+    if (!path.isAbsolute(specifier) && !specifier.startsWith(".")) return undefined;
+    const target = path.resolve(path.dirname(configFileName), specifier);
+    const candidates = path.extname(target)
+      ? [target]
+      : [path.join(target, "tsconfig.json"), `${target}.json`, target];
+    return candidates.find((candidate) => existsSync(candidate) && read(candidate));
+  };
+  return { read, resolve };
 };
 
-const configDocumentClosure = (root, configFileName, seen = new Set()) => {
-  const document = readConfigDocument(configFileName);
-  if (!document) return null;
-  const canonical = canonicalFileIdentity(configFileName);
-  if (seen.has(canonical)) {
-    return { config: relativePath(root, canonical), cycle: true };
-  }
-  const nextSeen = new Set(seen).add(canonical);
-  const extensions = Array.isArray(document.extends) ? document.extends : [document.extends];
-  const referenced = Array.isArray(document.references) ? document.references : [];
-  const closure = (specifiers) =>
-    specifiers
-      .map((specifier) => resolveConfigDocument(configFileName, specifier))
-      .filter(Boolean)
-      .map((resolved) => configDocumentClosure(root, resolved, nextSeen))
-      .filter(Boolean)
-      .toSorted((left, right) => compareText(left.config, right.config));
-  return {
-    config: relativePath(root, canonical),
-    document: normalizedConfigValue(root, document),
-    extends: closure(extensions),
-    references: closure(referenced.map((reference) => reference?.path)),
+const configChildren = (document) => ({
+  extends: Array.isArray(document.extends) ? document.extends : [document.extends],
+  references: (Array.isArray(document.references) ? document.references : []).map(
+    (reference) => reference?.path,
+  ),
+});
+
+// The config graph as a tree with one node per path. A stored type-aware
+// baseline holds the hash of this form, so it stays the form for each
+// config graph that fits in the visit budget. Returns undefined when the
+// walk needs more visits.
+const expandedConfigClosure = (root, reader, configFileName) => {
+  const normalized = new Map();
+  let visits = 0;
+  let textLength = 0;
+  const visit = (fileName, seen) => {
+    const document = reader.read(fileName);
+    if (!document) return null;
+    visits += 1;
+    if (visits > MAX_EXPANDED_CONFIG_VISITS) throw EXPANDED_WALK_STOPPED;
+    const canonical = canonicalFileIdentity(fileName);
+    if (seen.has(canonical)) {
+      return { config: relativePath(root, canonical), cycle: true };
+    }
+    if (!normalized.has(canonical)) {
+      const value = normalizedConfigValue(root, document);
+      normalized.set(canonical, { value, size: JSON.stringify(value)?.length ?? 0 });
+    }
+    const { value, size } = normalized.get(canonical);
+    textLength += size;
+    if (textLength > MAX_EXPANDED_CONFIG_TEXT_LENGTH) throw EXPANDED_WALK_STOPPED;
+    const nextSeen = new Set(seen).add(canonical);
+    const closure = (specifiers) =>
+      specifiers
+        .map((specifier) => reader.resolve(fileName, specifier))
+        .filter(Boolean)
+        .map((resolved) => visit(resolved, nextSeen))
+        .filter(Boolean)
+        .toSorted((left, right) => compareText(left.config, right.config));
+    const children = configChildren(document);
+    return {
+      config: relativePath(root, canonical),
+      document: value,
+      extends: closure(children.extends),
+      references: closure(children.references),
+    };
   };
+  try {
+    return visit(configFileName, new Set());
+  } catch (error) {
+    if (error === EXPANDED_WALK_STOPPED) return undefined;
+    throw error;
+  }
+};
+
+// The config graph with one visit per config: each config is digested once,
+// and a parent holds the digest of each child. The work and the hashed text
+// grow with the number of configs, not with the number of paths.
+const digestedConfigClosure = (root, reader, configFileName) => {
+  const digests = new Map();
+  const active = new Set();
+  const visit = (fileName) => {
+    const document = reader.read(fileName);
+    if (!document) return null;
+    const canonical = canonicalFileIdentity(fileName);
+    const config = relativePath(root, canonical);
+    if (active.has(canonical)) return { config, cycle: true };
+    const known = digests.get(canonical);
+    if (known) return known;
+    active.add(canonical);
+    const closure = (specifiers) =>
+      specifiers
+        .map((specifier) => reader.resolve(fileName, specifier))
+        .filter(Boolean)
+        .map(visit)
+        .filter(Boolean)
+        .toSorted((left, right) => compareText(left.config, right.config));
+    const children = configChildren(document);
+    const node = {
+      config,
+      document: normalizedConfigValue(root, document),
+      extends: closure(children.extends),
+      references: closure(children.references),
+    };
+    active.delete(canonical);
+    const entry = { config, digest: configDigest(node) };
+    digests.set(canonical, entry);
+    return entry;
+  };
+  return visit(configFileName);
+};
+
+const configDocumentClosure = (root, configFileName) => {
+  const reader = createConfigReader();
+  return (
+    expandedConfigClosure(root, reader, configFileName) ??
+    digestedConfigClosure(root, reader, configFileName)
+  );
 };
 
 // The hash deliberately excludes the project's root file listing: base and
@@ -287,7 +383,7 @@ const effectiveProjectConfigHash = (root, project) => {
     compiler_options: normalizedConfigValue(root, projectCompilerOptions(project)),
     config_document: configDocumentClosure(root, projectConfigFileName(project)),
   };
-  return `sha256:${createHash("sha256").update(JSON.stringify(effective)).digest("hex")}`;
+  return configDigest(effective);
 };
 
 export const projectState = (root, project, source) => {
