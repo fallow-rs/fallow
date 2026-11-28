@@ -18,7 +18,7 @@
 use std::ffi::OsStr;
 use std::fmt::Write as FmtWrite;
 use std::fs::{File, OpenOptions};
-use std::io::{self, Write};
+use std::io::{self, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 
@@ -1365,15 +1365,29 @@ fn confirm_with_default(
         return Ok(true);
     }
 
+    if !io::stdin().is_terminal() {
+        return Err(
+            "stdin is not a terminal, so setup cannot ask for confirmation; pass --yes to accept every prompt or --non-interactive to skip them".to_owned(),
+        );
+    }
+
     print!("{prompt}");
     io::stdout()
         .flush()
         .map_err(|err| format!("failed to flush stdout: {err}"))?;
+    read_confirmation(&mut io::stdin().lock(), default)
+}
 
+/// Read one answer to a yes/no prompt. An empty line takes `default`. End of
+/// input is `no`, so a closed stdin never accepts a `[Y/n]` prompt.
+fn read_confirmation(input: &mut impl io::BufRead, default: bool) -> Result<bool, String> {
     let mut answer = String::new();
-    io::stdin()
+    let read = input
         .read_line(&mut answer)
         .map_err(|err| format!("failed to read stdin: {err}"))?;
+    if read == 0 {
+        return Ok(false);
+    }
     let trimmed = answer.trim().to_ascii_lowercase();
     Ok(if trimmed.is_empty() {
         default
