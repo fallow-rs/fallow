@@ -31,7 +31,7 @@ use globset::{Glob, GlobSet, GlobSetBuilder};
 use rustc_hash::{FxHashMap, FxHashSet};
 use serde::{Deserialize, Serialize};
 
-use colored::Colorize as _;
+use crate::report::colorize::Colorize as _;
 
 use crate::api::{
     ResponseBodyReader, parse_error_envelope, sanitize_network_error, try_api_agent_with_timeout,

@@ -4,7 +4,7 @@ use std::process::ExitCode;
 use std::sync::{Arc, Mutex, mpsc};
 use std::time::{Duration, Instant};
 
-use colored::Colorize;
+use crate::report::colorize::Colorize;
 use fallow_config::OutputFormat;
 use ignore::Match;
 use notify::{RecommendedWatcher, Watcher};

@@ -4,7 +4,7 @@ use std::fmt::Write as _;
 use std::path::Path;
 use std::time::Duration;
 
-use colored::Colorize;
+use crate::report::colorize::Colorize;
 
 use super::health_crap_notes::{
     STATIC_CRAP_ESTIMATE_EXPLAIN, STATIC_CRAP_ESTIMATE_NOTE, crap_coverage_note,
@@ -72,7 +72,7 @@ pub(in crate::report) fn print_health_human(input: &PrintHealthHumanInput<'_>) {
         && !has_score
     {
         for line in parse_note {
-            outln!("{line}");
+            outln!("{}", super::report_line(&line));
         }
         print_health_empty_state(report, elapsed, quiet);
         return;
@@ -99,7 +99,7 @@ pub(in crate::report) fn print_health_human(input: &PrintHealthHumanInput<'_>) {
     );
     insert_parse_degraded_note(&mut lines, parse_note, has_score && !skip_score_and_trend);
     for line in lines {
-        outln!("{line}");
+        outln!("{}", super::report_line(&line));
     }
 
     if !quiet {
@@ -167,7 +167,7 @@ fn parse_degraded_note_lines(files: &[fallow_output::GateFile]) -> Vec<String> {
     lines.extend(files.iter().map(|file| {
         format!(
             "    {}: {}",
-            file.path,
+            fallow_output::display_text(&file.path),
             crate::gates::parse_error_reason(file).dimmed()
         )
     }));
@@ -2701,7 +2701,7 @@ pub(in crate::report) fn print_health_grouping(
     let key_width = grouping
         .groups
         .iter()
-        .map(|g| g.key.len())
+        .map(|g| fallow_output::display_text(&g.key).chars().count())
         .max()
         .unwrap_or(0)
         .max(8);
@@ -2719,7 +2719,7 @@ pub(in crate::report) fn print_health_grouping(
         if group.key == "(root)" {
             has_root_bucket = true;
         }
-        outln!("{}", grouping_row(group, &columns));
+        outln!("{}", super::report_line(&grouping_row(group, &columns)));
     }
     if !quiet {
         if has_root_bucket {
@@ -2768,20 +2768,15 @@ fn grouping_header(columns: &GroupingColumns) -> String {
 
 /// Builds one per-group data row, matching the column layout of `grouping_header`.
 fn grouping_row(group: &fallow_output::HealthGroup, columns: &GroupingColumns) -> String {
-    let mut row = format!("  {:<width$}", group.key, width = columns.key_width);
+    let key = fallow_output::display_text(&group.key);
+    let mut row = format!("  {key:<width$}", width = columns.key_width);
     if columns.score {
         if let Some(ref hs) = group.health_score {
             let grade_colored = colorize_grade(hs.grade);
             // The color codes break `{:<5}`, so pad the grade to the
             // header width by hand.
             let pad = "grade".len().saturating_sub(hs.grade.len());
-            let _ = write!(
-                row,
-                "  {:>9.1}  {grade_colored}{:pad$}",
-                hs.score,
-                "",
-                pad = pad
-            );
+            let _ = write!(row, "  {:>9.1}  {grade_colored}{:pad$}", hs.score, "");
         } else {
             row.push_str("                  ");
         }

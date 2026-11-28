@@ -42,14 +42,14 @@ fn format_window(seconds: u64) -> String {
 }
 
 fn escape_markdown_prose(s: &str) -> String {
-    s.replace('`', "\\`")
+    fallow_output::display_text(s).replace('`', "\\`")
 }
 
 /// Escape every character that inline markdown treats as syntax, so free
 /// text from a source comment renders as plain text.
 fn escape_markdown_inline(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
-    for c in s.chars() {
+    for c in fallow_output::display_text(s).chars() {
         if matches!(
             c,
             '\\' | '`' | '*' | '_' | '[' | ']' | '<' | '>' | '|' | '#'
@@ -1370,13 +1370,13 @@ fn write_duplication_families(out: &mut String, report: &DuplicationReport, root
                 .collect::<Vec<_>>()
                 .join(", "),
         );
-        for suggestion in &family.suggestions {
-            let savings = if suggestion.estimated_savings > 0 {
-                format!(" (~{} lines saved)", suggestion.estimated_savings)
+        for s in &family.suggestions {
+            let savings = if s.estimated_savings > 0 {
+                format!(" (~{} lines saved)", s.estimated_savings)
             } else {
                 String::new()
             };
-            let _ = writeln!(out, "- {}{savings}", suggestion.description);
+            let _ = writeln!(out, "- {}{savings}", escape_markdown_prose(&s.description));
         }
         out.push('\n');
     }

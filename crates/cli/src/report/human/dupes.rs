@@ -2,7 +2,7 @@ use crate::report::sink::outln;
 use std::path::Path;
 use std::time::Duration;
 
-use colored::Colorize;
+use crate::report::colorize::Colorize;
 use fallow_api::{
     AttributedCloneGroupFinding, AttributedInstance, DuplicationGroup, DuplicationGrouping,
 };
@@ -82,7 +82,7 @@ pub(in crate::report) fn print_duplication_human(
         build_duplication_human_lines(report, root)
     };
     for line in lines {
-        outln!("{line}");
+        outln!("{}", super::report_line(&line));
     }
 
     if !quiet {

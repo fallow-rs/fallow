@@ -6,7 +6,7 @@
 
 use std::process::ExitCode;
 
-use colored::Colorize;
+use crate::report::colorize::Colorize;
 use fallow_config::OutputFormat;
 use fallow_output::{ExplainExampleFile, ExplainOutput};
 

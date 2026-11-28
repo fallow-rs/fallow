@@ -12,7 +12,7 @@
 use std::fmt::Write as _;
 use std::path::Path;
 
-use colored::Colorize as _;
+use crate::report::colorize::Colorize as _;
 
 use fallow_config::{OutputFormat, WorkspaceDiagnostic, WorkspaceDiagnosticKind};
 use fallow_types::workspace::glob_first_literal_segment;

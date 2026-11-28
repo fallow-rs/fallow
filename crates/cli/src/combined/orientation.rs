@@ -1,4 +1,4 @@
-use colored::Colorize;
+use crate::report::colorize::Colorize;
 
 use crate::check::CheckResult;
 use crate::health::HealthResult;

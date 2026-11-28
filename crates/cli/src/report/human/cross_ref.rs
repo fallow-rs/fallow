@@ -1,7 +1,7 @@
 use crate::report::sink::outln;
 use std::path::Path;
 
-use colored::Colorize;
+use crate::report::colorize::Colorize;
 use fallow_config::OutputFormat;
 
 use super::plural;
@@ -26,7 +26,7 @@ pub(in crate::report) fn print_cross_reference_findings(
     }
 
     for line in build_cross_reference_lines(cross_ref, root) {
-        outln!("{line}");
+        outln!("{}", super::report_line(&line));
     }
 
     let total = cross_ref.total();

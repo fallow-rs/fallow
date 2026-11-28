@@ -1,6 +1,6 @@
 ---
 source: crates/cli/tests/integration/snapshot_tests.rs
-assertion_line: 2679
+assertion_line: 2420
 expression: redact_version(&json_str)
 ---
 {
@@ -778,7 +778,7 @@ expression: redact_version(&json_str)
   "next_steps": [
     {
       "id": "trace-unused-export",
-      "command": "fallow dead-code --trace src/utils.ts:helperFn",
+      "command": "fallow dead-code --trace=src/utils.ts:helperFn",
       "reason": "verify an export is truly unused before deleting"
     }
   ]

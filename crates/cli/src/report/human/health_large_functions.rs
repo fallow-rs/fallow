@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use colored::Colorize;
+use crate::report::colorize::Colorize;
 
 use super::health::DOCS_HEALTH;
 use super::{MAX_FLAT_ITEMS, format_path, push_docs_footer};

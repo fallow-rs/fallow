@@ -3,7 +3,7 @@
 
 use std::path::Path;
 
-use colored::Colorize;
+use crate::report::colorize::Colorize;
 use fallow_types::duplicates::RangeMarkerFinding;
 
 use super::format_path;

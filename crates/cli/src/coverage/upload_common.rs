@@ -2,7 +2,7 @@ use std::fmt::Write as _;
 use std::path::Path;
 use std::process::ExitCode;
 
-use colored::Colorize as _;
+use crate::report::colorize::Colorize as _;
 #[cfg(test)]
 use fallow_config::{OutputFormat, ProductionAnalysis, ResolvedConfig};
 #[cfg(test)]

@@ -66,7 +66,7 @@ pub(super) fn find_unresolved_map(
 
 /// Prints one warning for all maps whose sources do not resolve.
 pub(super) fn warn_unresolved_maps(log_prefix: &str, unresolved: &[UnresolvedMap], total: usize) {
-    use colored::Colorize as _;
+    use crate::report::colorize::Colorize as _;
 
     if unresolved.is_empty() {
         return;

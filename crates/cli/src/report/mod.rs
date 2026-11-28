@@ -2,6 +2,7 @@ mod badge;
 pub mod baseline_advisory_text;
 pub mod ci;
 pub(crate) mod codeclimate;
+pub(crate) mod colorize;
 mod compact;
 pub(crate) mod config_pattern_text;
 pub mod dupes_grouping;

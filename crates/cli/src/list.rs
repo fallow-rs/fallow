@@ -6,7 +6,7 @@ use crate::exit_codes::{exit_gate_failed, exit_invalid_input};
 use crate::report::format_display_path;
 use crate::runtime_support::{LoadConfigArgs, load_config};
 use fallow_api::{BoundaryData, ListJsonEnvelope, ListJsonOutputInput};
-use fallow_output::WorkspaceInfo;
+use fallow_output::{WorkspaceInfo, display_text};
 
 pub struct ListOptions<'a> {
     pub root: &'a std::path::Path,
@@ -709,7 +709,8 @@ fn print_list_human(input: &ListHumanInput<'_>) {
     {
         eprintln!("Discovered {} files", disc.len());
         for file in disc {
-            crate::report::sink::stdoutln!("{}", format_display_path(&file.path, opts.root));
+            let path = format_display_path(&file.path, opts.root);
+            crate::report::sink::stdoutln!("{}", display_text(&path));
         }
     }
 
@@ -717,12 +718,11 @@ fn print_list_human(input: &ListHumanInput<'_>) {
         eprintln!("Found {} entry points", entries.len());
         for ep in entries {
             let path = format_display_path(&ep.path, opts.root);
-            match ep.source.script() {
-                Some(script) => {
-                    crate::report::sink::stdoutln!("{path} ({} `{script}`)", ep.source);
-                }
-                None => crate::report::sink::stdoutln!("{path} ({})", ep.source),
-            }
+            let line = match ep.source.script() {
+                Some(script) => format!("{path} ({} `{script}`)", ep.source),
+                None => format!("{path} ({})", ep.source),
+            };
+            crate::report::sink::stdoutln!("{}", display_text(&line));
         }
     }
 
@@ -751,7 +751,8 @@ fn print_entry_weight_human(weight: &fallow_output::EntryWeightListing) {
         }
     );
     for entry in &weight.entries {
-        crate::report::sink::stdoutln!("{} ({})", entry.path, entry.source);
+        let line = format!("{} ({})", entry.path, entry.source);
+        crate::report::sink::stdoutln!("{}", display_text(&line));
         crate::report::sink::stdoutln!(
             "  eager          {} {}, {}{}",
             entry.eager_modules,
@@ -784,7 +785,7 @@ fn print_entry_weight_human(weight: &fallow_output::EntryWeightListing) {
             crate::report::sink::stdoutln!(
                 "  eager packages {}: {}",
                 entry.eager_package_count,
-                names.join(", ")
+                display_text(&names.join(", "))
             );
         }
         if !entry.dominating_imports.is_empty() {
@@ -795,8 +796,9 @@ fn print_entry_weight_human(weight: &fallow_output::EntryWeightListing) {
                     |line| format!("{}:{line}", import.importer),
                 );
                 crate::report::sink::stdoutln!(
-                    "    {location} -> {}  {}, {} {}",
-                    import.target,
+                    "    {} -> {}  {}, {} {}",
+                    display_text(&location),
+                    display_text(&import.target),
                     format_bytes(import.exclusive_bytes),
                     import.exclusive_modules,
                     pluralize("module", import.exclusive_modules)
@@ -847,7 +849,8 @@ fn print_entry_weight_regression_human(regression: &fallow_output::EntryWeightRe
             )
         };
         let mark = if delta.exceeded { "  [exceeded]" } else { "" };
-        eprintln!("  {}  {line}{packages}{mark}", delta.path);
+        let line = format!("  {}  {line}{packages}{mark}", delta.path);
+        eprintln!("{}", display_text(&line));
     }
 }
 
@@ -904,7 +907,8 @@ fn print_workspace_data_human(root: &std::path::Path, ws: &WorkspaceData, explic
             } else {
                 ""
             };
-            crate::report::sink::stdoutln!("  {} -> {path_str}{suffix}", w.name);
+            let line = format!("  {} -> {path_str}{suffix}", w.name);
+            crate::report::sink::stdoutln!("{}", display_text(&line));
         }
     }
     if !diagnostics.is_empty() {

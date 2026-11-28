@@ -1,6 +1,6 @@
 ---
 source: crates/cli/tests/integration/snapshot_tests.rs
-assertion_line: 1484
+assertion_line: 1214
 expression: redact_version(&json_str)
 ---
 {
@@ -166,7 +166,7 @@ expression: redact_version(&json_str)
   "next_steps": [
     {
       "id": "trace-unused-export",
-      "command": "fallow dead-code --trace src/helpers.ts:capitalize",
+      "command": "fallow dead-code --trace=src/helpers.ts:capitalize",
       "reason": "verify an export is truly unused before deleting"
     }
   ]

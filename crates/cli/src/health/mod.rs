@@ -24,7 +24,7 @@ pub use fallow_engine::health::scoring;
 use std::process::ExitCode;
 use std::time::Instant;
 
-use colored::Colorize;
+use crate::report::colorize::Colorize;
 use fallow_config::OutputFormat;
 use fallow_engine::health::{
     HealthError, HealthExecutionOptions, HealthGateOptions, HealthGroupResolver,

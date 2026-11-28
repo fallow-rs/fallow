@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::SystemTime;
 
-use colored::Colorize as _;
+use crate::report::colorize::Colorize as _;
 use globset::{Glob, GlobSet, GlobSetBuilder};
 use rayon::prelude::*;
 use rustc_hash::FxHashMap;
