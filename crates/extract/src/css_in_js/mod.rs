@@ -14,6 +14,7 @@
 
 mod object;
 mod shared;
+mod static_resolution;
 mod template;
 mod tokens;
 

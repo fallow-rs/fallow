@@ -4,6 +4,11 @@
 //! explicit so analysis never interprets an uninspected consumer as an empty call.
 
 mod classes;
+#[cfg(test)]
+mod spread_tests;
+
+use std::cell::RefCell;
+use std::rc::Rc;
 
 use oxc_ast::{AstKind, ast::*};
 use oxc_semantic::Semantic;
@@ -16,6 +21,35 @@ use fallow_types::extract::{
 };
 
 use crate::js_text::JsText;
+
+/// Most keys that a spread binding records. A larger object is not recorded.
+const MAX_SPREAD_KEYS: usize = 512;
+
+/// Deepest nesting of spreads and object literals that key resolution
+/// follows. Bindings declared before their use resolve one level deep,
+/// because resolution walks the objects in declaration order.
+const MAX_SPREAD_DEPTH: usize = 64;
+
+/// Why the keys of an object are not known.
+#[derive(Clone, Copy)]
+enum KeysUnknown {
+    /// The object has a key that is not static, or a spread of an unknown
+    /// value. This does not depend on where resolution started.
+    Opaque,
+    /// Resolution reached [`MAX_SPREAD_DEPTH`]. A start nearer to the object
+    /// can still resolve it, so this result is not memoized.
+    TooDeep,
+}
+
+enum KeysMemo {
+    InProgress,
+    Done(Result<Rc<[String]>, KeysUnknown>),
+}
+
+#[cfg(test)]
+thread_local! {
+    static OBJECT_KEY_CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
 
 #[derive(Clone)]
 struct PropShape {
@@ -39,6 +73,7 @@ pub fn collect(
         types: FxHashMap::default(),
         aliases: FxHashMap::default(),
         objects: FxHashMap::default(),
+        object_keys_memo: RefCell::default(),
         inspected_references: FxHashSet::default(),
         components: FxHashSet::default(),
     };
@@ -76,6 +111,9 @@ struct ContractCollector<'s, 'a> {
     types: FxHashMap<u32, Option<Vec<PropShape>>>,
     aliases: FxHashMap<u32, &'s IdentifierReference<'a>>,
     objects: FxHashMap<u32, &'s ObjectExpression<'a>>,
+    /// Keys of each `objects` entry, so that an object that many spreads
+    /// name resolves once.
+    object_keys_memo: RefCell<FxHashMap<u32, KeysMemo>>,
     inspected_references: FxHashSet<u32>,
     components: FxHashSet<u32>,
 }
@@ -205,7 +243,12 @@ impl ContractCollector<'_, '_> {
     }
 
     fn collect_spread_bindings(&mut self) {
-        for (&span, object) in &self.objects {
+        let mut declaration_order: Vec<u32> = self.objects.keys().copied().collect();
+        declaration_order.sort_unstable();
+        for span in declaration_order {
+            let _ = self.binding_keys(span, 0);
+        }
+        for &span in self.objects.keys() {
             let Some(symbol) = self
                 .semantic
                 .scoping()
@@ -220,11 +263,10 @@ impl ContractCollector<'_, '_> {
             {
                 continue;
             }
-            let Some(mut keys) = self.object_keys(object, 0) else {
+            let Ok(keys) = self.binding_keys(span, 0) else {
                 continue;
             };
-            keys.sort_unstable();
-            keys.dedup();
+            let keys = keys.to_vec();
             self.facts
                 .spread_bindings
                 .push(fallow_types::extract::ComponentSpreadBinding {
@@ -653,7 +695,7 @@ impl ContractCollector<'_, '_> {
                     if let Some(Expression::ObjectExpression(defaults)) =
                         call.arguments.get(1).and_then(Argument::as_expression)
                     {
-                        let keys = self.object_keys(defaults, 0);
+                        let keys = self.object_keys(defaults, 0).ok();
                         for prop in &mut self.facts.declarations[start..] {
                             if keys.as_ref().is_some_and(|keys| keys.contains(&prop.name)) {
                                 prop.has_default = true;
@@ -830,8 +872,8 @@ impl ContractCollector<'_, '_> {
                         JSXAttributeName::NamespacedName(_) => unknown_props = true,
                     },
                     JSXAttributeItem::SpreadAttribute(spread) => {
-                        if let Some(keys) = self.expression_keys(&spread.argument, 0) {
-                            supplied.extend(keys);
+                        if let Ok(keys) = self.expression_keys(&spread.argument, 0) {
+                            supplied.extend(keys.iter().cloned());
                         } else {
                             unknown_props = true;
                         }
@@ -860,44 +902,91 @@ impl ContractCollector<'_, '_> {
         }
     }
 
-    fn expression_keys(&self, expression: &Expression<'_>, depth: usize) -> Option<Vec<String>> {
-        if depth > self.objects.len() + 16 {
-            return None;
+    /// The sorted, unique keys of the `objects` entry declared at `span`.
+    fn binding_keys(&self, span: u32, depth: usize) -> Result<Rc<[String]>, KeysUnknown> {
+        match self.object_keys_memo.borrow().get(&span) {
+            Some(KeysMemo::Done(keys)) => return keys.clone(),
+            // A spread cycle has no static key set.
+            Some(KeysMemo::InProgress) => return Err(KeysUnknown::Opaque),
+            None => {}
+        }
+        let object = self.objects.get(&span).ok_or(KeysUnknown::Opaque)?;
+        self.object_keys_memo
+            .borrow_mut()
+            .insert(span, KeysMemo::InProgress);
+        let keys = self.object_keys(object, depth + 1).map(Rc::from);
+        let mut memo = self.object_keys_memo.borrow_mut();
+        if matches!(keys, Err(KeysUnknown::TooDeep)) {
+            memo.remove(&span);
+        } else {
+            memo.insert(span, KeysMemo::Done(keys.clone()));
+        }
+        keys
+    }
+
+    fn expression_keys(
+        &self,
+        expression: &Expression<'_>,
+        depth: usize,
+    ) -> Result<Rc<[String]>, KeysUnknown> {
+        if depth > MAX_SPREAD_DEPTH {
+            return Err(KeysUnknown::TooDeep);
         }
         match expression.without_parentheses() {
-            Expression::ObjectExpression(object) => self.object_keys(object, depth + 1),
+            Expression::ObjectExpression(object) => {
+                self.object_keys(object, depth + 1).map(Rc::from)
+            }
             Expression::Identifier(id) => {
-                let span = self.reference_span(id)?;
-                let object = self.objects.get(&span)?;
-                if !self.object_binding_safe(id) {
-                    return None;
+                let span = self.reference_span(id).ok_or(KeysUnknown::Opaque)?;
+                if !self.objects.contains_key(&span) || !self.object_binding_safe(id) {
+                    return Err(KeysUnknown::Opaque);
                 }
-                self.object_keys(object, depth + 1)
+                self.binding_keys(span, depth + 1)
             }
             Expression::TSAsExpression(cast) => self.expression_keys(&cast.expression, depth + 1),
             Expression::TSSatisfiesExpression(cast) => {
                 self.expression_keys(&cast.expression, depth + 1)
             }
-            _ => None,
+            _ => Err(KeysUnknown::Opaque),
         }
     }
 
-    fn object_keys(&self, object: &ObjectExpression<'_>, depth: usize) -> Option<Vec<String>> {
+    fn object_keys(
+        &self,
+        object: &ObjectExpression<'_>,
+        depth: usize,
+    ) -> Result<Vec<String>, KeysUnknown> {
+        #[cfg(test)]
+        OBJECT_KEY_CALLS.with(|calls| calls.set(calls.get() + 1));
+        if depth > MAX_SPREAD_DEPTH {
+            return Err(KeysUnknown::TooDeep);
+        }
         let mut keys = Vec::new();
         for property in &object.properties {
             match property {
                 ObjectPropertyKind::SpreadProperty(spread) => {
-                    keys.extend(self.expression_keys(&spread.argument, depth + 1)?);
+                    keys.extend_from_slice(&self.expression_keys(&spread.argument, depth + 1)?);
                 }
                 ObjectPropertyKind::ObjectProperty(property) => {
                     if property.kind != PropertyKind::Init || property.method {
-                        return None;
+                        return Err(KeysUnknown::Opaque);
                     }
-                    keys.push(static_key(&property.key, property.computed)?);
+                    keys.push(
+                        static_key(&property.key, property.computed).ok_or(KeysUnknown::Opaque)?,
+                    );
+                }
+            }
+            if keys.len() > MAX_SPREAD_KEYS {
+                keys.sort_unstable();
+                keys.dedup();
+                if keys.len() > MAX_SPREAD_KEYS {
+                    return Err(KeysUnknown::Opaque);
                 }
             }
         }
-        Some(keys)
+        keys.sort_unstable();
+        keys.dedup();
+        Ok(keys)
     }
 
     fn object_binding_safe(&self, id: &IdentifierReference<'_>) -> bool {
