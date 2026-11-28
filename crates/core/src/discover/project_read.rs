@@ -115,8 +115,25 @@ pub fn is_project_file(root: &Path, path: &Path) -> bool {
 /// [`is_project_file`] for one candidate of a probe. A missing candidate
 /// costs one `lstat` call. A candidate that resolves outside the scope
 /// counts as missing, whether its target exists or not.
+///
+/// A candidate that is not a symlink resolves where its directory resolves,
+/// so only the directory needs the scope check, and each directory gets it
+/// once per run.
 pub fn is_probed_project_file(root: &Path, path: &Path) -> bool {
-    path.symlink_metadata().is_ok() && is_inside_scope(root, path) && path.is_file()
+    let Ok(meta) = path.symlink_metadata() else {
+        return false;
+    };
+    if meta.file_type().is_symlink() {
+        return is_inside_scope(root, path) && path.is_file();
+    }
+    if !meta.is_file() {
+        return false;
+    }
+    let Some(dir) = path.parent() else {
+        return false;
+    };
+    let base = scope_base(root);
+    fallow_config::dir_inside_scope_base(&base, dir, || is_inside_root(&base, dir))
 }
 
 /// The bounded reads of one scan of many candidate files under `root`, such
