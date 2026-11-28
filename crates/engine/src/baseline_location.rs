@@ -25,15 +25,25 @@ fn cache_dir_warning(baseline: &Path, cache_dir: &Path, root: &Path) -> Option<S
     let name = baseline
         .file_name()
         .map_or_else(|| "baseline.json".into(), |name| name.to_string_lossy());
-    // The paths are shown as given. A resolved path can name the place that
-    // a linked cache directory leads to, outside the project.
+    let root_resolved = crate::write_guard::resolve(root);
     Some(format!(
         "Warning: the baseline {} is in the fallow cache directory {}. \
          Fallow tells Git to ignore all files in this directory, so you cannot commit the baseline. \
          Save the baseline to a path that you commit, for example {COMMITTED_BASELINE_DIR}/{name}.",
-        display_from(&absolute, root),
-        display_from(cache_dir, root),
+        shown(&absolute, &resolved, root, &root_resolved),
+        shown(cache_dir, &cache, root, &root_resolved),
     ))
+}
+
+/// A path for the warning: the resolved path relative to the resolved root
+/// when it is inside the project, else the given path with each `..`
+/// applied. A resolved path outside the project can name the place that a
+/// linked cache directory leads to, so the warning does not show it.
+fn shown(given: &Path, resolved: &Path, root: &Path, root_resolved: &Path) -> String {
+    if resolved.starts_with(root_resolved) {
+        return display_from(resolved, root_resolved);
+    }
+    display_from(&fallow_types::path_guard::lexically_normalized(given), root)
 }
 
 /// Print a warning to stderr when `baseline` is inside `cache_dir`. A relative
