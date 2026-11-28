@@ -422,6 +422,9 @@ fn extend_template_expression_usage(
         // valid TSX program. Spans are irrelevant: only span-less name pairs are
         // drained.
         let wrapped = format!("({region});");
+        if !crate::nesting::fragment_within_limits(&wrapped) {
+            continue;
+        }
         let allocator = Allocator::default();
         let parser_return = Parser::new(&allocator, &wrapped, SourceType::tsx()).parse();
         if parser_return.fatal_error || !parser_return.diagnostics.is_empty() {
@@ -810,7 +813,9 @@ fn analyze_astro_frontmatter(
     line_offsets: &[u32],
     gates: crate::module_parse::ExtractionGates,
 ) -> AstroFrontmatterAnalysis {
-    let Some(script) = frontmatter else {
+    let Some(script) =
+        frontmatter.filter(|script| crate::nesting::fragment_within_limits(&script.body))
+    else {
         return empty_astro_frontmatter_analysis();
     };
     let source_type = SourceType::ts();
@@ -972,7 +977,7 @@ fn extend_inline_script_imports(
             continue;
         }
         let body = &template[open.body.clone()];
-        if body.trim().is_empty() {
+        if body.trim().is_empty() || !crate::nesting::fragment_within_limits(body) {
             continue;
         }
 

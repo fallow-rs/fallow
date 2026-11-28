@@ -106,7 +106,9 @@ fn script_sources<'s>(
     }
     crate::sfc::extract_sfc_scripts(source)
         .into_iter()
-        .filter(|script| script.src.is_none())
+        .filter(|script| {
+            script.src.is_none() && crate::nesting::fragment_within_limits(&script.body)
+        })
         .map(|script| {
             let source_type = crate::sfc::source_type_for_script(&script);
             (std::borrow::Cow::Owned(script.body), source_type)

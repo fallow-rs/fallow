@@ -931,16 +931,15 @@ pub fn sfc_merged_script_source(source: &str) -> Option<(String, SourceType)> {
 /// a synthetic local type alias. The alias is unexported and uses a sentinel
 /// name so it can't collide with user code. Returns `None` when there is no
 /// generic attribute to pin (the common case), so callers fall back to the
-/// raw body without paying for a second parse.
+/// raw body without paying for a second parse. A probe past the nesting
+/// limits is also `None`, and it refuses the parse of the file.
 fn build_generic_attr_probe_source(script: &SfcScript) -> Option<String> {
     let constraint = script.generic_attr.as_deref()?.trim();
-    if constraint.is_empty() {
-        return None;
-    }
-    Some(format!(
+    let probe = format!(
         "{}\n;type __FALLOW_GENERIC_ATTR_PROBE<{}> = unknown;\n",
         script.body, constraint,
-    ))
+    );
+    (!constraint.is_empty() && crate::nesting::fragment_within_limits(&probe)).then_some(probe)
 }
 
 struct TemplateUsageInput<'a> {

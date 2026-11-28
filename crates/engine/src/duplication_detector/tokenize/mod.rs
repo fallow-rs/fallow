@@ -58,7 +58,7 @@ pub(crate) fn tokenize_file_cross_language(
 
     let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
 
-    fallow_extract::parse_bounded(source, || {
+    fallow_extract::parse_bounded_for_file(path, source, || {
         if is_sfc_file(path) {
             return tokenize_sfc(source, strip_types, skip_imports);
         }
@@ -207,7 +207,7 @@ fn tokenize_astro(
 /// Tokenize MDX import/export statements.
 fn tokenize_mdx(source: &str, strip_types: bool, skip_imports: bool) -> FileTokens {
     let statements = fallow_extract::extract_mdx_statements_mapped(source);
-    if !statements.body.is_empty() {
+    if !statements.body.is_empty() && fallow_extract::fragment_within_limits(&statements.body) {
         let allocator = Allocator::default();
         let parser_return = Parser::new(&allocator, &statements.body, SourceType::tsx()).parse();
 
@@ -281,6 +281,18 @@ fn tokenize_js_section(
     strip_types: bool,
     skip_imports: bool,
 ) -> TokenSection {
+    // The scan of the whole host file does not see every fragment as the
+    // parser reads it, so each fragment gets its own scan.
+    if !fallow_extract::fragment_within_limits(source) {
+        return TokenSection {
+            name,
+            start: byte_offset,
+            tokens: Vec::new(),
+            function_spans: Vec::new(),
+            atomic_invocation_spans: Vec::new(),
+            literal_argument_spans: Vec::new(),
+        };
+    }
     let allocator = Allocator::default();
     let parser_return = Parser::new(&allocator, source, source_type).parse();
 

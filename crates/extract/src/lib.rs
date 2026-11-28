@@ -141,7 +141,10 @@ pub use glimmer::{is_glimmer_file, strip_glimmer_templates};
 pub use js_text::JsText;
 pub use mdx::{extract_mdx_statements, extract_mdx_statements_mapped};
 pub(crate) use nesting::parse_style_bounded;
-pub use nesting::{MAX_NESTING_DEPTH, parse_bounded, parse_bounded_or_default};
+pub use nesting::{
+    MAX_NESTING_DEPTH, fragment_within_limits, parse_bounded, parse_bounded_for_file,
+    parse_bounded_or_default,
+};
 pub use sfc::{
     SourceRegion, extract_sfc_scripts, extract_sfc_styles, extract_sfc_template_regions,
     is_sfc_file, sfc_merged_script_source,

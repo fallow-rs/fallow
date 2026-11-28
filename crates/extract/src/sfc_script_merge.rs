@@ -26,6 +26,9 @@ pub(super) fn merge_script_into_module(input: &mut SfcScriptMergeInput<'_>) {
         add_script_src_import(input.combined, src, input.script.src_span);
     }
 
+    if !crate::nesting::fragment_within_limits(&input.script.body) {
+        return;
+    }
     let allocator = Allocator::default();
     let parser_return = Parser::new(
         &allocator,

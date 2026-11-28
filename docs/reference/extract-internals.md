@@ -64,6 +64,28 @@ Shared extraction result types live in `crates/types/src/extract.rs` and its
     that pattern holds the inner part. A file past
     `MAX_TYPE_ARGUMENT_NESTING` returns `None` in the same way as a file
     past `MAX_NESTING_DEPTH`.
+  - The parser also reads the bytes after a failed list again, and keeps the
+    nodes of each failed attempt until the parse ends. A flat chain such as
+    `a<a<a<...<a;` costs the square of its length. The scan adds each byte
+    once for each `<` that is open there (`reread_budget`: 256 KiB plus 16
+    per source byte). A `<` ends at `>`, at a closing bracket, and at a token
+    that cannot follow a type in the list (`;`, `=`, `&&`, `||`, `??`, `?.`,
+    a `?` or `:` outside a conditional type). `x << 1` opens no list.
+  - Each script source is scanned twice: as code, and with JSX elements,
+    whose text holds no strings, comments or brackets for the parser. A
+    source is refused when either view passes a limit. A `/` after the `)`
+    of an `if`, `while`, `for` or `with` header starts a regex, and a `#!`
+    line at the start is a comment. A failed string or regex guess records
+    the bytes that it read, so the scan stays linear on long lines.
+  - A fragment that extraction parses on its own (a template expression, a
+    component or Astro script block, Astro frontmatter, an MDX body) gets
+    its own scan through `fragment_within_limits`. A refused fragment
+    refuses the whole file. The prose of an HTML, MDX, Vue, Svelte or Astro
+    file can hold many bare `<`, so the whole-file scan of such a host
+    (`parse_bounded_for_file`) skips the reread budget, and each parsed
+    fragment applies it.
+  - The JSX view runs only when the code view saw a `<` where a JSX element
+    can start. Up to that byte both views read the same.
   - It then runs the parse on a stack of
     `256 KiB + 1024 * source length + 4096 * bracket depth`
     (`crates/extract/src/stack.rs`). A need over 64 GiB (a source over 64 MB in
