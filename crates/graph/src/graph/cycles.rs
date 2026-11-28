@@ -533,9 +533,10 @@ fn enumerate_elementary_cycles(
 
     let out_of_steps = steps_left == 0;
     // A strongly connected group always has a cycle. When the budget ran
-    // out before the search met one, the first short cycle that a
-    // breadth-first search finds from a file, in path order, still reports
-    // the group.
+    // out before the search met one, a breadth-first search from each file,
+    // in path order, looks for one short cycle. It has its own budget of
+    // `max_steps` followed edges and stops at the first cycle that it
+    // finds, which `accept` can still accept.
     if out_of_steps && seen.is_empty() {
         let mut witness_steps = max_steps;
         let witness = sorted_nodes
