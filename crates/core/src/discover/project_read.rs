@@ -7,7 +7,7 @@
 //! [`fallow_config::project_scope_base`]), is not a regular file or is too large counts
 //! as a missing file. No message names its content.
 
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use fallow_config::PackageJson;
 use fallow_types::read_guard::{DEFAULT_MAX_READ_BYTES, is_inside_root, read_to_string_inside};
@@ -163,11 +163,20 @@ std::thread_local! {
 
 /// Whether the directory `dir` resolves inside the scope base `base`. A
 /// directory that is not a symlink resolves where its parent resolves, so a
-/// directory below a checked parent costs one `lstat`. A directory that is
-/// not spelled below the base gets the full check.
+/// directory below a checked parent costs one `lstat`. A directory with a
+/// `.` or `..` component, or one that is not spelled below the base, gets
+/// the full check, because its text parent is not where it resolves.
 fn dir_inside_scope(base: &Path, dir: &Path) -> bool {
     fallow_config::dir_inside_scope_base(base, dir, || {
-        let parent_below_base = dir.parent().filter(|parent| parent.starts_with(base));
+        let plain = dir.components().all(|component| {
+            matches!(
+                component,
+                Component::Normal(_) | Component::RootDir | Component::Prefix(_)
+            )
+        });
+        let parent_below_base = dir
+            .parent()
+            .filter(|parent| plain && parent.starts_with(base));
         match (parent_below_base, dir.symlink_metadata()) {
             (Some(parent), Ok(meta)) if meta.is_dir() => dir_inside_scope(base, parent),
             _ => is_inside_root(base, dir),
@@ -238,6 +247,22 @@ mod tests {
             config_project_root(Path::new("/config")),
             Path::new("/config")
         );
+    }
+
+    #[test]
+    fn a_probed_file_spelled_with_parent_steps_out_of_the_root_is_refused() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let sandbox = dunce::canonicalize(dir.path()).expect("canonical temp dir");
+        let root = sandbox.join("project");
+        std::fs::create_dir_all(root.join("a")).expect("mkdir");
+        std::fs::create_dir_all(sandbox.join("elsewhere")).expect("mkdir");
+        std::fs::write(sandbox.join("elsewhere/x.ts"), "").expect("write");
+        std::fs::write(root.join("a/inside.ts"), "").expect("write");
+
+        assert!(is_probed_project_file(&root, &root.join("a/inside.ts")));
+        let stepped_out = root.join("a/../../elsewhere/x.ts");
+        assert!(stepped_out.is_file());
+        assert!(!is_probed_project_file(&root, &stepped_out));
     }
 
     #[test]
