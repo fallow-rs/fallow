@@ -89,7 +89,7 @@ pub fn setup_tracing(quiet: bool) {
     // The builder alone keeps INFO and above. The target filter decides.
     tracing_subscriber::fmt()
         .with_max_level(tracing_subscriber::filter::LevelFilter::TRACE)
-        .with_writer(std::io::stderr)
+        .with_writer(move || crate::log_writer::EscapedStderr::new(ansi))
         .with_ansi(ansi)
         .with_target(false)
         .with_timer(tracing_subscriber::fmt::time::uptime())

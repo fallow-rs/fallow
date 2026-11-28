@@ -593,7 +593,9 @@ export type WorkspaceDiagnostic = ({
 path: string
 /**
  * Human-readable rendering derived from `kind` + `path`. Always ends
- * with a next-step hint.
+ * with a next-step hint. A control character of a path or a value in it
+ * is a visible escape (see [`crate::display_text::display_text()`]), so
+ * the message stays on one line on stderr.
  */
 message: string
 /**

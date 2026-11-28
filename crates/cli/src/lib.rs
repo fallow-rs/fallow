@@ -73,6 +73,7 @@ mod inspect;
 mod json_style;
 mod license;
 mod list;
+mod log_writer;
 mod migrate;
 mod mutation_cli;
 mod mutation_human;

@@ -42,6 +42,8 @@ pub mod config_file_names;
 pub mod diagnostic_scope;
 /// File discovery types: discovered files, file IDs, and entry points.
 pub mod discover;
+/// Display forms of project strings for text output and shell commands.
+pub mod display_text;
 /// Shared duplicate-code output contracts.
 pub mod duplicates;
 /// JSON-output envelope and utility types: `SchemaVersion`, `ToolVersion`,

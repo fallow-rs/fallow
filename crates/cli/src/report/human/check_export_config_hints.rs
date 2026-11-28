@@ -8,7 +8,7 @@
 use std::collections::BTreeSet;
 use std::path::Path;
 
-use colored::Colorize;
+use crate::report::human::colorize::Colorize;
 use fallow_types::output::{
     AddToConfigValue, GENERATED_FILE_EXPORTS_HINT, IssueAction, UI_FOLDER_EXPORTS_HINT,
 };

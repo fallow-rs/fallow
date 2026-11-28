@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use colored::Colorize;
+use crate::report::human::colorize::Colorize;
 
 use super::{MAX_FLAT_ITEMS, format_path, thousands};
 use crate::health::optimization_target::MIN_COGNITIVE_COST;

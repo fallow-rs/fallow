@@ -1,6 +1,6 @@
 //! Human output for the shallow directories section of `fallow health`.
 
-use colored::Colorize;
+use crate::report::human::colorize::Colorize;
 
 use super::health::DOCS_HEALTH;
 use super::{plural, push_docs_footer};

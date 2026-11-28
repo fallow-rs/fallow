@@ -17,6 +17,7 @@ use std::path::{Path, PathBuf};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use crate::display_text::display_text;
 use crate::path_util::display_relative;
 use crate::serde_path;
 
@@ -914,7 +915,9 @@ pub struct WorkspaceDiagnostic {
     #[serde(flatten)]
     pub kind: WorkspaceDiagnosticKind,
     /// Human-readable rendering derived from `kind` + `path`. Always ends
-    /// with a next-step hint.
+    /// with a next-step hint. A control character of a path or a value in it
+    /// is a visible escape (see [`crate::display_text::display_text()`]), so
+    /// the message stays on one line on stderr.
     pub message: String,
     /// True when this diagnostic reports a run whose results are degraded:
     /// something the user installed, wrote, or expected did not reach the
@@ -958,7 +961,7 @@ impl WorkspaceDiagnostic {
     pub fn new(root: &Path, path: PathBuf, kind: WorkspaceDiagnosticKind) -> Self {
         let path = normalise_diagnostic_path(path);
         let kind = normalise_payload_paths(root, kind);
-        let message = render_message(root, &path, &kind);
+        let message = display_text(&render_message(root, &path, &kind)).into_owned();
         let degrades_analysis = kind.warns_on_stderr();
         Self {
             path,

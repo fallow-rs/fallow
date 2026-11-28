@@ -70,15 +70,15 @@ impl BaselineKind {
                 "Warning: {label} has {entries} entries but matched 0 current {noun}s. \
                  Your paths may have changed, or the baseline was saved on a different machine. \
                  Re-save with: --save-baseline {}",
-                path.display(),
+                fallow_output::display_path(path),
             ),
             BaselineStalenessWarning::Partial => eprintln!(
                 "Warning: {label} is partially stale: {} of {entries} entries matched no current {noun}, \
                  so the gate protects less than what was saved. Remove only the stale entries with: {}, \
                  or re-save with: --save-baseline {}",
                 staleness.stale_entries(),
-                self.prune_command_for_root(path, saved_mode, root),
-                path.display(),
+                fallow_output::display_text(&self.prune_command_for_root(path, saved_mode, root)),
+                fallow_output::display_path(path),
             ),
         }
     }

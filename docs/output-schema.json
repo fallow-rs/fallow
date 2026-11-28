@@ -13506,7 +13506,7 @@
         },
         "message": {
           "type": "string",
-          "description": "Human-readable rendering derived from `kind` + `path`. Always ends\nwith a next-step hint."
+          "description": "Human-readable rendering derived from `kind` + `path`. Always ends\nwith a next-step hint. A control character of a path or a value in it\nis a visible escape (see [`crate::display_text::display_text()`]), so\nthe message stays on one line on stderr."
         },
         "degrades_analysis": {
           "type": "boolean",

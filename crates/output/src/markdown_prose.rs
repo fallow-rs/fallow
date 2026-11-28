@@ -3,7 +3,7 @@
 /// Render a complete CommonMark code span around an untrusted value. The
 /// fence grows past the longest backtick run inside the value, so the span
 /// cannot be closed early from within. A control character becomes a visible
-/// escape (see [`crate::display_text()`]), so the span stays on one line.
+/// escape (see [`fallow_types::display_text::display_text()`]), so the span stays on one line.
 #[must_use]
 pub fn markdown_code_span(value: &str) -> String {
     let value = &*crate::display_text(value);

@@ -10,7 +10,7 @@ use crate::report::sink::outln;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use colored::Colorize;
+use crate::report::human::colorize::Colorize;
 use fallow_config::{RulesConfig, Severity};
 use fallow_engine::test_paths::is_test_path;
 use fallow_types::output_dead_code::*;

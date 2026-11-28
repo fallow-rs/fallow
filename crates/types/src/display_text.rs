@@ -10,6 +10,7 @@
 
 use std::borrow::Cow;
 use std::fmt::Write as _;
+use std::path::Path;
 
 /// Whether `ch` must not reach a text line as it is: a control character
 /// other than a tab, or a Unicode line or paragraph separator. A tab cannot
@@ -51,6 +52,13 @@ pub fn display_text(value: &str) -> Cow<'_, str> {
     Cow::Owned(out)
 }
 
+/// A file path for a text line, with the escapes of [`display_text`]. A path
+/// that is not valid UTF-8 shows U+FFFD for each invalid sequence.
+#[must_use]
+pub fn display_path(path: &Path) -> String {
+    display_text(&path.to_string_lossy()).into_owned()
+}
+
 /// The length in bytes of the color sequence (`ESC [ <digits and ;> m`) at
 /// the start of `rest`, or `None` when `rest` does not start with one.
 fn color_sequence_len(rest: &str) -> Option<usize> {
@@ -59,13 +67,14 @@ fn color_sequence_len(rest: &str) -> Option<usize> {
     params[end..].starts_with('m').then_some(2 + end + 1)
 }
 
-/// A rendered text line whose values come from the analyzed project: the
-/// [`display_text`] escapes for every control character, except a color
-/// sequence (`ESC [ <digits and ;> m`). The terminal renderer adds such
-/// sequences for colors, and they cannot move the cursor or start a line.
+/// A rendered, colored text line: the [`display_text`] escapes for every
+/// control character, except a color sequence (`ESC [ <digits and ;> m`).
 ///
-/// Use this where a renderer builds a colored line first and the values in it
-/// are not escaped one by one.
+/// This keeps the line on one line, but it cannot tell the renderer's color
+/// sequences from a color sequence in a project value. Escape each project
+/// value with [`display_text`] before the renderer colors it, and use this
+/// only as the last step for the line. Without colors, use [`display_text`]
+/// for the whole line.
 #[must_use]
 pub fn display_line(line: &str) -> Cow<'_, str> {
     if !line.chars().any(needs_escape) {
@@ -139,7 +148,7 @@ mod tests {
     }
 
     #[test]
-    fn a_line_keeps_color_sequences_and_escapes_other_controls() {
+    fn a_colored_line_keeps_its_color_sequences_and_escapes_other_controls() {
         let line = "\u{1B}[1m./helper\n::notice\u{1B}[0m \u{1B}[2J";
         assert_eq!(
             display_line(line),

@@ -676,11 +676,11 @@ fn apply_duplication_baseline(
         change_scoped: !scope_reasons.is_empty(),
     };
     if !opts.quiet {
-        eprintln!("Comparing against duplication baseline: {}", path.display());
+        let shown = fallow_output::display_path(path);
+        eprintln!("Comparing against duplication baseline: {shown}");
         if legacy_keys && matches!(opts.output, OutputFormat::Human) {
             eprintln!(
-                "Note: {} has clone keys that older versions shared between unrelated groups. Run --save-baseline to rewrite them.",
-                path.display()
+                "Note: {shown} has clone keys that older versions shared between unrelated groups. Run --save-baseline to rewrite them."
             );
         }
         fallow_engine::baseline::BaselineKind::Dupes.warn_on_staleness(

@@ -2,7 +2,7 @@ use crate::report::sink::outln;
 use std::path::Path;
 use std::time::Duration;
 
-use colored::Colorize;
+use crate::report::human::colorize::Colorize;
 use fallow_api::{
     AttributedCloneGroupFinding, AttributedInstance, DuplicationGroup, DuplicationGrouping,
 };

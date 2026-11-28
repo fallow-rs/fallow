@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 
-use colored::Colorize;
+use crate::report::human::colorize::Colorize;
 
 /// The final status line of a health run. A run with no finding and no
 /// failing gate shows the success mark. Otherwise the mark follows the gate

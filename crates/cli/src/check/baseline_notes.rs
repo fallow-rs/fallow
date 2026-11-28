@@ -171,7 +171,7 @@ pub(super) fn warn_about_a_narrower_saved_baseline(
     eprintln!(
         "Warning: the baseline {} was saved from a run narrowed by {}, so it lists only part of \
          the findings. This run is wider and can report old findings as new.{remedy}",
-        baseline_path.display(),
+        fallow_output::display_path(baseline_path),
         wider.join(", "),
     );
 }

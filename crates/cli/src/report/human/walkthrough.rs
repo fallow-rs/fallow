@@ -26,7 +26,7 @@
 //! Decisions whose anchor is not a staged unit (a manifest) get their own block
 //! after the stages so the top-ranked decision is never hidden behind "0 files".
 
-use colored::Colorize;
+use crate::report::human::colorize::Colorize;
 use fallow_output::{
     DecisionCategory, DirectionUnit, MAX_CONTRACT_MEMBERS, ReviewEffort, RiskClass,
     StandardWalkthroughGuide, WalkthroughAccounting, cap_names, clean_decision_fact,

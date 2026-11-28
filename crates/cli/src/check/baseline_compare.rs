@@ -47,7 +47,7 @@ pub(super) fn load_and_compare_baseline(
                     "baseline analysis identity is incompatible in: {}. Regenerate it with: fallow {}{type_aware_flag} --save-baseline {}",
                     fields.join(", "),
                     io.command,
-                    baseline_path.display(),
+                    fallow_output::display_path(baseline_path),
                 ),
                 io.output,
             )
@@ -64,11 +64,11 @@ pub(super) fn load_and_compare_baseline(
         } => (staleness, true, saved_by, false),
     };
     if !io.quiet {
-        eprintln!("Comparing against baseline: {}", baseline_path.display());
+        let shown = fallow_output::display_path(baseline_path);
+        eprintln!("Comparing against baseline: {shown}");
         if legacy_keys && matches!(io.output, OutputFormat::Human) {
             eprintln!(
-                "Note: {} uses the old baseline key format. Run --save-baseline to rewrite it without line numbers.",
-                baseline_path.display()
+                "Note: {shown} uses the old baseline key format. Run --save-baseline to rewrite it without line numbers."
             );
         }
         if !unrecognised_format {

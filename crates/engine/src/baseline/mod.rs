@@ -385,7 +385,7 @@ pub fn refuse_baseline_kind_overwrite(save_path: &Path, saving: BaselineKind) ->
     Some(format!(
         "refusing to overwrite the baseline at {}: it was saved by `fallow {found}` and this is a \
          `fallow {}` save, which would destroy it. Save each command's baseline to its own path.",
-        save_path.display(),
+        fallow_output::display_path(save_path),
         saving.as_str(),
     ))
 }

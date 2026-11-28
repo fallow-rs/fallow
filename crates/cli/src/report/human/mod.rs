@@ -1,4 +1,5 @@
 pub(super) mod check;
+mod colorize;
 mod cross_ref;
 pub(super) mod dupes;
 mod dupes_range_markers;
@@ -27,7 +28,7 @@ use std::io::IsTerminal;
 use std::path::Path;
 use std::sync::{Mutex, OnceLock};
 
-use colored::Colorize;
+use crate::report::human::colorize::Colorize;
 use fallow_types::issue_meta::{issue_meta_by_kind, issue_meta_for_contract_token};
 use fallow_types::suppress::{IssueKind, issue_kind_to_kebab};
 use rustc_hash::FxHashSet;
@@ -520,7 +521,12 @@ fn docs_footers() -> &'static Mutex<FxHashSet<String>> {
 /// One entry of a human report as printed text. Every entry other than a
 /// docs footer can hold a project string (a path, a name, a specifier), so a
 /// control character in it becomes a visible escape and cannot start a new
-/// output line. The color sequences of the renderer stay.
+/// output line.
+///
+/// With colors off, the renderer adds no terminal sequence, so every escape
+/// character is escaped. With colors on, the color sequences stay; the
+/// [`colorize::Colorize`] methods escaped each colored value before they
+/// added its color.
 fn report_line(entry: &str) -> Cow<'_, str> {
     let is_footer = entry.contains('\n')
         && docs_footers()
@@ -528,8 +534,10 @@ fn report_line(entry: &str) -> Cow<'_, str> {
             .is_ok_and(|footers| footers.contains(entry));
     if is_footer {
         Cow::Borrowed(entry)
-    } else {
+    } else if colored::control::SHOULD_COLORIZE.should_colorize() {
         fallow_output::display_line(entry)
+    } else {
+        fallow_output::display_text(entry)
     }
 }
 
