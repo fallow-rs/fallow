@@ -759,3 +759,47 @@ fn peer_only_owner_credits_the_installing_ancestor() {
         Some(PathBuf::from("/project/apps/tool")),
     );
 }
+
+#[test]
+fn collect_unused_dev_dep_uses_dev_dependencies_section_line() {
+    let content = r#"{
+  "peerDependencies": {
+    "react": ">=18"
+  },
+  "overrides": {
+    "react": "^18.0.0"
+  },
+  "devDependencies": {
+    "react": "^19.0.0"
+  }
+}"#;
+    let (pr, pt, su, id) = empty_shared_sets();
+    let shared = SharedDepSets {
+        plugin_referenced: &pr,
+        package_plugin_referenced: &pr,
+        plugin_tooling: &pt,
+        credited_plugin_tooling: &pt,
+        declared_packages: &pt,
+        project_root: Path::new("/project"),
+        script_used: &su,
+        ignore_deps: &id,
+    };
+    let category = DepCategoryConfig {
+        location: DependencyLocation::DevDependencies,
+        check_implicit: false,
+        check_known_tooling: false,
+        check_plugin_tooling: false,
+        plugin_tooling_needs_evidence: false,
+    };
+    let result = collect_unused_for_category(UnusedCategoryInput {
+        dep_names: vec!["react".to_string()],
+        category: &category,
+        shared: &shared,
+        is_used: &|_| false,
+        used_in_workspaces: &|_| Vec::new(),
+        pkg_path: Path::new("/project/package.json"),
+        pkg_content: Some(content),
+    });
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].line, 9);
+}

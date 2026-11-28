@@ -7,7 +7,7 @@ use rustc_hash::FxHashSet;
 use fallow_config::{PackageJson, ResolvedConfig};
 
 use super::{
-    RootImporters, TypeOnlyDependency, find_dep_line_in_json, production_exclude_globset,
+    RootImporters, TypeOnlyDependency, find_dep_line_in_section, production_exclude_globset,
     read_pkg_json_content,
 };
 use crate::discover::FileId;
@@ -51,7 +51,7 @@ pub fn find_type_only_dependencies(
         if reported && !config.ignore_dependencies.suppresses(&dep) {
             let line = root_pkg_content
                 .as_deref()
-                .map_or(1, |c| find_dep_line_in_json(c, &dep));
+                .map_or(1, |c| find_dep_line_in_section(c, &dep, "dependencies"));
             type_only_deps.push(TypeOnlyDependency {
                 package_name: dep,
                 path: root_pkg_path.clone(),

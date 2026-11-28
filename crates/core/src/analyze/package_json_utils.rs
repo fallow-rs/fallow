@@ -1,59 +1,216 @@
 use std::path::Path;
 
 use fallow_config::{PackageJson, ResolvedConfig};
+use fallow_types::results::DependencyLocation;
 use rustc_hash::FxHashSet;
 
-/// Find the 1-based line number of a dependency key in a package.json file.
-///
-/// Searches the raw file content for `"<package_name>"` followed by `:` on the
-/// same line. Skips JSONC comment lines. Returns 1 if not found (safe fallback).
-#[expect(
-    clippy::cast_possible_truncation,
-    reason = "line count in package.json is bounded by file size"
-)]
-pub fn find_dep_line_in_json(content: &str, package_name: &str) -> u32 {
-    let needle = format!("\"{package_name}\"");
-    let mut in_block_comment = false;
-    for (i, line) in content.lines().enumerate() {
-        let trimmed = line.trim_start();
-        if in_block_comment {
-            if let Some(end) = trimmed.find("*/") {
-                let rest = &trimmed[end + 2..];
-                in_block_comment = false;
-                if let Some(pos) = rest.find(&*needle) {
-                    let after = &rest[pos + needle.len()..];
-                    if after.trim_start().starts_with(':') {
-                        return (i + 1) as u32;
-                    }
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SectionScanState {
+    Idle,
+    AwaitColon,
+    AwaitOpenBrace,
+    Inside,
+}
+
+fn skip_block_comment(bytes: &[u8], i: &mut usize, line: &mut u32) {
+    *i += 2;
+    while *i < bytes.len() {
+        if bytes[*i] == b'*' && bytes.get(*i + 1) == Some(&b'/') {
+            *i += 2;
+            return;
+        }
+        if bytes[*i] == b'\n' {
+            *line += 1;
+        }
+        *i += 1;
+    }
+}
+
+/// Skip JSON/JSONC whitespace and comments (`//...`, `/*...*/`), updating `line`.
+fn skip_ws_and_comments(bytes: &[u8], i: &mut usize, line: &mut u32) {
+    while *i < bytes.len() {
+        match bytes[*i] {
+            b' ' | b'\t' | b'\r' => *i += 1,
+            b'\n' => {
+                *line += 1;
+                *i += 1;
+            }
+            b'/' if bytes.get(*i + 1) == Some(&b'/') => {
+                *i += 2;
+                while *i < bytes.len() && bytes[*i] != b'\n' {
+                    *i += 1;
                 }
             }
-            continue;
-        }
-        if trimmed.starts_with("//") {
-            continue;
-        }
-        if let Some(after_open) = trimmed.strip_prefix("/*") {
-            if let Some(end) = after_open.find("*/") {
-                let rest = &after_open[end + 2..];
-                if let Some(pos) = rest.find(&*needle) {
-                    let after = &rest[pos + needle.len()..];
-                    if after.trim_start().starts_with(':') {
-                        return (i + 1) as u32;
-                    }
-                }
-            } else {
-                in_block_comment = true;
-            }
-            continue;
-        }
-        if let Some(pos) = line.find(&needle) {
-            let after = &line[pos + needle.len()..];
-            if after.trim_start().starts_with(':') {
-                return (i + 1) as u32;
-            }
+            b'/' if bytes.get(*i + 1) == Some(&b'*') => skip_block_comment(bytes, i, line),
+            _ => break,
         }
     }
-    1
+}
+
+/// Read a quoted JSON string literal starting at `bytes[*i] == b'"'`, updating
+/// `line` and advancing `i` past the closing quote.
+fn read_jsonc_string<'a>(
+    content: &'a str,
+    bytes: &[u8],
+    i: &mut usize,
+    line: &mut u32,
+) -> Option<(&'a str, u32, bool, bool)> {
+    let start_line = *line;
+    *i += 1;
+    let str_start = *i;
+    let mut has_escape = false;
+    while *i < bytes.len() {
+        let b = bytes[*i];
+        if b == b'\\' {
+            has_escape = true;
+            *i += 1;
+            if *i < bytes.len() && bytes[*i] == b'\n' {
+                *line += 1;
+            }
+            *i += 1;
+            continue;
+        }
+        if b == b'"' {
+            let raw = &content[str_start..*i];
+            *i += 1;
+            let mut look = *i;
+            let mut look_line = *line;
+            skip_ws_and_comments(bytes, &mut look, &mut look_line);
+            return Some((raw, start_line, has_escape, bytes.get(look) == Some(&b':')));
+        }
+        if b == b'\n' {
+            *line += 1;
+        }
+        *i += 1;
+    }
+    None
+}
+
+struct SectionTracker {
+    brace_depth: usize,
+    state: SectionScanState,
+}
+
+impl SectionTracker {
+    fn step_byte(&mut self, b: u8) {
+        match b {
+            b'{' => {
+                self.brace_depth += 1;
+                let enter = self.state == SectionScanState::AwaitOpenBrace && self.brace_depth == 2;
+                self.state = if enter || self.state == SectionScanState::Inside {
+                    SectionScanState::Inside
+                } else {
+                    SectionScanState::Idle
+                };
+            }
+            b'}' => {
+                self.brace_depth = self.brace_depth.saturating_sub(1);
+                if self.brace_depth < 2 || self.state != SectionScanState::Inside {
+                    self.state = SectionScanState::Idle;
+                }
+            }
+            b':' => {
+                self.state = match self.state {
+                    SectionScanState::AwaitColon => SectionScanState::AwaitOpenBrace,
+                    SectionScanState::Inside => SectionScanState::Inside,
+                    SectionScanState::Idle | SectionScanState::AwaitOpenBrace => {
+                        SectionScanState::Idle
+                    }
+                };
+            }
+            _ => self.reset_if_pending(),
+        }
+    }
+
+    fn reset_if_pending(&mut self) {
+        if self.state != SectionScanState::Inside {
+            self.state = SectionScanState::Idle;
+        }
+    }
+
+    fn step_key(
+        &mut self,
+        raw_key: &str,
+        start_line: u32,
+        package_name: &str,
+        target_section: Option<&str>,
+    ) -> Option<u32> {
+        let Some(section) = target_section else {
+            self.reset_if_pending();
+            return (raw_key == package_name).then_some(start_line);
+        };
+        if self.brace_depth == 1 && raw_key == section {
+            self.state = SectionScanState::AwaitColon;
+            return None;
+        }
+        if self.state == SectionScanState::Inside
+            && self.brace_depth == 2
+            && raw_key == package_name
+        {
+            return Some(start_line);
+        }
+        self.reset_if_pending();
+        None
+    }
+}
+
+/// Scan a `package.json` (JSON/JSONC) string for the 1-based line number of
+/// `"<package_name>":`, optionally scoped to a specific top-level `section` object
+/// (`dependencies`, `devDependencies`, `optionalDependencies`).
+fn scan_dep_line_in_json(content: &str, package_name: &str, target_section: Option<&str>) -> u32 {
+    let bytes = content.as_bytes();
+    let mut i = 0;
+    let mut line: u32 = 1;
+    let mut tracker = SectionTracker {
+        brace_depth: 0,
+        state: SectionScanState::Idle,
+    };
+
+    loop {
+        skip_ws_and_comments(bytes, &mut i, &mut line);
+        if i >= bytes.len() {
+            return 1;
+        }
+        if bytes[i] != b'"' {
+            tracker.step_byte(bytes[i]);
+            i += 1;
+            continue;
+        }
+        let Some((raw_key, start_line, has_escape, is_key)) =
+            read_jsonc_string(content, bytes, &mut i, &mut line)
+        else {
+            return 1;
+        };
+        if !is_key || has_escape {
+            tracker.reset_if_pending();
+            continue;
+        }
+        if let Some(found) = tracker.step_key(raw_key, start_line, package_name, target_section) {
+            return found;
+        }
+    }
+}
+
+/// Map a [`DependencyLocation`] to its top-level `package.json` section key.
+pub(super) const fn section_name(location: &DependencyLocation) -> &'static str {
+    match location {
+        DependencyLocation::Dependencies => "dependencies",
+        DependencyLocation::DevDependencies => "devDependencies",
+        DependencyLocation::OptionalDependencies => "optionalDependencies",
+    }
+}
+
+/// Find the 1-based line number of a dependency key inside a specific top-level
+/// `package.json` section (`dependencies`, `devDependencies`, `optionalDependencies`).
+///
+/// Returns `1` if the section or key is missing (safe fallback).
+pub fn find_dep_line_in_section(content: &str, package_name: &str, section: &str) -> u32 {
+    scan_dep_line_in_json(content, package_name, Some(section))
+}
+
+#[cfg(test)]
+fn find_dep_line_in_json(content: &str, package_name: &str) -> u32 {
+    scan_dep_line_in_json(content, package_name, None)
 }
 
 /// Read a package.json file's raw text for line-number scanning.
@@ -267,5 +424,90 @@ mod tests {
     fn find_dep_line_with_trailing_comma_jsonc() {
         let content = "{\n  \"dependencies\": {\n    \"lodash\": \"^4.17.21\",\n  }\n}";
         assert_eq!(find_dep_line_in_json(content, "lodash"), 3);
+    }
+
+    #[test]
+    fn find_dep_line_in_section_skips_peer_dependencies_before_dev_dependencies() {
+        let content = r#"{
+  "peerDependencies": {
+    "react": ">=18"
+  },
+  "devDependencies": {
+    "react": "^19.0.0"
+  }
+}"#;
+        assert_eq!(
+            find_dep_line_in_section(content, "react", "devDependencies"),
+            6
+        );
+        assert_eq!(
+            find_dep_line_in_section(content, "react", "dependencies"),
+            1
+        );
+    }
+
+    #[test]
+    fn find_dep_line_in_section_skips_overrides_and_resolutions_before_target_section() {
+        let content = r#"{
+  "overrides": {
+    "dependencies": {
+      "react": "^17.0.0"
+    },
+    "lodash": "^4.17.21"
+  },
+  "resolutions": {
+    "chalk": "^5.0.0"
+  },
+  "pnpm": {
+    "overrides": {
+      "chalk": "^5.0.0"
+    }
+  },
+  "dependencies": {
+    "react": "^19.0.0"
+  },
+  "devDependencies": {
+    "lodash": "^4.17.21"
+  },
+  "optionalDependencies": {
+    "chalk": "^5.3.0"
+  }
+}"#;
+        assert_eq!(
+            find_dep_line_in_section(content, "react", "dependencies"),
+            17
+        );
+        assert_eq!(
+            find_dep_line_in_section(content, "lodash", "devDependencies"),
+            20
+        );
+        assert_eq!(
+            find_dep_line_in_section(content, "chalk", "optionalDependencies"),
+            23
+        );
+    }
+
+    #[test]
+    fn find_dep_line_in_section_handles_same_package_across_sections_and_missing_fallback() {
+        let content = r#"{
+  "dependencies": {
+    "react": "^18.0.0"
+  },
+  "devDependencies": {
+    "react": "^19.0.0"
+  }
+}"#;
+        assert_eq!(
+            find_dep_line_in_section(content, "react", "dependencies"),
+            3
+        );
+        assert_eq!(
+            find_dep_line_in_section(content, "react", "devDependencies"),
+            6
+        );
+        assert_eq!(
+            find_dep_line_in_section(content, "react", "optionalDependencies"),
+            1
+        );
     }
 }

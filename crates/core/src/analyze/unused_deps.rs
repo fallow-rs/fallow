@@ -14,7 +14,7 @@ use crate::{discover::FileId, extract::ModuleInfo, graph::ModuleGraph, resolve::
 
 use super::bundle_externalization::source_sets_packages_external;
 use super::gitignored_targets::GitignoredTargets;
-use super::package_json_utils::{find_dep_line_in_json, read_pkg_json_content};
+use super::package_json_utils::{find_dep_line_in_section, read_pkg_json_content, section_name};
 use super::predicates::{
     TestImporters, is_builtin_module, is_config_file, is_implicit_dependency, is_path_alias,
     is_virtual_module,
@@ -920,9 +920,9 @@ pub fn collect_unused_for_category(input: UnusedCategoryInput<'_>) -> Vec<Unused
         // Last, so only an entry that hides a reported dependency gets credit.
         .filter(|dep| !input.shared.ignore_deps.suppresses(dep))
         .map(|dep| {
-            let line = input
-                .pkg_content
-                .map_or(1, |c| find_dep_line_in_json(c, &dep));
+            let line = input.pkg_content.map_or(1, |c| {
+                find_dep_line_in_section(c, &dep, section_name(&input.category.location))
+            });
             let used_in_workspaces = (input.used_in_workspaces)(&dep);
             UnusedDependency {
                 package_name: dep,
@@ -1817,7 +1817,7 @@ pub fn find_test_only_dependencies(
         if test_only && !ignore_deps.suppresses(&dep) {
             let line = root_pkg_content
                 .as_deref()
-                .map_or(1, |c| find_dep_line_in_json(c, &dep));
+                .map_or(1, |c| find_dep_line_in_section(c, &dep, "dependencies"));
             test_only_deps.push(TestOnlyDependency {
                 package_name: dep,
                 path: root_pkg_path.clone(),
@@ -1992,7 +1992,7 @@ pub fn find_dev_dependencies_in_production(
         if prod_import && !ignore_deps.suppresses(&dep) {
             let line = root_pkg_content
                 .as_deref()
-                .map_or(1, |c| find_dep_line_in_json(c, &dep));
+                .map_or(1, |c| find_dep_line_in_section(c, &dep, "devDependencies"));
             findings.push(DevDependencyInProduction {
                 package_name: dep,
                 path: root_pkg_path.clone(),
