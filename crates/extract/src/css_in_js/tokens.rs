@@ -66,6 +66,7 @@ use oxc_span::{GetSpan, SourceType, Span};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::object::{Lib, module_library};
+use super::static_resolution::{StaticVisit, is_definitely_static_primitive};
 use crate::js_text::JsText;
 use crate::visitor::MAX_RECORDED_CHAIN_LINKS;
 
@@ -497,7 +498,7 @@ impl<'a> BatchedBindingCollector<'a, '_, '_> {
         &self,
         expression: &'a Expression<'a>,
         before: u32,
-        visiting: &mut FxHashSet<&'a str>,
+        visiting: &mut StaticVisit<'a>,
     ) -> Option<RootBinding<'a>> {
         if let Some(binding) = expression_root_binding(expression) {
             return Some(binding);
@@ -557,7 +558,7 @@ impl<'a> BatchedBindingCollector<'a, '_, '_> {
                 declaration_start,
                 &self.static_values,
                 &self.root_reference_spans,
-                &mut FxHashSet::default(),
+                &mut StaticVisit::default(),
             )
     }
 
@@ -572,7 +573,7 @@ impl<'a> BatchedBindingCollector<'a, '_, '_> {
         let Some(contract) = self.resolve_theme_contract_alias(
             contract_expression,
             call.span.start,
-            &mut FxHashSet::default(),
+            &mut StaticVisit::default(),
         ) else {
             return;
         };
@@ -585,7 +586,7 @@ impl<'a> BatchedBindingCollector<'a, '_, '_> {
             &self.static_values,
             &self.stylex_imports,
             &self.root_reference_spans,
-            &mut FxHashSet::default(),
+            &mut StaticVisit::default(),
         ) {
             return;
         }
@@ -607,7 +608,7 @@ impl<'a> BatchedBindingCollector<'a, '_, '_> {
         &self,
         expression: &'a Expression<'a>,
         before: u32,
-        visiting: &mut FxHashSet<&'a str>,
+        visiting: &mut StaticVisit<'a>,
     ) -> Option<&'a str> {
         let Expression::Identifier(identifier) = unwrap_transparent_expression(expression) else {
             return None;
@@ -675,7 +676,7 @@ impl<'a> Visit<'a> for BatchedBindingCollector<'a, '_, '_> {
                 let binding = self.mutation_root_binding(
                     receiver,
                     assignment.span.start,
-                    &mut FxHashSet::default(),
+                    &mut StaticVisit::default(),
                 );
                 self.invalidate_static_value(binding);
             }
@@ -702,7 +703,7 @@ impl<'a> Visit<'a> for BatchedBindingCollector<'a, '_, '_> {
             walk::walk_call_expression(self, call);
             return;
         }
-        let mut visiting = FxHashSet::default();
+        let mut visiting = StaticVisit::default();
         let is_stylex_helper = call.arguments.len() == 1
             && is_root_stylex_static_call(
                 &call.callee,
@@ -737,7 +738,7 @@ impl<'a> Visit<'a> for BatchedBindingCollector<'a, '_, '_> {
                 let binding = self.mutation_root_binding(
                     receiver,
                     call.span.start,
-                    &mut FxHashSet::default(),
+                    &mut StaticVisit::default(),
                 );
                 self.invalidate_static_value(binding);
             }
@@ -746,7 +747,11 @@ impl<'a> Visit<'a> for BatchedBindingCollector<'a, '_, '_> {
                 .iter()
                 .filter_map(Argument::as_expression)
                 .filter_map(|argument| {
-                    self.mutation_root_binding(argument, call.span.start, &mut FxHashSet::default())
+                    self.mutation_root_binding(
+                        argument,
+                        call.span.start,
+                        &mut StaticVisit::default(),
+                    )
                 })
                 .collect();
             for binding in possibly_mutated {
@@ -1051,7 +1056,9 @@ fn binding_access_object_chain<'a>(
     }
 }
 
-fn unwrap_transparent_expression<'a, 'b: 'a>(mut expr: &'a Expression<'b>) -> &'a Expression<'b> {
+pub(super) fn unwrap_transparent_expression<'a, 'b: 'a>(
+    mut expr: &'a Expression<'b>,
+) -> &'a Expression<'b> {
     loop {
         expr = match expr {
             Expression::ParenthesizedExpression(expression) => &expression.expression,
@@ -1104,7 +1111,7 @@ fn is_static_stylex_theme_override<'a>(
     static_values: &FxHashMap<&'a str, (u32, &'a Expression<'a>)>,
     imports: &FxHashMap<&'a str, (Lib, &'a str)>,
     root_reference_spans: &FxHashSet<Span>,
-    visiting: &mut FxHashSet<&'a str>,
+    visiting: &mut StaticVisit<'a>,
 ) -> bool {
     let expression = unwrap_transparent_expression(expression);
     if let Some(is_static) = is_static_stylex_composite_expression(
@@ -1131,28 +1138,14 @@ fn is_static_stylex_theme_override<'a>(
             root_reference_spans,
             visiting,
         ),
-        Expression::Identifier(identifier) => {
-            if !root_reference_spans.contains(&identifier.span) {
-                return false;
-            }
-            let name = identifier.name.as_str();
-            let Some(&(declaration_start, value)) = static_values.get(name) else {
-                return false;
-            };
-            if declaration_start >= before || !visiting.insert(name) {
-                return false;
-            }
-            let is_static = is_static_stylex_theme_override(
-                value,
-                declaration_start,
-                static_values,
-                imports,
-                root_reference_spans,
-                visiting,
-            );
-            visiting.remove(name);
-            is_static
-        }
+        Expression::Identifier(identifier) => is_static_stylex_theme_override_binding(
+            identifier,
+            before,
+            static_values,
+            imports,
+            root_reference_spans,
+            visiting,
+        ),
         Expression::StaticMemberExpression(_) | Expression::ComputedMemberExpression(_) => {
             let mut member_visiting = visiting.clone();
             let resolver = StyleXStaticResolver {
@@ -1202,13 +1195,50 @@ fn is_static_stylex_theme_override<'a>(
     }
 }
 
+fn is_static_stylex_theme_override_binding<'a>(
+    identifier: &IdentifierReference<'a>,
+    before: u32,
+    static_values: &FxHashMap<&'a str, (u32, &'a Expression<'a>)>,
+    imports: &FxHashMap<&'a str, (Lib, &'a str)>,
+    root_reference_spans: &FxHashSet<Span>,
+    visiting: &mut StaticVisit<'a>,
+) -> bool {
+    if !root_reference_spans.contains(&identifier.span) {
+        return false;
+    }
+    let name = identifier.name.as_str();
+    let Some(&(declaration_start, value)) = static_values.get(name) else {
+        return false;
+    };
+    if declaration_start >= before {
+        return false;
+    }
+    if let Some(&is_static) = visiting.theme_override.get(name) {
+        return is_static;
+    }
+    if !visiting.insert(name) {
+        return false;
+    }
+    let is_static = is_static_stylex_theme_override(
+        value,
+        declaration_start,
+        static_values,
+        imports,
+        root_reference_spans,
+        visiting,
+    );
+    visiting.remove(name);
+    visiting.theme_override.insert(name, is_static);
+    is_static
+}
+
 fn is_static_stylex_composite_expression<'a>(
     expression: &'a Expression<'a>,
     before: u32,
     static_values: &FxHashMap<&'a str, (u32, &'a Expression<'a>)>,
     imports: &FxHashMap<&'a str, (Lib, &'a str)>,
     root_reference_spans: &FxHashSet<Span>,
-    visiting: &mut FxHashSet<&'a str>,
+    visiting: &mut StaticVisit<'a>,
 ) -> Option<bool> {
     let mut check = |expression| {
         is_static_stylex_theme_override(
@@ -1234,7 +1264,7 @@ fn is_static_stylex_composite_expression<'a>(
                         before,
                         static_values,
                         root_reference_spans,
-                        &mut FxHashSet::default(),
+                        &mut StaticVisit::default(),
                     ))
                 && check(&unary.argument),
         ),
@@ -1255,13 +1285,13 @@ fn is_static_stylex_composite_expression<'a>(
                         before,
                         static_values,
                         root_reference_spans,
-                        &mut FxHashSet::default(),
+                        &mut StaticVisit::default(),
                     ) && !is_static_stylex_bigint_value(
                         &binary.right,
                         before,
                         static_values,
                         root_reference_spans,
-                        &mut FxHashSet::default(),
+                        &mut StaticVisit::default(),
                     )))
                 && check(&binary.left)
                 && check(&binary.right),
@@ -1276,7 +1306,7 @@ fn is_static_stylex_theme_object<'a>(
     static_values: &FxHashMap<&'a str, (u32, &'a Expression<'a>)>,
     imports: &FxHashMap<&'a str, (Lib, &'a str)>,
     root_reference_spans: &FxHashSet<Span>,
-    visiting: &mut FxHashSet<&'a str>,
+    visiting: &mut StaticVisit<'a>,
 ) -> bool {
     object.properties.iter().all(|property| match property {
         ObjectPropertyKind::ObjectProperty(property) => {
@@ -1321,7 +1351,7 @@ fn is_static_stylex_computed_key<'a>(
     static_values: &FxHashMap<&'a str, (u32, &'a Expression<'a>)>,
     imports: &FxHashMap<&'a str, (Lib, &'a str)>,
     root_reference_spans: &FxHashSet<Span>,
-    visiting: &mut FxHashSet<&'a str>,
+    visiting: &mut StaticVisit<'a>,
 ) -> bool {
     match unwrap_transparent_expression(expression) {
         Expression::StringLiteral(_) | Expression::NumericLiteral(_) => true,
@@ -1413,7 +1443,7 @@ struct ResolvedStyleXStaticObject<'ast> {
 fn resolve_static_stylex_member<'a>(
     expression: &'a Expression<'a>,
     resolver: &StyleXStaticResolver<'_, 'a>,
-    visiting: &mut FxHashSet<&'a str>,
+    visiting: &mut StaticVisit<'a>,
 ) -> Option<ResolvedStyleXStaticMember<'a>> {
     match unwrap_transparent_expression(expression) {
         Expression::StaticMemberExpression(member) => {
@@ -1437,7 +1467,7 @@ fn resolve_static_stylex_member<'a>(
 fn resolve_static_stylex_object<'a>(
     expression: &'a Expression<'a>,
     resolver: &StyleXStaticResolver<'_, 'a>,
-    visiting: &mut FxHashSet<&'a str>,
+    visiting: &mut StaticVisit<'a>,
 ) -> Option<ResolvedStyleXStaticObject<'a>> {
     match unwrap_transparent_expression(expression) {
         Expression::ObjectExpression(object) => Some(ResolvedStyleXStaticObject {
@@ -1477,7 +1507,7 @@ fn resolve_static_stylex_object_property<'a>(
     resolved_object: ResolvedStyleXStaticObject<'a>,
     wanted: &str,
     resolver: &StyleXStaticResolver<'_, 'a>,
-    visiting: &mut FxHashSet<&'a str>,
+    visiting: &mut StaticVisit<'a>,
 ) -> Option<ResolvedStyleXStaticMember<'a>> {
     for property in resolved_object.object.properties.iter().rev() {
         match property {
@@ -1520,7 +1550,7 @@ fn resolve_static_stylex_object_property<'a>(
 fn resolve_static_stylex_member_key<'a>(
     expression: &'a Expression<'a>,
     resolver: &StyleXStaticResolver<'_, 'a>,
-    visiting: &mut FxHashSet<&'a str>,
+    visiting: &mut StaticVisit<'a>,
 ) -> Option<String> {
     if let Some(key) = static_computed_key(expression) {
         return Some(key);
@@ -1552,7 +1582,7 @@ fn is_static_stylex_theme_override_object<'a>(
     static_values: &FxHashMap<&'a str, (u32, &'a Expression<'a>)>,
     imports: &FxHashMap<&'a str, (Lib, &'a str)>,
     root_reference_spans: &FxHashSet<Span>,
-    visiting: &mut FxHashSet<&'a str>,
+    visiting: &mut StaticVisit<'a>,
 ) -> bool {
     match unwrap_transparent_expression(expression) {
         Expression::ObjectExpression(_) => is_static_stylex_theme_override(
@@ -1632,7 +1662,7 @@ fn is_static_stylex_pure_call<'a>(
     static_values: &FxHashMap<&'a str, (u32, &'a Expression<'a>)>,
     imports: &FxHashMap<&'a str, (Lib, &'a str)>,
     root_reference_spans: &FxHashSet<Span>,
-    visiting: &mut FxHashSet<&'a str>,
+    visiting: &mut StaticVisit<'a>,
 ) -> bool {
     if is_static_stylex_local_arrow_call(
         call,
@@ -1675,7 +1705,7 @@ fn is_static_stylex_pure_call<'a>(
                     before,
                     static_values,
                     root_reference_spans,
-                    &mut FxHashSet::default(),
+                    &mut StaticVisit::default(),
                 )
             })
         })
@@ -1718,122 +1748,12 @@ fn is_root_math_call(
         && !static_values.contains_key("Math")
 }
 
-fn is_definitely_static_primitive<'a>(
-    expression: &'a Expression<'a>,
-    before: u32,
-    static_values: &FxHashMap<&'a str, (u32, &'a Expression<'a>)>,
-    root_reference_spans: &FxHashSet<Span>,
-    visiting: &mut FxHashSet<&'a str>,
-) -> bool {
-    match unwrap_transparent_expression(expression) {
-        Expression::StringLiteral(_)
-        | Expression::NumericLiteral(_)
-        | Expression::BooleanLiteral(_)
-        | Expression::NullLiteral(_)
-        | Expression::BigIntLiteral(_) => true,
-        Expression::TemplateLiteral(template) => template.expressions.iter().all(|expression| {
-            is_definitely_static_primitive(
-                expression,
-                before,
-                static_values,
-                root_reference_spans,
-                visiting,
-            )
-        }),
-        Expression::UnaryExpression(unary) => {
-            !unary.operator.is_delete()
-                && is_definitely_static_primitive(
-                    &unary.argument,
-                    before,
-                    static_values,
-                    root_reference_spans,
-                    visiting,
-                )
-        }
-        Expression::BinaryExpression(binary) => is_static_stylex_primitive_pair(
-            &binary.left,
-            &binary.right,
-            before,
-            static_values,
-            root_reference_spans,
-            visiting,
-        ),
-        Expression::LogicalExpression(logical) => is_static_stylex_primitive_pair(
-            &logical.left,
-            &logical.right,
-            before,
-            static_values,
-            root_reference_spans,
-            visiting,
-        ),
-        Expression::ConditionalExpression(conditional) => is_static_stylex_primitive_pair(
-            &conditional.consequent,
-            &conditional.alternate,
-            before,
-            static_values,
-            root_reference_spans,
-            visiting,
-        ),
-        Expression::SequenceExpression(sequence) => {
-            sequence.expressions.last().is_some_and(|expression| {
-                is_definitely_static_primitive(
-                    expression,
-                    before,
-                    static_values,
-                    root_reference_spans,
-                    visiting,
-                )
-            })
-        }
-        Expression::Identifier(identifier) => {
-            if !root_reference_spans.contains(&identifier.span) {
-                return false;
-            }
-            let name = identifier.name.as_str();
-            let Some(&(declaration_start, value)) = static_values.get(name) else {
-                return false;
-            };
-            if declaration_start >= before || !visiting.insert(name) {
-                return false;
-            }
-            let is_primitive = is_definitely_static_primitive(
-                value,
-                declaration_start,
-                static_values,
-                root_reference_spans,
-                visiting,
-            );
-            visiting.remove(name);
-            is_primitive
-        }
-        _ => false,
-    }
-}
-
-fn is_static_stylex_primitive_pair<'a>(
-    left: &'a Expression<'a>,
-    right: &'a Expression<'a>,
-    before: u32,
-    static_values: &FxHashMap<&'a str, (u32, &'a Expression<'a>)>,
-    root_reference_spans: &FxHashSet<Span>,
-    visiting: &mut FxHashSet<&'a str>,
-) -> bool {
-    is_definitely_static_primitive(left, before, static_values, root_reference_spans, visiting)
-        && is_definitely_static_primitive(
-            right,
-            before,
-            static_values,
-            root_reference_spans,
-            visiting,
-        )
-}
-
 fn is_static_stylex_bigint_value<'a>(
     expression: &'a Expression<'a>,
     before: u32,
     static_values: &FxHashMap<&'a str, (u32, &'a Expression<'a>)>,
     root_reference_spans: &FxHashSet<Span>,
-    visiting: &mut FxHashSet<&'a str>,
+    visiting: &mut StaticVisit<'a>,
 ) -> bool {
     let parameters = FxHashMap::default();
     let context = StyleXBigIntContext {
@@ -1856,7 +1776,7 @@ struct StyleXBigIntContext<'maps, 'ast> {
 fn is_static_stylex_bigint_value_with_context<'a>(
     expression: &'a Expression<'a>,
     context: &StyleXBigIntContext<'_, 'a>,
-    visiting: &mut FxHashSet<&'a str>,
+    visiting: &mut StaticVisit<'a>,
 ) -> bool {
     match unwrap_transparent_expression(expression) {
         Expression::BigIntLiteral(_) => true,
@@ -1871,7 +1791,16 @@ fn is_static_stylex_bigint_value_with_context<'a>(
             let Some(&(declaration_start, value)) = context.static_values.get(name) else {
                 return false;
             };
-            if declaration_start >= context.before || !visiting.insert(name) {
+            if declaration_start >= context.before {
+                return false;
+            }
+            // A parameter name shadows the constant, so the memo holds only
+            // results without parameters.
+            let memoizable = context.parameters.is_empty();
+            if memoizable && let Some(&is_bigint) = visiting.bigint.get(name) {
+                return is_bigint;
+            }
+            if !visiting.insert(name) {
                 return false;
             }
             let nested_context = StyleXBigIntContext {
@@ -1881,6 +1810,9 @@ fn is_static_stylex_bigint_value_with_context<'a>(
             let is_bigint =
                 is_static_stylex_bigint_value_with_context(value, &nested_context, visiting);
             visiting.remove(name);
+            if memoizable {
+                visiting.bigint.insert(name, is_bigint);
+            }
             is_bigint
         }
         Expression::UnaryExpression(unary)
@@ -1942,7 +1874,7 @@ fn is_static_stylex_bigint_pair<'a>(
     left: &'a Expression<'a>,
     right: &'a Expression<'a>,
     context: &StyleXBigIntContext<'_, 'a>,
-    visiting: &mut FxHashSet<&'a str>,
+    visiting: &mut StaticVisit<'a>,
 ) -> bool {
     is_static_stylex_bigint_value_with_context(left, context, visiting)
         || is_static_stylex_bigint_value_with_context(right, context, visiting)
@@ -1951,7 +1883,7 @@ fn is_static_stylex_bigint_pair<'a>(
 fn is_static_stylex_bigint_arrow_call<'a>(
     call: &'a CallExpression<'a>,
     context: &StyleXBigIntContext<'_, 'a>,
-    visiting: &mut FxHashSet<&'a str>,
+    visiting: &mut StaticVisit<'a>,
 ) -> bool {
     let Expression::Identifier(callee) = unwrap_transparent_expression(&call.callee) else {
         return false;
@@ -2021,7 +1953,7 @@ fn is_root_scalar_pure_call<'a>(
     static_values: &FxHashMap<&'a str, (u32, &'a Expression<'a>)>,
     imports: &FxHashMap<&'a str, (Lib, &'a str)>,
     root_reference_spans: &FxHashSet<Span>,
-    visiting: &mut FxHashSet<&'a str>,
+    visiting: &mut StaticVisit<'a>,
 ) -> bool {
     match unwrap_transparent_expression(callee) {
         Expression::Identifier(identifier) => {
@@ -2068,7 +2000,7 @@ fn static_stylex_scalar_kind<'a>(
     static_values: &FxHashMap<&'a str, (u32, &'a Expression<'a>)>,
     imports: &FxHashMap<&'a str, (Lib, &'a str)>,
     root_reference_spans: &FxHashSet<Span>,
-    visiting: &mut FxHashSet<&'a str>,
+    visiting: &mut StaticVisit<'a>,
 ) -> Option<StyleXScalarKind> {
     match unwrap_transparent_expression(expression) {
         Expression::StringLiteral(_) => Some(StyleXScalarKind::String),
@@ -2209,7 +2141,7 @@ fn is_static_stylex_entries_call<'a>(
     static_values: &FxHashMap<&'a str, (u32, &'a Expression<'a>)>,
     imports: &FxHashMap<&'a str, (Lib, &'a str)>,
     root_reference_spans: &FxHashSet<Span>,
-    visiting: &mut FxHashSet<&'a str>,
+    visiting: &mut StaticVisit<'a>,
 ) -> bool {
     let Some(Expression::ArrayExpression(entries)) =
         call.arguments.first().and_then(Argument::as_expression)
@@ -2277,7 +2209,7 @@ fn is_static_stylex_scalar_call_shape<'a>(
                     before,
                     static_values,
                     root_reference_spans,
-                    &mut FxHashSet::default(),
+                    &mut StaticVisit::default(),
                 )
             }),
         "toFixed" | "toExponential" => static_numeric_method_argument(
@@ -2336,7 +2268,7 @@ fn static_numeric_method_argument<'a>(
         before,
         static_values,
         root_reference_spans,
-        &mut FxHashSet::default(),
+        &mut StaticVisit::default(),
     )
     .is_some_and(|value| value.fract() == 0.0 && (min..=max).contains(&value))
 }
@@ -2362,7 +2294,7 @@ fn static_padding_arguments_are_safe<'a>(
         before,
         static_values,
         root_reference_spans,
-        &mut FxHashSet::default(),
+        &mut StaticVisit::default(),
     )
     .is_some_and(|value| value.is_finite() && (0.0..=MAX_STATIC_PADDING).contains(&value))
 }
@@ -2372,7 +2304,7 @@ fn static_stylex_numeric_value<'a>(
     before: u32,
     static_values: &FxHashMap<&'a str, (u32, &'a Expression<'a>)>,
     root_reference_spans: &FxHashSet<Span>,
-    visiting: &mut FxHashSet<&'a str>,
+    visiting: &mut StaticVisit<'a>,
 ) -> Option<f64> {
     match unwrap_transparent_expression(expression) {
         Expression::NumericLiteral(value) => Some(value.value),
@@ -2405,7 +2337,7 @@ fn is_static_stylex_local_arrow_call<'a>(
     static_values: &FxHashMap<&'a str, (u32, &'a Expression<'a>)>,
     imports: &FxHashMap<&'a str, (Lib, &'a str)>,
     root_reference_spans: &FxHashSet<Span>,
-    visiting: &mut FxHashSet<&'a str>,
+    visiting: &mut StaticVisit<'a>,
 ) -> bool {
     let Expression::Identifier(callee) = unwrap_transparent_expression(&call.callee) else {
         return false;
@@ -2481,7 +2413,7 @@ fn stylex_arrow_expression_body<'a>(
 fn resolve_stylex_arrow_parameter_member<'a>(
     expression: &'a Expression<'a>,
     context: &StyleXArrowStaticContext<'_, 'a>,
-    visiting: &mut FxHashSet<&'a str>,
+    visiting: &mut StaticVisit<'a>,
 ) -> Option<ResolvedStyleXStaticMember<'a>> {
     let (base, _, segments) = binding_access_object_chain(expression)?;
     let argument = context.parameters.get(base)?;
@@ -2509,7 +2441,7 @@ fn resolve_stylex_arrow_parameter_member<'a>(
 fn is_static_stylex_arrow_body<'a>(
     expression: &'a Expression<'a>,
     context: &StyleXArrowStaticContext<'_, 'a>,
-    visiting: &mut FxHashSet<&'a str>,
+    visiting: &mut StaticVisit<'a>,
 ) -> bool {
     let expression = unwrap_transparent_expression(expression);
     match expression {
