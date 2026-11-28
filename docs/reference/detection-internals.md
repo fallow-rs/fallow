@@ -1235,7 +1235,12 @@ example a dotfiles repository) is normal.
 The builder installs that filter with `filter_entry`, so a caller passes its
 own filter to the builder and does not call `filter_entry` again. Readers that
 build a matcher from named files (`fallow watch`, the gitignored-target check)
-call `readable_ignore_file` before each read.
+and the input digest of `dead-code --finding-id` call `readable_ignore_file`
+before each read. It uses the same project scope as the walk. A path below a
+file, such as `.git/info/exclude` when `.git` is the file of a linked
+worktree, counts as absent. The first lines of the `.git` and `commondir`
+files are read as `BufRead::lines` reads them: a `\r` is removed only before
+a `\n`.
 
 ### Dynamic import pattern base
 

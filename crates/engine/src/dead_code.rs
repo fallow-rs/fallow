@@ -403,12 +403,21 @@ fn input_files_digest(config: &ResolvedConfig) -> String {
 }
 
 /// The content of one fingerprint input file: a regular file inside `root`
-/// with at most [`fallow_types::read_guard::DEFAULT_MAX_READ_BYTES`] bytes. An
-/// ignore file must also pass the ignore file check, so a FIFO or a link to a
-/// device is never opened.
+/// with at most [`fallow_types::read_guard::DEFAULT_MAX_READ_BYTES`] bytes.
+///
+/// An ignore file passes the ignore file check of the walk instead, so a FIFO
+/// or a link to a device is never opened, and a link to a file elsewhere in
+/// the repository is read, as the walk reads it.
 fn read_input_file(root: &Path, path: &Path, is_ignore_file: bool) -> Option<Vec<u8>> {
-    if is_ignore_file && !fallow_config::readable_ignore_file(path, root) {
-        return None;
+    if is_ignore_file {
+        if !fallow_config::readable_ignore_file(path, root) {
+            return None;
+        }
+        return fallow_types::read_guard::read_bytes_bounded(
+            path,
+            fallow_types::read_guard::DEFAULT_MAX_READ_BYTES,
+        )
+        .ok();
     }
     fallow_types::read_guard::read_bytes_inside(
         root,

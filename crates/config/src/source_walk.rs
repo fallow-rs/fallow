@@ -310,6 +310,47 @@ mod tests {
         assert!(walked.contains(&"src/index.ts".to_string()), "{walked:?}");
     }
 
+    /// A worktree at `base/worktree` whose `.git` file holds `git_file`.
+    #[cfg(unix)]
+    fn worktree_with_git_file(base: &Path, git_file: &str) -> PathBuf {
+        let root = base.join("worktree");
+        write_file(&root.join("src/index.ts"), "");
+        write_file(&root.join(".git"), git_file);
+        root
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn source_walk_keeps_a_carriage_return_at_the_end_of_an_unterminated_gitdir_line() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let base = directory.path();
+        let git_dir = base.join("repository-git\r");
+        std::fs::create_dir_all(&git_dir).expect("git directory");
+        make_fifo(&git_dir.join("commondir"));
+        let root = worktree_with_git_file(base, &format!("gitdir: {}", git_dir.display()));
+
+        let walked = walked_files_within(source_walk_builder(&root, |_| true), &root)
+            .expect("the walk must end although the commondir file is a FIFO");
+        assert!(walked.contains(&"src/index.ts".to_string()), "{walked:?}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn source_walk_keeps_a_carriage_return_at_the_end_of_an_unterminated_commondir_line() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let base = directory.path();
+        let git_dir = base.join("repository-git");
+        let common = base.join("common\r");
+        std::fs::create_dir_all(common.join("info")).expect("common info directory");
+        make_fifo(&common.join("info/exclude"));
+        write_file(&git_dir.join("commondir"), &common.display().to_string());
+        let root = worktree_with_git_file(base, &format!("gitdir: {}\n", git_dir.display()));
+
+        let walked = walked_files_within(source_walk_builder(&root, |_| true), &root)
+            .expect("the walk must end although the exclude file is a FIFO");
+        assert!(walked.contains(&"src/index.ts".to_string()), "{walked:?}");
+    }
+
     #[cfg(unix)]
     #[test]
     fn source_walk_skips_an_ignore_file_above_the_size_cap() {

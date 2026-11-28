@@ -66,7 +66,7 @@ impl Refusal {
 fn check(path: &Path, scope: Option<&Path>) -> Result<bool, Refusal> {
     let metadata = match std::fs::symlink_metadata(path) {
         Ok(metadata) => metadata,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(error) if is_absent(&error) => return Ok(false),
         Err(_) => return Err(Refusal::NoMetadata),
     };
     let metadata = if metadata.file_type().is_symlink() {
@@ -75,7 +75,7 @@ fn check(path: &Path, scope: Option<&Path>) -> Result<bool, Refusal> {
         // does not resolve for another reason, such as a loop, is refused.
         let Ok(target) = dunce::canonicalize(path) else {
             return match std::fs::metadata(path) {
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+                Err(error) if is_absent(&error) => Ok(false),
                 _ => Err(Refusal::NoMetadata),
             };
         };
@@ -98,6 +98,16 @@ fn check(path: &Path, scope: Option<&Path>) -> Result<bool, Refusal> {
     Ok(true)
 }
 
+/// True when an error means that no file is at the path. A path below a file,
+/// such as `.git/info/exclude` when `.git` is the file of a linked worktree,
+/// gives `NotADirectory`.
+fn is_absent(error: &std::io::Error) -> bool {
+    matches!(
+        error.kind(),
+        std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
+    )
+}
+
 /// Give the warning for a skipped ignore file once per process.
 fn warn_skipped(path: &Path, refusal: Refusal, consequence: &str) {
     static WARNED: OnceLock<Mutex<FxHashSet<PathBuf>>> = OnceLock::new();
@@ -117,11 +127,12 @@ fn warn_skipped(path: &Path, refusal: Refusal, consequence: &str) {
 /// True when the ignore file at `path` exists and is safe to read.
 ///
 /// A reader that builds a matcher from named ignore files calls this before
-/// each read. A link target must be inside the directory `scope`. A skipped
-/// file gets one warning.
+/// each read. A link target must be inside the project of `root`, the same
+/// scope that a walk from `root` uses. A skipped file gets one warning.
 #[must_use]
-pub fn readable_ignore_file(path: &Path, scope: &Path) -> bool {
-    let scope = dunce::canonicalize(scope).unwrap_or_else(|_| scope.to_path_buf());
+pub fn readable_ignore_file(path: &Path, root: &Path) -> bool {
+    let canonical_root = dunce::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+    let scope = project_scope(&canonical_root);
     match check(path, Some(&scope)) {
         Ok(exists) => exists,
         Err(refusal) => {
@@ -213,13 +224,22 @@ fn git_exclude_refusal(dir: &Path, scope: Option<&Path>) -> Option<(PathBuf, Ref
     refused(common.join("info").join("exclude"), None)
 }
 
-/// The first line of a file that passed the check, without its line end.
-/// `None` when the file is absent or the line is not valid UTF-8, the cases in
-/// which the `ignore` crate reads no exclude file.
+/// The first line of a file that passed the check, as `BufRead::lines` gives
+/// it: without a `\n` line end, and without a `\r` only when a `\n` follows
+/// it. `None` when the file is absent or empty, or the line is not valid
+/// UTF-8, the cases in which the `ignore` crate reads no exclude file.
 fn first_line(path: &Path) -> Option<String> {
     let bytes = fallow_types::read_guard::read_bytes_bounded(path, MAX_IGNORE_FILE_BYTES).ok()?;
-    let line = bytes.split(|byte| *byte == b'\n').next()?;
-    let line = line.strip_suffix(b"\r").unwrap_or(line);
+    if bytes.is_empty() {
+        return None;
+    }
+    let line = match bytes.iter().position(|byte| *byte == b'\n') {
+        Some(end) => {
+            let line = &bytes[..end];
+            line.strip_suffix(b"\r").unwrap_or(line)
+        }
+        None => bytes.as_slice(),
+    };
     String::from_utf8(line.to_vec()).ok()
 }
 
@@ -326,5 +346,14 @@ mod tests {
 
         assert_eq!(check(&looped, None), Err(Refusal::NoMetadata));
         assert_eq!(check(&dangling, None), Ok(false));
+    }
+
+    #[test]
+    fn an_exclude_path_below_a_git_file_is_absent() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let root = directory.path();
+        std::fs::write(root.join(".git"), "gitdir: /missing/worktree\n").expect("git file");
+
+        assert_eq!(check(&root.join(".git/info/exclude"), None), Ok(false));
     }
 }

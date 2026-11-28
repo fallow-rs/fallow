@@ -923,3 +923,30 @@ fn the_fingerprint_skips_a_fifo_package_json() {
     let project = fifo_project("package.json");
     assert!(fingerprint_within_limit(project.path()).is_some());
 }
+
+#[cfg(unix)]
+#[test]
+fn the_fingerprint_reads_a_gitignore_that_links_inside_the_repository() {
+    let dir = tempfile::tempdir().expect("repository");
+    let repository = dir.path();
+    std::fs::create_dir_all(repository.join(".git")).expect("git dir");
+    std::fs::write(repository.join("shared-ignore"), "dist\n").expect("shared rules");
+    let root = repository.join("packages/app");
+    std::fs::create_dir_all(root.join("src")).expect("src");
+    std::fs::write(root.join("src/index.ts"), "export const a = 1;\n").expect("source");
+    std::os::unix::fs::symlink("../../shared-ignore", root.join(".gitignore"))
+        .expect("link inside the repository");
+    let config = fallow_config::FallowConfig::default().resolve(
+        root,
+        fallow_config::OutputFormat::Json,
+        1,
+        true,
+        true,
+        None,
+    );
+    let before = analysis_fingerprint_for_version(&config, "1.0.0");
+
+    std::fs::write(repository.join("shared-ignore"), "coverage\n").expect("edit rules");
+
+    assert_ne!(analysis_fingerprint_for_version(&config, "1.0.0"), before);
+}
