@@ -2,7 +2,6 @@
 
 use std::fmt::Write as _;
 use std::path::Path;
-use std::sync::atomic::Ordering;
 
 use rustc_hash::FxHashSet;
 
@@ -32,31 +31,50 @@ fn resolution_steps(source: &str) -> usize {
         alias: "vars",
         leaf_paths: &leaf_paths,
     };
-    let before = RESOLUTION_STEPS.load(Ordering::Relaxed);
+    RESOLUTION_STEPS.with(|steps| steps.set(0));
     let _ = css_in_js_consumer_scan(source, Path::new("tokens.ts"), &[query]);
-    RESOLUTION_STEPS.load(Ordering::Relaxed) - before
+    RESOLUTION_STEPS.with(std::cell::Cell::get)
+}
+
+/// Run `scan` on a thread with a known large stack, so that the scan parses
+/// on this thread and the thread-local step count sees its work.
+fn on_scan_thread(scan: impl FnOnce() -> usize + Send + 'static) -> usize {
+    const SCAN_STACK: usize = 256 << 20;
+    std::thread::Builder::new()
+        .stack_size(SCAN_STACK)
+        .spawn(move || {
+            crate::stack::register_thread_stack(SCAN_STACK);
+            scan()
+        })
+        .expect("spawn scan thread")
+        .join()
+        .expect("scan thread")
 }
 
 // Each constant reads the previous one twice, so a resolution without a memo
-// or a budget visits 2 to the power of the chain length constants.
+// or a budget visits 2 to the power of the chain length constants. The lower
+// bound shows that the count saw the scan: each constant expands at least once.
 
 #[test]
 fn primitive_check_resolves_a_doubling_chain_in_bounded_steps() {
-    let steps = resolution_steps(&doubling_chain(16, "1", "String"));
-    assert!(steps <= 4_096, "resolution steps: {steps}");
+    let steps = on_scan_thread(|| resolution_steps(&doubling_chain(16, "1", "String")));
+    assert!((16..=4_096).contains(&steps), "resolution steps: {steps}");
 }
 
 #[test]
 fn bigint_check_resolves_a_doubling_chain_in_bounded_steps() {
-    let steps = resolution_steps(&doubling_chain(16, "1", "Math.abs"));
-    assert!(steps <= 4_096, "resolution steps: {steps}");
+    let steps = on_scan_thread(|| resolution_steps(&doubling_chain(16, "1", "Math.abs")));
+    assert!((16..=4_096).contains(&steps), "resolution steps: {steps}");
 }
 
 #[test]
 fn a_long_doubling_chain_finishes_inside_the_step_budget() {
     for call in ["String", "Math.abs"] {
-        let steps = resolution_steps(&doubling_chain(40, "1", call));
-        assert!(steps <= 4_096, "resolution steps for {call}: {steps}");
+        let steps = on_scan_thread(move || resolution_steps(&doubling_chain(40, "1", call)));
+        assert!(
+            (40..=4_096).contains(&steps),
+            "resolution steps for {call}: {steps}"
+        );
     }
 }
 

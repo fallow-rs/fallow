@@ -8,7 +8,9 @@ use super::object::Lib;
 use super::tokens::{is_static_stylex_theme_override, unwrap_transparent_expression};
 
 #[cfg(test)]
-static RESOLUTION_STEPS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+thread_local! {
+    static RESOLUTION_STEPS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
 
 #[cfg(all(test, not(miri)))]
 #[path = "static_resolution_tests.rs"]
@@ -45,7 +47,7 @@ impl<'a> StaticVisit<'a> {
     /// expanding, or when the resolution reached its depth or step limit.
     pub(super) fn insert(&mut self, name: &'a str) -> bool {
         #[cfg(test)]
-        RESOLUTION_STEPS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        RESOLUTION_STEPS.with(|steps| steps.set(steps.get() + 1));
         let steps = self.steps.get();
         if steps >= MAX_STATIC_RESOLUTION_STEPS || self.active.len() >= MAX_STATIC_RESOLUTION_DEPTH
         {
