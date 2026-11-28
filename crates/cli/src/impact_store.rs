@@ -276,12 +276,16 @@ pub(super) fn migration_marker_path(store: &Path) -> PathBuf {
 }
 
 /// The legacy in-repo store as a current store, without a write. `Absent` when
-/// the marker exists or the legacy file does not exist.
+/// the marker exists, the legacy file does not exist, or Git tracks it.
 fn legacy_view(root: &Path, store: &Path) -> Existing<ImpactStore> {
     if migration_marker_path(store).exists() {
         return Existing::Absent;
     }
-    let parsed = load_existing_inside(root, &legacy_store_path(root), |content| {
+    let legacy = legacy_store_path(root);
+    if legacy.symlink_metadata().is_err() || legacy_store_may_be_tracked(root) {
+        return Existing::Absent;
+    }
+    let parsed = load_existing_inside(root, &legacy, |content| {
         serde_json::from_str::<LegacyFlatStore>(content).map_err(|err| err.to_string())
     });
     match parsed {
@@ -295,6 +299,21 @@ fn legacy_view(root: &Path, store: &Path) -> Existing<ImpactStore> {
             Existing::Loaded(store)
         }
     }
+}
+
+/// Whether Git tracks the legacy store. A local run wrote that file and
+/// `fallow init` ignores `.fallow/`, so a tracked copy came with the checkout
+/// and is not imported. Outside a Git work tree nothing is tracked. When Git
+/// cannot answer, the answer is "tracked", so the import does not run.
+fn legacy_store_may_be_tracked(root: &Path) -> bool {
+    if !root
+        .ancestors()
+        .any(|dir| dir.join(".git").symlink_metadata().is_ok())
+    {
+        return false;
+    }
+    let legacy = Path::new(".fallow").join(STORE_FILE);
+    crate::agent_install::git_tracks_any(root, &[legacy]).unwrap_or(true)
 }
 
 /// Load the store for a report. This function never writes. A missing store

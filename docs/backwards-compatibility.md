@@ -1315,7 +1315,9 @@ These are documented for the rare CI script that depended on the old behavior. N
   not imported again. `fallow impact reset --all` no longer removes the
   `impact` folder: the lock files and the markers stay. `fallow impact` and the
   statusline show the old in-repo history without a write, and the first change
-  of the store saves the import. `fallow impact --all` counts each store that a
+  of the store saves the import. The import takes the history and the counters
+  only: the opt-in, the onboarding answer and the digest time stay unset, and
+  a `.fallow/impact.json` that Git tracks is not imported. `fallow impact --all` counts each store that a
   newer fallow wrote in `unreadable_count`, and the statusline reports the
   newer-fallow state for a newer store with a changed field shape. The store
   schema version and the JSON output do not change. An older fallow ignores the
