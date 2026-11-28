@@ -301,3 +301,42 @@ test("hashes a large config that many extends paths share a bounded amount of te
   const { hashedLength } = sharedChainConfigHash(10, large);
   assert.ok(hashedLength < 16 * 1024 * 1024, `the config hash hashed ${hashedLength} characters`);
 });
+
+test("keeps the config hash of a small config graph", () => {
+  // A saved type-aware baseline stores this hash. A change of the hash form
+  // makes every saved baseline incompatible, so it must be a deliberate one.
+  const root = createRoot();
+  const api = createApi({ cwd: root });
+  let snapshot;
+  try {
+    write(root, "base.json", JSON.stringify({ compilerOptions: { strict: true } }));
+    write(
+      root,
+      "tsconfig.json",
+      JSON.stringify({
+        extends: "./base.json",
+        compilerOptions: { module: "ESNext", moduleResolution: "Bundler", skipLibCheck: true },
+        include: ["src/**/*.ts"],
+        references: [{ path: "./pkg" }],
+      }),
+    );
+    write(
+      root,
+      "pkg/tsconfig.json",
+      JSON.stringify({ extends: "../base.json", compilerOptions: { composite: true } }),
+    );
+    write(root, "src/index.ts", "export const value = 1;\n");
+    const configFileName = path.join(root, "tsconfig.json");
+    snapshot = api.updateSnapshot({ openProjects: [configFileName] });
+    const project = snapshot.getProject(configFileName);
+    assert.ok(project, "expected TypeScript-Go to open the fixture project");
+    assert.equal(
+      projectState(root, project, "explicit").effective_config_hash,
+      "sha256:5a0955b89850beedf81ed8df2d9aad4e24f9d6d65fbaa41cca6d28af24ed272a",
+    );
+  } finally {
+    snapshot?.dispose();
+    api.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
