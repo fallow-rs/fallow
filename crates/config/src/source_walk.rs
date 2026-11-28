@@ -302,6 +302,75 @@ mod tests {
         );
     }
 
+    /// A root below the top level of a repository also gets no ignore rule
+    /// from above the top level. An audit of `--root packages/app` walks
+    /// such a root inside its base snapshot in the temp dir.
+    #[cfg(unix)]
+    #[test]
+    fn source_walk_below_the_top_level_reads_no_ignore_file_above_it() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let base = directory.path();
+        write_file(&base.join(".ignore"), "consumer.ts\n");
+        let repository = base.join("snapshot");
+        std::fs::create_dir_all(repository.join(".git")).expect("git directory");
+        let root = repository.join("packages/app");
+        write_file(&root.join("src/consumer.ts"), "");
+
+        let walked =
+            walked_files_within(source_walk_builder(&root, |_| true), &root).expect("walk ends");
+        assert_eq!(walked, vec!["src/consumer.ts".to_string()]);
+    }
+
+    /// The ignore files between a root and the top level of its repository
+    /// keep their rules and their order: a closer file overrides a farther
+    /// one of the same kind, `.ignore` rules override `.gitignore` rules, the
+    /// exclude file of the repository applies, and the `.gitignore` rules of
+    /// the repository stop at a nested repository.
+    #[cfg(unix)]
+    #[test]
+    fn source_walk_below_the_top_level_keeps_the_rules_of_the_repository() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let repository = directory.path();
+        std::fs::create_dir_all(repository.join(".git/info")).expect("git directory");
+        write_file(&repository.join(".git/info/exclude"), "excluded.ts\n");
+        write_file(&repository.join(".gitignore"), "dist\n*.log\nshadowed.ts\n");
+        write_file(&repository.join(".ignore"), "generated.ts\n!shadowed.ts\n");
+        let root = repository.join("app");
+        write_file(&root.join(".gitignore"), "!keep.log\n");
+        write_file(&root.join("sub/.ignore"), "!generated.ts\n");
+        for file in [
+            "src/index.ts",
+            "dist/out.js",
+            "drop.log",
+            "keep.log",
+            "generated.ts",
+            "sub/generated.ts",
+            "excluded.ts",
+            "shadowed.ts",
+            "vendor/kept.log",
+        ] {
+            write_file(&root.join(file), "");
+        }
+        std::fs::create_dir_all(root.join("vendor/.git")).expect("nested repository");
+
+        let walked =
+            walked_files_within(source_walk_builder(&root, |_| true), &root).expect("walk ends");
+        assert_eq!(
+            walked,
+            [
+                ".gitignore",
+                "keep.log",
+                "shadowed.ts",
+                "src/index.ts",
+                "sub/.ignore",
+                "sub/generated.ts",
+                "vendor/kept.log",
+            ]
+            .map(String::from)
+            .to_vec()
+        );
+    }
+
     #[cfg(unix)]
     #[test]
     fn source_walk_reads_a_parent_gitignore_that_links_outside_the_project() {

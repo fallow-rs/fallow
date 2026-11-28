@@ -23,6 +23,9 @@ use std::sync::{Mutex, OnceLock};
 use ignore::{DirEntry, WalkBuilder};
 use rustc_hash::FxHashSet;
 
+#[path = "ignore_parent_rules.rs"]
+mod parent_rules;
+
 /// The largest ignore file that a walk reads.
 const MAX_IGNORE_FILE_BYTES: u64 = 1024 * 1024;
 
@@ -312,18 +315,22 @@ where
 {
     let canonical_root = dunce::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
     let scope = project_scope(&canonical_root);
-    // A walk from the top level of a repository applies no ignore rule from
-    // above it, the same as Git. The `ignore` crate stops `.gitignore` rules
-    // at a repository but applies each parent `.ignore` file. An audit walks
-    // its base snapshot from a top level in the temp dir, where these files
-    // belong to whoever can write the temp dir. The crate still opens the
-    // parent files, so the check of `checked_root_reads` covers them.
-    let parents = scope != canonical_root || !has_git_entry(&canonical_root);
     let reads = checked_root_reads(&canonical_root, &scope, sources);
+    // A walk inside a repository applies no ignore rule from above the top
+    // level, the same as Git. The `ignore` crate stops `.gitignore` rules at
+    // a repository but applies each parent `.ignore` file. An audit walks its
+    // base snapshot in the temp dir, where these files belong to whoever can
+    // write the temp dir. The crate gets `parents(false)`, and `ParentRules`
+    // applies the files from the parent of the root up to the top level. The
+    // crate still opens all parent files, so `checked_root_reads` checks them.
+    let in_repository = has_git_entry(&scope);
+    let parent_rules = (in_repository && scope != canonical_root)
+        .then(|| parent_rules::ParentRules::load(root, &canonical_root, &scope, reads))
+        .flatten();
     let mut builder = WalkBuilder::new(root);
     builder
         .hidden(false)
-        .parents(parents)
+        .parents(!in_repository)
         .ignore(reads.dot_ignore)
         .git_ignore(reads.sources.git_ignore)
         .git_global(reads.sources.git_global)
@@ -335,6 +342,11 @@ where
                 && let Some((path, refusal, _)) = reads.first_refusal(entry.path(), Some(&scope))
             {
                 warn_skipped(&path, refusal, "the walk skips its directory");
+                return false;
+            }
+            if let Some(rules) = &parent_rules
+                && rules.ignores(entry.path(), is_dir)
+            {
                 return false;
             }
             filter(entry)
