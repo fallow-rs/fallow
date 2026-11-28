@@ -86,6 +86,11 @@ pub(super) fn store_results(
         stored: counts.stored,
         dry_run_hits: outcome.dry_run_reused,
         dry_run_misses: outcome.dry_run_missed,
+        dry_run_miss_reasons: outcome
+            .dry_run_miss_reasons
+            .iter()
+            .map(|(reason, count)| ((*reason).to_owned(), *count))
+            .collect(),
         dry_run_stored,
         not_keyed: NOT_KEYED.iter().map(|&item| item.to_owned()).collect(),
         reach_selection,

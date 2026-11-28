@@ -259,6 +259,8 @@ pub struct ScheduleOutcome {
     /// The test files that the first dry run ran, because the store had no
     /// valid facts for them. Zero without a store.
     pub dry_run_missed: usize,
+    /// The count of missed test files for each reason, see `dry_store`.
+    pub dry_run_miss_reasons: BTreeMap<&'static str, usize>,
     /// The new dry-run facts of each test file, for the store.
     pub dry_run_entries: Vec<DryRunEntry>,
     /// The reach selection and the probe ids of the dry run.
@@ -286,6 +288,7 @@ impl ScheduleOutcome {
             worker_modes: None,
             dry_run_reused: 0,
             dry_run_missed: 0,
+            dry_run_miss_reasons: BTreeMap::new(),
             dry_run_entries: Vec::new(),
             reach: None,
         }

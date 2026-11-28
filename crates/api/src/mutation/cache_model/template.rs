@@ -50,10 +50,18 @@ test("adds", () => {
 });
 "#;
 
-const OTHER_TEST: &str = r#"import { expect, test } from "vitest";
+/// The marker file of [`Step::ToggleOtherFlaky`]. The other test fails while
+/// it exists. No key holds it: the Fallow cache and the key leave out
+/// `node_modules` and the files that a test reads.
+const FLAKY_MARKER: &str = "node_modules/.model-flaky";
+
+const OTHER_TEST: &str = r#"import { existsSync } from "node:fs";
+import { expect, test } from "vitest";
 import { add } from "../src/math";
 
+// edition 1
 test("gives a number", () => {
+  expect(existsSync(new URL("../node_modules/.model-flaky", import.meta.url))).toBe(false);
   expect(typeof add(1, 1)).toBe("number");
 });
 "#;
@@ -166,10 +174,16 @@ pub enum Step {
     /// `package.json` lists `@types/bun`, which enables the Bun plugin of
     /// the analysis, or no such package.
     ToggleBunTypes,
+    /// An edit of the other test file makes its test fail, or pass again.
+    ToggleOtherFails,
+    /// An edit of the other test file and a new [`FLAKY_MARKER`] make its
+    /// test fail. The next toggle removes only the marker, so the test
+    /// passes again with no change of a key, as a flaky test.
+    ToggleOtherFlaky,
 }
 
 impl Step {
-    pub const ALL: [Self; 12] = [
+    pub const ALL: [Self; 14] = [
         Self::ToggleSetupMode,
         Self::TogglePreloadMode,
         Self::ToggleHelperExact,
@@ -182,7 +196,15 @@ impl Step {
         Self::TouchSetup,
         Self::ReinstallPackage,
         Self::ToggleBunTypes,
+        Self::ToggleOtherFails,
+        Self::ToggleOtherFlaky,
     ];
+}
+
+/// The test files of the project at `root` whose test fails.
+pub fn failing_test_files(root: &Path) -> usize {
+    let text = fs::read_to_string(root.join("test/other.test.ts")).expect("read");
+    usize::from(text.contains("toBe(\"string\")") || root.join(FLAKY_MARKER).exists())
 }
 
 /// Replaces `a` with `b` in `path`, or `b` with `a` when `a` is absent.
@@ -240,6 +262,21 @@ pub fn apply(root: &Path, step: Step) {
             "\"devDependencies\":{\"@types/bun\":\"1.3.0\"}",
             "\"devDependencies\":{}",
         ),
+        Step::ToggleOtherFails => swap(
+            root,
+            "test/other.test.ts",
+            "toBe(\"number\")",
+            "toBe(\"string\")",
+        ),
+        Step::ToggleOtherFlaky => {
+            let marker = root.join(FLAKY_MARKER);
+            if marker.exists() {
+                fs::remove_file(marker).expect("remove");
+            } else {
+                swap(root, "test/other.test.ts", "edition 1", "edition 2");
+                fs::write(marker, "").expect("write");
+            }
+        }
         Step::TouchSetup => {
             let target = root.join("test/setup.ts");
             let text = fs::read(&target).expect("read");

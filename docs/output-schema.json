@@ -35948,6 +35948,13 @@
           "type": "integer",
           "description": "The test files with no valid dry-run facts in the cache. The first\ndry run of the run ran them."
         },
+        "dry_run_miss_reasons": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "description": "The count of `dry_run_misses` for each reason: `no-entry` (no stored\nfacts with the key of the run: a new or changed file, or a file whose\nlast dry run had a failed test or an error), `unknown-mutant` (the\nfacts name a mutant outside the plan) and `bound-file-changed` (a test\nfile of the same earlier dry run that can give the static hits or\nloaded files of the facts changed its key, or is not in the dry run).\nAbsent when no file missed."
+        },
         "dry_run_stored": {
           "type": "integer",
           "description": "The test files whose dry-run facts this run added to the cache. A\nfile with a failed test or an error is not stored."

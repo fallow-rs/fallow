@@ -22684,6 +22684,18 @@ dry_run_hits: number
  */
 dry_run_misses: number
 /**
+ * The count of `dry_run_misses` for each reason: `no-entry` (no stored
+ * facts with the key of the run: a new or changed file, or a file whose
+ * last dry run had a failed test or an error), `unknown-mutant` (the
+ * facts name a mutant outside the plan) and `bound-file-changed` (a test
+ * file of the same earlier dry run that can give the static hits or
+ * loaded files of the facts changed its key, or is not in the dry run).
+ * Absent when no file missed.
+ */
+dry_run_miss_reasons?: {
+[k: string]: number
+}
+/**
  * The test files whose dry-run facts this run added to the cache. A
  * file with a failed test or an error is not stored.
  */

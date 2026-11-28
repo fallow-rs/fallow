@@ -75,6 +75,7 @@ mod lean_profile;
 mod list_envelopes;
 mod markdown_prose;
 mod mutation;
+mod mutation_cache;
 mod mutation_ci;
 mod mutation_plan_runner;
 mod mutation_replay;

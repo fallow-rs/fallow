@@ -12,11 +12,20 @@
 //! dry-run share that belong to the source files that it reaches through
 //! static imports. Another file of the share that reaches the same source
 //! file can be the file that gave the fact. So the facts of a file are valid
-//! only when each such file (its `bound` files) is valid in the same run.
-//! Without this rule, a test file that imports only types from a module
-//! could keep a static hit that a changed test file gave.
+//! only when each such file (its `bound` files) has the same key as in the
+//! run that stored the facts. Without this rule, a test file that imports
+//! only types from a module could keep a static hit that a changed test file
+//! gave.
+//!
+//! A bound file needs the same key, not valid facts of its own. A file with
+//! a failed test gets no entry, so it dry-runs again in each run, and a
+//! fixed or flaky test shows in the next run. Its share facts come from the
+//! same inputs as before, so the facts of the files bound to it stay valid.
+
+use std::fmt::Write as _;
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 use super::dry_phase::{DryPhase, ShareFacts, dry_phase};
 use super::*;
@@ -68,9 +77,13 @@ pub struct StoredDryRun {
     pub duplicate_test_ids: Vec<String>,
     /// The other test files of the dry-run share that reach a source file of
     /// `static_hits` or `loaded_paths`. The facts are valid only when each
-    /// of these files has valid facts in the same run.
+    /// of these files is in the dry run with the key of `bound_keys`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub bound: Vec<String>,
+    /// The digest of the keys of the `bound` files in the run that stored
+    /// the facts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bound_keys: Option<String>,
 }
 
 impl StoredDryRun {
@@ -101,6 +114,39 @@ impl StoredDryRun {
     }
 }
 
+/// The digest of the key of each file of `bound` in `keys`, or `None` when a
+/// file has no key in the run.
+fn bound_digest(bound: &[String], keys: &FxHashMap<String, String>) -> Option<String> {
+    if bound.is_empty() {
+        return None;
+    }
+    let mut hasher = Sha256::new();
+    for file in bound {
+        let key = keys.get(file)?;
+        for part in [file, key] {
+            hasher.update((part.len() as u64).to_le_bytes());
+            hasher.update(part.as_bytes());
+        }
+    }
+    Some(
+        hasher
+            .finalize()
+            .iter()
+            .fold(String::with_capacity(64), |mut text, byte| {
+                let _ = write!(text, "{byte:02x}");
+                text
+            }),
+    )
+}
+
+/// True when each bound file of `facts` has the key that it had when the
+/// facts were stored.
+fn bound_holds(facts: &StoredDryRun, keys: &FxHashMap<String, String>) -> bool {
+    facts.bound.is_empty()
+        || bound_digest(&facts.bound, keys)
+            .is_some_and(|digest| facts.bound_keys.as_deref() == Some(digest.as_str()))
+}
+
 /// The new dry-run facts of one test file, for the store.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DryRunEntry {
@@ -119,12 +165,22 @@ pub trait DryRunLookup: std::fmt::Debug + Send + Sync {
     fn get(&self, test_file: &str, key: &str) -> Option<StoredDryRun>;
 }
 
+/// The miss reason of a file with no stored facts for the key of the run: a
+/// new or changed file, or a file whose last dry run failed.
+const NO_ENTRY: &str = "no-entry";
+/// The miss reason of facts that name a mutant id outside the plan.
+const UNKNOWN_MUTANT: &str = "unknown-mutant";
+/// The miss reason of facts with a bound file whose key changed, or that is
+/// not in the dry run of the run.
+const BOUND_FILE_CHANGED: &str = "bound-file-changed";
+
 /// The stored facts of `dry_files` and the files that must dry-run, in the
-/// order of `dry_files`.
+/// order of `dry_files`, with the count of missed files for each reason.
 struct Reuse {
     stored: Vec<(String, StoredDryRun)>,
     run: Vec<String>,
     keys: FxHashMap<String, String>,
+    reasons: BTreeMap<&'static str, usize>,
 }
 
 fn reuse(
@@ -138,48 +194,35 @@ fn reuse(
             stored: Vec::new(),
             run: dry_files.to_vec(),
             keys: FxHashMap::default(),
+            reasons: BTreeMap::new(),
         };
     };
     let keys: FxHashMap<String, String> = dry_files
         .iter()
         .map(|file| (file.clone(), store.key(ready, file)))
         .collect();
-    let mut valid: FxHashMap<&str, StoredDryRun> = dry_files
-        .iter()
-        .filter_map(|file| {
-            let facts = store.get(file, &keys[file])?;
-            facts
-                .names_known_ids(plan)
-                .then_some((file.as_str(), facts))
-        })
-        .collect();
-    loop {
-        let unbound: Vec<&str> = valid
-            .iter()
-            .filter(|(_, facts)| {
-                facts
-                    .bound
-                    .iter()
-                    .any(|file| !valid.contains_key(file.as_str()))
-            })
-            .map(|(file, _)| *file)
-            .collect();
-        if unbound.is_empty() {
-            break;
-        }
-        for file in unbound {
-            valid.remove(file);
-        }
-    }
+    let mut reasons = BTreeMap::new();
     let mut stored = Vec::new();
     let mut run = Vec::new();
     for file in dry_files {
-        match valid.remove(file.as_str()) {
-            Some(facts) => stored.push((file.clone(), facts)),
-            None => run.push(file.clone()),
-        }
+        let reason = match store.get(file, &keys[file]) {
+            None => NO_ENTRY,
+            Some(facts) if !facts.names_known_ids(plan) => UNKNOWN_MUTANT,
+            Some(facts) if !bound_holds(&facts, &keys) => BOUND_FILE_CHANGED,
+            Some(facts) => {
+                stored.push((file.clone(), facts));
+                continue;
+            }
+        };
+        *reasons.entry(reason).or_default() += 1;
+        run.push(file.clone());
     }
-    Reuse { stored, run, keys }
+    Reuse {
+        stored,
+        run,
+        keys,
+        reasons,
+    }
 }
 
 /// The source file of each mutant of the plan.
@@ -331,7 +374,9 @@ fn new_entries(
                     .map(|test| test.test_id.clone())
                     .collect(),
                 bound: claims.bound.into_iter().collect(),
+                bound_keys: None,
             };
+            facts.bound_keys = bound_digest(&facts.bound, keys);
             facts.static_hits.sort_unstable();
             facts.loaded_paths.sort_unstable();
             entries.push(DryRunEntry {
@@ -453,7 +498,13 @@ pub(super) fn joined_dry_phase(
     (progress, outcome): (MutationProgressSink<'_>, &mut ScheduleOutcome),
 ) -> Result<DryPhase, ScheduleError> {
     let started = config.clock.now();
-    let Reuse { stored, run, keys } = reuse(plan, config, ready, dry_files);
+    let Reuse {
+        stored,
+        run,
+        keys,
+        reasons,
+    } = reuse(plan, config, ready, dry_files);
+    outcome.dry_run_miss_reasons = reasons;
     // The run dir of a run with reach selection also holds files that have
     // only entry probes. They are no plan files, so the loaded paths leave
     // them out.
