@@ -205,6 +205,73 @@ fn markup_snippets_declare_only_the_locals_they_name() {
     assert_bytes_below(
         "markup snippet locals",
         extraction_work("a.vue", source),
-        160 * MIB,
+        48 * MIB,
     );
+}
+
+/// Template locals of the outer scope in the scope copy tests below.
+const SCOPE_LOCALS: usize = 1_000;
+
+/// Elements inside the outer scope in the scope copy tests below.
+const SCOPE_ELEMENTS: usize = 2_000;
+
+/// `SCOPE_ELEMENTS` empty paragraphs.
+fn plain_elements() -> String {
+    "<p></p>\n".repeat(SCOPE_ELEMENTS)
+}
+
+/// `local0, local1, ...` with `SCOPE_LOCALS` names.
+fn local_names() -> String {
+    (0..SCOPE_LOCALS)
+        .map(|index| format!("local{index}"))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// A Vue slot with many props and many plain elements inside it. The scan
+/// reads the template locals at each element.
+#[test]
+fn vue_scan_does_not_copy_scope_locals_per_element() {
+    let source = format!(
+        "<script setup>\nimport Comp from './Comp.vue';\n</script>\n<template>\n\
+         <Comp v-slot=\"{{ {} }}\">\n{}</Comp>\n</template>\n",
+        local_names(),
+        plain_elements()
+    );
+    assert_bytes_below(
+        "vue scope locals",
+        extraction_work("a.vue", source),
+        16 * MIB,
+    );
+}
+
+/// A Svelte each block with many item names and many plain elements inside it.
+#[test]
+fn svelte_scan_does_not_copy_scope_locals_per_element() {
+    let source = format!(
+        "<script>\nimport Item from './Item.svelte';\nlet items = [];\n</script>\n\
+         {{#each items as {{ {} }}}}\n{}{{/each}}\n",
+        local_names(),
+        plain_elements()
+    );
+    assert_bytes_below(
+        "svelte scope locals",
+        extraction_work("a.svelte", source),
+        16 * MIB,
+    );
+}
+
+/// An Angular template with many `@let` locals and many plain elements.
+#[test]
+fn angular_scan_does_not_copy_scope_locals_per_element() {
+    let mut template = String::new();
+    for index in 0..SCOPE_LOCALS {
+        let _ = writeln!(template, "@let local{index} = {index};");
+    }
+    template.push_str(&plain_elements());
+    let work = work_on_large_stack(move || {
+        crate::sfc_template::angular::collect_angular_template_refs(&template)
+    });
+    // Most of the bound is the parse of each `@let` expression, which is linear.
+    assert_bytes_below("angular scope locals", work, 32 * MIB);
 }

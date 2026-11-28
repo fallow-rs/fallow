@@ -397,18 +397,19 @@ fn build_template_usage(
 /// for external templates where unresolved identifiers are potential component
 /// class member refs and member-access chains (`dataService.getTotal()`) must
 /// be resolved against the component's constructor-injected type bindings to
-/// credit the target class's member as used.
+/// credit the target class's member as used. `locals` are the template locals
+/// that the snippet names, as [`named_locals`] gives them.
 pub fn collect_unresolved_refs_and_accesses(
     snippet: &str,
     kind: TemplateSnippetKind,
-    locals: &[String],
+    locals: &[&str],
 ) -> (FxHashSet<String>, Vec<MemberAccess>) {
     let snippet = snippet.trim();
     if snippet.is_empty() {
         return (FxHashSet::default(), Vec::new());
     }
 
-    let wrapped = wrap_snippet(snippet, kind, &named_locals(snippet, locals));
+    let wrapped = wrap_snippet(snippet, kind, locals);
     let allocator = Allocator::default();
     let parser_return = Parser::new(&allocator, &wrapped, SourceType::ts()).parse();
     let semantic_ret = SemanticBuilder::new().build(&parser_return.program);
@@ -696,7 +697,7 @@ fn remap_object_name(
 /// A snippet with a non-ASCII character or a backslash (a Unicode escape in
 /// an identifier) keeps every local, because the word scan below reads ASCII
 /// identifiers only.
-fn named_locals<'l>(snippet: &str, locals: &'l [String]) -> Vec<&'l str> {
+pub fn named_locals<'l>(snippet: &str, locals: &'l [String]) -> Vec<&'l str> {
     if locals.is_empty() {
         return Vec::new();
     }

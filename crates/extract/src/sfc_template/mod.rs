@@ -43,6 +43,7 @@ pub mod component_contracts;
 pub mod glimmer;
 mod recovery;
 mod scanners;
+mod scope_stack;
 mod shared;
 mod svelte;
 mod svelte_listeners;

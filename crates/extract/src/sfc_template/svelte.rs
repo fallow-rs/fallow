@@ -5,6 +5,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use crate::template_usage::TemplateUsage;
 
 use super::scanners::{scan_curly_section, scan_html_tag};
+use super::scope_stack::ScopeStack;
 use super::shared::{
     HTML_COMMENT_RE, ParsedAttr, extract_pattern_binding_names, merge_component_tag_usage,
     merge_expression_usage_allow_dollar_refs_with_bound_targets,
@@ -42,7 +43,7 @@ static SVELTE_SNIPPET_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
     crate::static_regex(r"(?is)^#snippet\s+[A-Za-z_$][\w$]*\s*\((?P<params>.*)\)\s*$")
 });
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SvelteBlockKind {
     Root,
     If,
@@ -57,12 +58,6 @@ const VOID_HTML_TAGS: &[&str] = &[
     "area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source",
     "track", "wbr",
 ];
-
-#[derive(Debug, Clone)]
-struct SvelteScopeFrame {
-    kind: SvelteBlockKind,
-    locals: Vec<String>,
-}
 
 #[cfg(test)]
 pub(super) fn collect_template_usage(
@@ -130,7 +125,7 @@ struct SvelteTemplateUsageScanner<'a> {
     bound_targets: &'a FxHashMap<String, String>,
     iterable_types: &'a FxHashMap<String, String>,
     usage: TemplateUsage,
-    scopes: Vec<SvelteScopeFrame>,
+    scopes: ScopeStack<SvelteBlockKind>,
 }
 
 impl<'a> SvelteTemplateUsageScanner<'a> {
@@ -147,10 +142,7 @@ impl<'a> SvelteTemplateUsageScanner<'a> {
             bound_targets,
             iterable_types,
             usage,
-            scopes: vec![SvelteScopeFrame {
-                kind: SvelteBlockKind::Root,
-                locals: Vec::new(),
-            }],
+            scopes: ScopeStack::new(SvelteBlockKind::Root),
         }
     }
 
@@ -260,7 +252,7 @@ struct SvelteTagInput<'a> {
     imported_bindings: &'a FxHashSet<String>,
     bound_targets: &'a FxHashMap<String, String>,
     iterable_types: &'a FxHashMap<String, String>,
-    scopes: &'a mut Vec<SvelteScopeFrame>,
+    scopes: &'a mut ScopeStack<SvelteBlockKind>,
     usage: &'a mut TemplateUsage,
 }
 
@@ -290,7 +282,7 @@ fn apply_tag(input: &mut SvelteTagInput<'_>) {
         input.tag,
         input.imported_bindings,
         input.bound_targets,
-        &current_locals(input.scopes),
+        input.scopes.locals(),
     );
 }
 
@@ -364,10 +356,10 @@ fn apply_svelte_snippet_tag(input: &mut SvelteTagInput<'_>) -> bool {
         return false;
     };
     let params = captures.name("params").map_or("", |m| m.as_str());
-    input.scopes.push(SvelteScopeFrame {
-        kind: SvelteBlockKind::Snippet,
-        locals: extract_pattern_binding_names(params),
-    });
+    input.scopes.push(
+        SvelteBlockKind::Snippet,
+        extract_pattern_binding_names(params),
+    );
     true
 }
 
@@ -378,7 +370,7 @@ fn merge_expr_and_open_block(
     kind: SvelteBlockKind,
     imported_bindings: &FxHashSet<String>,
     bound_targets: &FxHashMap<String, String>,
-    scopes: &mut Vec<SvelteScopeFrame>,
+    scopes: &mut ScopeStack<SvelteBlockKind>,
     usage: &mut TemplateUsage,
 ) {
     merge_expression_usage_allow_dollar_refs_with_bound_targets(
@@ -386,12 +378,9 @@ fn merge_expr_and_open_block(
         expr.trim(),
         imported_bindings,
         bound_targets,
-        &current_locals(scopes),
+        scopes.locals(),
     );
-    scopes.push(SvelteScopeFrame {
-        kind,
-        locals: Vec::new(),
-    });
+    scopes.push(kind, Vec::new());
 }
 
 struct SvelteExpressionDirectiveInput<'a> {
@@ -400,7 +389,7 @@ struct SvelteExpressionDirectiveInput<'a> {
     tag_end: usize,
     imported_bindings: &'a FxHashSet<String>,
     bound_targets: &'a FxHashMap<String, String>,
-    scopes: &'a mut [SvelteScopeFrame],
+    scopes: &'a mut ScopeStack<SvelteBlockKind>,
     usage: &'a mut TemplateUsage,
 }
 
@@ -481,7 +470,7 @@ fn apply_html_directive(input: &mut SvelteExpressionDirectiveInput<'_>, expr: &s
         expr.trim(),
         input.imported_bindings,
         input.bound_targets,
-        &current_locals(input.scopes),
+        input.scopes.locals(),
     );
 }
 
@@ -490,7 +479,7 @@ fn apply_each_tag(
     imported_bindings: &FxHashSet<String>,
     bound_targets: &FxHashMap<String, String>,
     iterable_types: &FxHashMap<String, String>,
-    scopes: &mut Vec<SvelteScopeFrame>,
+    scopes: &mut ScopeStack<SvelteBlockKind>,
     usage: &mut TemplateUsage,
 ) {
     let iterable = captures.name("iterable").map_or("", |m| m.as_str()).trim();
@@ -503,31 +492,26 @@ fn apply_each_tag(
     if let Some((item, _)) = svelte_each_element_binding(iterable, bindings, iterable_types) {
         each_locals.retain(|name| name != &item);
     }
-    let current = current_locals(scopes);
     merge_expression_usage_allow_dollar_refs_with_bound_targets(
         usage,
         iterable,
         imported_bindings,
         bound_targets,
-        &current,
+        scopes.locals(),
     );
+    // The key expression sees the item names of the block.
+    scopes.push(SvelteBlockKind::Each, each_locals);
     if let Some(key) = captures.name("key").map(|m| m.as_str().trim())
         && !key.is_empty()
     {
-        let mut key_locals = current;
-        key_locals.extend(each_locals.iter().cloned());
         merge_expression_usage_allow_dollar_refs_with_bound_targets(
             usage,
             key,
             imported_bindings,
             bound_targets,
-            &key_locals,
+            scopes.locals(),
         );
     }
-    scopes.push(SvelteScopeFrame {
-        kind: SvelteBlockKind::Each,
-        locals: each_locals,
-    });
 }
 
 /// Pre-scan the markup for `{#each src as item}` blocks and, for each whose source
@@ -593,7 +577,7 @@ fn apply_await_tag(
     captures: &regex::Captures<'_>,
     imported_bindings: &FxHashSet<String>,
     bound_targets: &FxHashMap<String, String>,
-    scopes: &mut Vec<SvelteScopeFrame>,
+    scopes: &mut ScopeStack<SvelteBlockKind>,
     usage: &mut TemplateUsage,
 ) {
     let body = captures.name("expr").map_or("", |m| m.as_str()).trim();
@@ -606,24 +590,24 @@ fn apply_await_tag(
         expr,
         imported_bindings,
         bound_targets,
-        &current_locals(scopes),
+        scopes.locals(),
     );
-    scopes.push(SvelteScopeFrame {
-        kind: SvelteBlockKind::Await,
-        locals: extract_pattern_binding_names(binding),
-    });
+    scopes.push(
+        SvelteBlockKind::Await,
+        extract_pattern_binding_names(binding),
+    );
 }
 
-fn update_await_branch_locals(captures: &regex::Captures<'_>, scopes: &mut [SvelteScopeFrame]) {
-    if let Some(frame) = scopes
-        .iter_mut()
-        .rev()
-        .find(|frame| matches!(frame.kind, SvelteBlockKind::Await))
-    {
-        frame.locals = captures
+fn update_await_branch_locals(
+    captures: &regex::Captures<'_>,
+    scopes: &mut ScopeStack<SvelteBlockKind>,
+) {
+    if let Some(index) = scopes.innermost_index_of(SvelteBlockKind::Await) {
+        let locals = captures
             .name("binding")
             .map(|m| extract_pattern_binding_names(m.as_str()))
             .unwrap_or_default();
+        scopes.replace_locals(index, locals);
     }
 }
 
@@ -631,22 +615,18 @@ fn apply_const_tag(
     stmt: &str,
     imported_bindings: &FxHashSet<String>,
     bound_targets: &FxHashMap<String, String>,
-    scopes: &mut [SvelteScopeFrame],
+    scopes: &mut ScopeStack<SvelteBlockKind>,
     usage: &mut TemplateUsage,
 ) {
-    let locals = current_locals(scopes);
     merge_statement_usage_allow_dollar_refs_with_bound_targets(
         usage,
         stmt.trim(),
         imported_bindings,
         bound_targets,
-        &locals,
+        scopes.locals(),
     );
     if let Some(lhs) = stmt.split_once('=').map(|(lhs, _)| lhs.trim()) {
-        let new_bindings = extract_pattern_binding_names(lhs);
-        if let Some(frame) = scopes.last_mut() {
-            frame.locals.extend(new_bindings);
-        }
+        scopes.extend_innermost(extract_pattern_binding_names(lhs));
     }
 }
 
@@ -654,7 +634,7 @@ fn apply_expression_tag(
     expr: &str,
     imported_bindings: &FxHashSet<String>,
     bound_targets: &FxHashMap<String, String>,
-    scopes: &[SvelteScopeFrame],
+    scopes: &ScopeStack<SvelteBlockKind>,
     usage: &mut TemplateUsage,
 ) {
     merge_expression_usage_allow_dollar_refs_with_bound_targets(
@@ -662,7 +642,7 @@ fn apply_expression_tag(
         expr.trim(),
         imported_bindings,
         bound_targets,
-        &current_locals(scopes),
+        scopes.locals(),
     );
 }
 
@@ -727,14 +707,12 @@ fn apply_markup_tag(
     tag: &str,
     imported_bindings: &FxHashSet<String>,
     bound_targets: &FxHashMap<String, String>,
-    scopes: &mut Vec<SvelteScopeFrame>,
+    scopes: &mut ScopeStack<SvelteBlockKind>,
     usage: &mut TemplateUsage,
 ) {
     let trimmed = tag.trim();
     if trimmed.starts_with("</") {
-        if let Some(frame) = scopes.last()
-            && frame.kind == SvelteBlockKind::Element
-        {
+        if scopes.innermost_kind() == Some(SvelteBlockKind::Element) {
             scopes.pop();
         }
         return;
@@ -749,8 +727,8 @@ fn apply_markup_tag(
         return;
     }
 
-    let current = current_locals(scopes);
-    merge_markup_brace_usage(trimmed, usage, imported_bindings, bound_targets, &current);
+    let current = scopes.locals();
+    merge_markup_brace_usage(trimmed, usage, imported_bindings, bound_targets, current);
     if parsed.name.contains('.')
         || parsed
             .name
@@ -758,22 +736,19 @@ fn apply_markup_tag(
             .next()
             .is_some_and(|ch| ch.is_ascii_uppercase())
     {
-        merge_component_tag_usage(usage, &parsed.name, imported_bindings, &current, false);
+        merge_component_tag_usage(usage, &parsed.name, imported_bindings, current, false);
     }
 
     let element_locals = merge_markup_attr_usage(
         &parsed.attrs,
         imported_bindings,
         bound_targets,
-        &current,
+        current,
         usage,
     );
 
     if !parsed.self_closing && !is_void_html_tag(&parsed.name) {
-        scopes.push(SvelteScopeFrame {
-            kind: SvelteBlockKind::Element,
-            locals: element_locals,
-        });
+        scopes.push(SvelteBlockKind::Element, element_locals);
     }
 }
 
@@ -959,7 +934,7 @@ fn is_void_html_tag(tag_name: &str) -> bool {
     VOID_HTML_TAGS.contains(&tag_name)
 }
 
-fn pop_scope(scopes: &mut Vec<SvelteScopeFrame>, closing: &str) {
+fn pop_scope(scopes: &mut ScopeStack<SvelteBlockKind>, closing: &str) {
     let kind = match closing {
         "if" => Some(SvelteBlockKind::If),
         "each" => Some(SvelteBlockKind::Each),
@@ -973,18 +948,9 @@ fn pop_scope(scopes: &mut Vec<SvelteScopeFrame>, closing: &str) {
         return;
     };
 
-    if let Some(index) = scopes.iter().rposition(|frame| frame.kind == kind)
-        && index > 0
-    {
+    if let Some(index) = scopes.innermost_index_of(kind) {
         scopes.truncate(index);
     }
-}
-
-fn current_locals(scopes: &[SvelteScopeFrame]) -> Vec<String> {
-    scopes
-        .iter()
-        .flat_map(|frame| frame.locals.iter().cloned())
-        .collect()
 }
 
 #[cfg(all(test, not(miri)))]

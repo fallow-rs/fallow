@@ -8,6 +8,7 @@ use super::recovery::RecoveryScanner;
 use super::scanners::{
     is_html_tag_start, scan_bracket_section, scan_curly_section, scan_html_tag, scan_paren_section,
 };
+use super::scope_stack::ScopeStack;
 use super::shared::{
     HTML_COMMENT_RE, ParsedAttr, ParsedTag, kebab_to_camel_case, merge_component_tag_usage,
     merge_expression_usage_with_bound_targets, merge_pattern_binding_usage,
@@ -450,7 +451,7 @@ fn scan_template_body(
 ) -> TemplateUsage {
     let mut usage = TemplateUsage::default();
     usage.take_markup_sink_from(outer);
-    let mut scopes: Vec<Vec<String>> = vec![Vec::new()];
+    let mut scopes = ScopeStack::new(());
     let bytes = body.as_bytes();
     let mut index = 0;
 
@@ -474,7 +475,7 @@ fn scan_template_body(
                 expr.trim(),
                 imported_bindings,
                 bound_targets,
-                &current_locals(&scopes),
+                scopes.locals(),
             );
             index = next_index;
             continue;
@@ -512,7 +513,7 @@ struct VueTagInput<'a> {
     imported_bindings: &'a FxHashSet<String>,
     bound_targets: &'a FxHashMap<String, String>,
     iterable_types: &'a FxHashMap<String, String>,
-    scopes: &'a mut Vec<Vec<String>>,
+    scopes: &'a mut ScopeStack<()>,
     usage: &'a mut TemplateUsage,
 }
 
@@ -530,9 +531,7 @@ fn apply_tag(input: VueTagInput<'_>) {
 
     let trimmed = tag.trim();
     if trimmed.starts_with("</") {
-        if scopes.len() > 1 {
-            scopes.pop();
-        }
+        scopes.pop();
         return;
     }
 
@@ -540,9 +539,8 @@ fn apply_tag(input: VueTagInput<'_>) {
         return;
     }
 
-    let current = current_locals(scopes);
     let parsed = parse_tag_attrs(trimmed, false);
-    mark_tag_usage(&parsed.name, imported_bindings, &current, usage);
+    mark_tag_usage(&parsed.name, imported_bindings, scopes.locals(), usage);
     collect_v_html_sink(&parsed, tag_start, tag_end, usage);
 
     let v_for_locals = collect_v_for_locals(
@@ -550,30 +548,27 @@ fn apply_tag(input: VueTagInput<'_>) {
         imported_bindings,
         bound_targets,
         iterable_types,
-        &current,
+        scopes.locals(),
         usage,
     );
-    let slot_locals = collect_slot_locals(&parsed, imported_bindings, &current, usage);
+    let slot_locals = collect_slot_locals(&parsed, imported_bindings, scopes.locals(), usage);
 
-    let mut element_locals = v_for_locals.clone();
-    element_locals.extend(slot_locals);
-
-    let mut attr_locals = current.clone();
-    attr_locals.extend(element_locals.iter().cloned());
-    let mut arg_locals = current;
-    arg_locals.extend(v_for_locals);
-
+    // The element scope declares the `v-for` locals, then the slot locals. A
+    // dynamic attribute argument sees only the `v-for` locals.
+    let slot_count = slot_locals.len();
+    scopes.push((), v_for_locals.into_iter().chain(slot_locals));
+    let attr_locals = scopes.locals();
     scan_vue_attrs(
         &parsed,
         imported_bindings,
         bound_targets,
-        &arg_locals,
-        &attr_locals,
+        &attr_locals[..attr_locals.len() - slot_count],
+        attr_locals,
         usage,
     );
 
-    if !parsed.self_closing {
-        scopes.push(element_locals);
+    if parsed.self_closing {
+        scopes.pop();
     }
 }
 
@@ -775,13 +770,6 @@ fn dynamic_argument_expression(attr_name: &str) -> Option<&str> {
     let (expr, _) = scan_bracket_section(attr_name, start)?;
     let expr = expr.trim();
     (!expr.is_empty()).then_some(expr)
-}
-
-fn current_locals(scopes: &[Vec<String>]) -> Vec<String> {
-    scopes
-        .iter()
-        .flat_map(|locals| locals.iter().cloned())
-        .collect()
 }
 
 fn mark_tag_usage(

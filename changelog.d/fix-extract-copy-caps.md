@@ -7,6 +7,6 @@
   - Glimmer template chains and CSS-in-JS token reads stop at 64 links, as JavaScript member chains already do.
   - The complexity name of a callback keeps a callee of 128 bytes at most. A longer dotted callee gives its last property.
   - A Playwright fixture type collects 512 fixture bindings at most, with paths of 128 bytes at most.
-  - A Vue, Svelte or Angular template expression declares only the template locals that it names, not every local in scope.
+  - A Vue, Svelte or Angular template expression declares only the template locals that it names, not every local in scope. The template scans read the locals in scope without a copy at each element.
 
   The output for real projects does not change. The parse cache version changes, so the first run after the upgrade parses each file again.
