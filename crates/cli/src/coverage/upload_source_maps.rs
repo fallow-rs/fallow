@@ -17,8 +17,8 @@ use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
 
 use crate::api::{
-    NETWORK_EXIT_CODE, ResponseBodyReader, parse_error_envelope, response_message_suffix,
-    retry_delay_for_status, sanitize_network_error, should_retry_status,
+    NETWORK_EXIT_CODE, ResponseBodyReader, SendCompactJson, parse_error_envelope,
+    response_message_suffix, retry_delay_for_status, sanitize_network_error, should_retry_status,
     try_api_agent_with_timeout,
 };
 use crate::coverage::generated_line_starts;
@@ -1087,7 +1087,7 @@ fn send_source_map(
         request = request.header(super::vercel_upload::DEPLOYMENT_ID_HEADER, id);
     }
     let mut response = request
-        .send_json(&payload)
+        .send_compact_json(&payload)
         .map_err(|err| UploadAttemptError {
             message: sanitize_network_error(&format!("network error: {err}")),
             retryable: true,

@@ -33,7 +33,8 @@ use serde::{Deserialize, Serialize};
 use crate::report::colorize::Colorize as _;
 
 use crate::api::{
-    ResponseBodyReader, parse_error_envelope, sanitize_network_error, try_api_agent_with_timeout,
+    ResponseBodyReader, SendCompactJson, parse_error_envelope, sanitize_network_error,
+    try_api_agent_with_timeout,
 };
 use crate::coverage::upload_common::{
     self, UploadError, display_endpoint_url, format_count, format_upload_error_message,
@@ -276,7 +277,7 @@ fn upload(
     let mut response = agent
         .post(&url)
         .header("Authorization", &format!("Bearer {api_key}"))
-        .send_json(payload)
+        .send_compact_json(payload)
         .map_err(|err| {
             UploadError::Network(sanitize_network_error(&format!("network error: {err}")))
         })?;

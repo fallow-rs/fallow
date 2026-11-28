@@ -26,7 +26,7 @@ use flate2::read::GzDecoder;
 
 use super::cloud_client::CloudError;
 use crate::api::{
-    parse_error_envelope, retry_delay_for_status, sanitize_network_error,
+    SendCompactJson, parse_error_envelope, retry_delay_for_status, sanitize_network_error,
     try_api_agent_with_timeout,
 };
 
@@ -297,7 +297,7 @@ fn send_once(
             if let Some(source) = auth.agent_source.as_deref() {
                 request = request.header(AGENT_SOURCE_HEADER, source);
             }
-            request.send_json(value)
+            request.send_compact_json(value)
         }
     };
     let mut response = result.map_err(|err| transport_error(&err, operation))?;

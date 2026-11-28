@@ -16,7 +16,7 @@ use fallow_engine::module_graph::RetainedModuleGraph;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::api::{api_url, try_api_agent_with_timeout, without_redirects};
+use crate::api::{SendCompactJson, api_url, try_api_agent_with_timeout, without_redirects};
 use crate::{exit_codes, json_style::JsonStyle};
 
 #[path = "telemetry_mcp_record.rs"]
@@ -2022,12 +2022,12 @@ fn post_telemetry_payload(
     } else {
         request
     };
-    let response = request.send_json(payload).map_err(|err| err.to_string())?;
-    if response.status().is_success() {
-        Ok(())
-    } else {
-        Err(format!("telemetry endpoint returned {}", response.status()))
-    }
+    let response = request.send_compact_json(payload);
+    let status = response.map_err(|err| err.to_string())?.status();
+    status
+        .is_success()
+        .then_some(())
+        .ok_or_else(|| format!("telemetry endpoint returned {status}"))
 }
 
 /// Advisory lock serialising spool rewrites across concurrent `fallow` processes.

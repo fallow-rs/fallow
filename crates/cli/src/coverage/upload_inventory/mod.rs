@@ -34,7 +34,8 @@ use serde::{Deserialize, Serialize};
 use crate::report::colorize::Colorize as _;
 
 use crate::api::{
-    ResponseBodyReader, parse_error_envelope, sanitize_network_error, try_api_agent_with_timeout,
+    ResponseBodyReader, SendCompactJson, parse_error_envelope, sanitize_network_error,
+    try_api_agent_with_timeout,
 };
 use crate::coverage::upload_common::{
     self, UploadError, display_endpoint_url, format_count, format_upload_error_message,
@@ -1053,7 +1054,7 @@ fn upload(
     if let Some(id) = deployment_id {
         request = request.header(super::vercel_upload::DEPLOYMENT_ID_HEADER, id);
     }
-    let mut response = request.send_json(payload).map_err(|err| {
+    let mut response = request.send_compact_json(payload).map_err(|err| {
         UploadError::Network(sanitize_network_error(&format!("network error: {err}")))
     })?;
 

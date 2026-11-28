@@ -24,8 +24,8 @@ use fallow_license::{
 use serde::{Deserialize, Serialize};
 
 use crate::api::{
-    LICENSE_API_KEY_RECOVERY, TOKEN_STALE_CODE, api_url, http_status_failure, http_status_message,
-    sanitize_network_error, try_api_agent,
+    LICENSE_API_KEY_RECOVERY, SendCompactJson, TOKEN_STALE_CODE, api_url, http_status_failure,
+    http_status_message, sanitize_network_error, try_api_agent,
 };
 use crate::exit_codes::{
     ErrorExitCode, INVALID_INPUT, NETWORK_FAILURE, RESOURCE_UNAVAILABLE,
@@ -404,7 +404,7 @@ pub fn activate_trial(email: &str, json: bool) -> Result<LicenseStatus, String> 
     let mut response = try_api_agent()
         .map_err(|err| err.to_string())?
         .post(&api_url("/v1/auth/license/trial"))
-        .send_json(TrialRequest { email })
+        .send_compact_json(&TrialRequest { email })
         .map_err(|err| sanitize_network_error(&format!("failed to request a trial: {err}")))?;
     if !response.status().is_success() {
         return Err(http_status_message(&mut response, "trial"));

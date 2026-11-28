@@ -343,6 +343,43 @@ pub fn actionable_error_hint(operation: &str, code: &str) -> Option<&'static str
     }
 }
 
+/// Content type of a JSON request body.
+const JSON_CONTENT_TYPE: &str = "application/json; charset=utf-8";
+
+/// Send a value as a compact JSON request body.
+///
+/// `ureq`'s own `send_json` serialises with `serde_json::to_vec_pretty`. The
+/// indentation makes a large inventory body about a third larger, and that
+/// can push it above the request size cap of the API (issue #5453). Use this
+/// method for every JSON request body.
+pub trait SendCompactJson {
+    /// Serialise `value` without whitespace and send it as the request body.
+    fn send_compact_json(
+        self,
+        value: &impl serde::Serialize,
+    ) -> Result<http::Response<ureq::Body>, ureq::Error>;
+}
+
+impl SendCompactJson for ureq::RequestBuilder<ureq::typestate::WithBody> {
+    fn send_compact_json(
+        self,
+        value: &impl serde::Serialize,
+    ) -> Result<http::Response<ureq::Body>, ureq::Error> {
+        let body = serde_json::to_vec(value)?;
+        // `content_type` appends a header. Keep a caller's own value, as
+        // `send_json` does, so the request never carries two of them.
+        let has_content_type = self
+            .headers_ref()
+            .is_some_and(|headers| headers.contains_key(http::header::CONTENT_TYPE));
+        let request = if has_content_type {
+            self
+        } else {
+            self.content_type(JSON_CONTENT_TYPE)
+        };
+        request.send(body)
+    }
+}
+
 /// Abstraction over an HTTP response's status + body accessors.
 ///
 /// Implemented for `http::Response<ureq::Body>` and exposed as a trait so
@@ -977,6 +1014,74 @@ mod tests {
         receiver
             .recv_timeout(Duration::from_secs(5))
             .expect("the request reached the server")
+    }
+
+    /// `ureq`'s `send_json` sends indented JSON. On a large repository the
+    /// indentation pushed the inventory upload above the request size cap of the
+    /// API (#5453). `crate::api::SendCompactJson` sends compact JSON.
+    #[test]
+    fn http_json_bodies_use_compact_serialisation() {
+        // Both `ureq` entry points that serialise with `to_vec_pretty`. A bare
+        // token also matches a spaced, split or fully qualified call.
+        let forbidden = [concat!("send_", "json"), concat!("SendBody::", "from_json")];
+        let offenders: Vec<String> = crate::architecture_boundaries::rust_sources_under(["crates"])
+            .into_iter()
+            .filter(|source_path| {
+                let source =
+                    crate::architecture_boundaries::read_source_without_line_comments(source_path)
+                        .unwrap_or_else(|error| panic!("read {source_path}: {error}"));
+                forbidden.iter().any(|needle| {
+                    source.match_indices(needle).any(|(index, _)| {
+                        !source[index + needle.len()..]
+                            .starts_with(|next: char| next.is_alphanumeric() || next == '_')
+                            && !source[..index].ends_with(|previous: char| {
+                                previous.is_alphanumeric() || previous == '_'
+                            })
+                    })
+                })
+            })
+            .collect();
+        assert!(
+            offenders.is_empty(),
+            "send JSON request bodies with crate::api::SendCompactJson, not {forbidden:?}: {offenders:?}"
+        );
+    }
+
+    fn content_type_lines(head: &str) -> Vec<&str> {
+        head.lines()
+            .filter(|line| line.starts_with("content-type:"))
+            .collect()
+    }
+
+    #[test]
+    fn send_compact_json_sets_one_json_content_type() {
+        let (port, receiver) = serve_one(EMPTY_OK.to_owned());
+        let agent = try_api_agent().expect("agent");
+        agent
+            .post(&format!("http://127.0.0.1:{port}/"))
+            .send_compact_json(&serde_json::json!({ "a": 1 }))
+            .expect("request succeeds");
+        let head = header_block(&receiver);
+        assert_eq!(
+            content_type_lines(&head),
+            ["content-type: application/json; charset=utf-8"]
+        );
+    }
+
+    #[test]
+    fn send_compact_json_keeps_a_content_type_of_the_caller() {
+        let (port, receiver) = serve_one(EMPTY_OK.to_owned());
+        let agent = try_api_agent().expect("agent");
+        agent
+            .post(&format!("http://127.0.0.1:{port}/"))
+            .header("Content-Type", "application/json")
+            .send_compact_json(&serde_json::json!({ "a": 1 }))
+            .expect("request succeeds");
+        let head = header_block(&receiver);
+        assert_eq!(
+            content_type_lines(&head),
+            ["content-type: application/json"]
+        );
     }
 
     #[test]

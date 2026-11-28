@@ -16,7 +16,9 @@ use fallow_config::OutputFormat;
 use serde::Deserialize;
 use serde_json::json;
 
-use crate::api::{parse_error_envelope, sanitize_network_error, try_api_agent_with_timeout};
+use crate::api::{
+    SendCompactJson, parse_error_envelope, sanitize_network_error, try_api_agent_with_timeout,
+};
 use crate::coverage::credentials::{self, Deletion, KeySource};
 use crate::error::{emit_input_error, emit_input_error_with_style};
 use crate::json_style::JsonStyle;
@@ -364,7 +366,7 @@ fn start_device_flow(
     let url = format!("{base_url}/v1/auth/device");
     let mut response = agent
         .post(&url)
-        .send_json(json!({ "keyType": "read", "machineName": machine_name }))
+        .send_compact_json(&json!({ "keyType": "read", "machineName": machine_name }))
         .map_err(|err| sanitize_network_error(&format!("failed to start the login: {err}")))?;
     let status = response.status().as_u16();
     let body = response
@@ -449,7 +451,7 @@ fn poll_once(agent: &ureq::Agent, base_url: &str, device_code: &str) -> PollOutc
     let url = format!("{base_url}/v1/auth/device/token");
     let mut response = match agent
         .post(&url)
-        .send_json(json!({ "deviceCode": device_code }))
+        .send_compact_json(&json!({ "deviceCode": device_code }))
     {
         Ok(response) => response,
         Err(err) => {
