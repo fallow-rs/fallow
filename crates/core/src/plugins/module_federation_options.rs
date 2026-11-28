@@ -19,7 +19,7 @@ pub(super) type OptionsMemo = FxHashMap<(PathBuf, String, usize), (bool, Resolve
 
 /// How many steps of indirection the options resolver follows. A binding, a
 /// spread, an `Object.assign` argument and an import are one step each.
-pub(super) const MAX_OPTIONS_DEPTH: usize = 4;
+const MAX_OPTIONS_DEPTH: usize = 4;
 
 /// What one Federation options value declares, read from every object literal
 /// the value resolves to.
