@@ -273,3 +273,21 @@ fn refuses_an_overload_split_from_a_default_export() {
         Err(PostEditViolation::MixedExport { .. })
     ));
 }
+
+/// Oxc puts the optional `;` after an index signature into its span. A `;`
+/// that a member removal writes after the signature keeps the signature.
+#[test]
+fn a_semicolon_after_an_index_signature_keeps_the_signature() {
+    let path = Path::new("a.ts");
+    let source = "export class C {\n  [key: string]: unknown\n  rm(): void {}\n  [k](): void {}\n}\nconst k = Symbol();\n";
+    let removed = "  rm(): void {}\n  ";
+    let start = source.find(removed).expect("the member is in the source");
+    let end = start + removed.len();
+    let after = format!("{}  ;{}", &source[..start], &source[end..]);
+    let before = SourceFacts::collect(path, source).expect("the source parses");
+    let deleted = [(
+        u32::try_from(start).unwrap_or(u32::MAX),
+        u32::try_from(end).unwrap_or(u32::MAX),
+    )];
+    assert_eq!(before.check(path, &after, &deleted).map(|_| ()), Ok(()));
+}

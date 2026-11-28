@@ -48,6 +48,20 @@ export class Word {
   rmF(): void {}
   as(): void {}
 }
+
+export class Indexed {
+  [key: string]: unknown
+  rmG(): void {}
+  [k](): void {}
+}
+
+export class IndexedGenerator {
+  [key: string]: unknown
+  rmH(): void {}
+  *[Symbol.iterator](): Generator<number> {
+    yield 1;
+  }
+}
 "#;
 
 const FIXED: &str = r#"export const k = Symbol("k");
@@ -78,9 +92,21 @@ export class Word {
   value = 1
   as(): void {}
 }
+
+export class Indexed {
+  [key: string]: unknown
+  ;[k](): void {}
+}
+
+export class IndexedGenerator {
+  [key: string]: unknown
+  ;*[Symbol.iterator](): Generator<number> {
+    yield 1;
+  }
+}
 "#;
 
-const INDEX: &str = r#"import { k, Field, AfterMethod, Typed, Between, Word } from "./c.js";
+const INDEX: &str = r#"import { k, Field, AfterMethod, Typed, Between, Word, Indexed, IndexedGenerator } from "./c.js";
 
 console.log(k, new Field().value);
 new AfterMethod().keep();
@@ -88,7 +114,7 @@ console.log(new Typed().value);
 new Between().keep();
 const word = new Word();
 word.as();
-console.log(word.value);
+console.log(word.value, new Indexed(), new IndexedGenerator());
 "#;
 
 fn write_project(root: &Path) {
@@ -148,7 +174,7 @@ fn type_aware_fix_removes_members_before_a_member_that_could_join_the_line_above
     removed.sort_unstable();
     assert_eq!(
         removed,
-        ["rmA", "rmB", "rmC", "rmD", "rmE", "rmF"],
+        ["rmA", "rmB", "rmC", "rmD", "rmE", "rmF", "rmG", "rmH"],
         "{json:#}"
     );
     assert_eq!(

@@ -135,36 +135,24 @@ fn starts_a_continuation(rest: &str) -> bool {
 
 /// True when the last token before `start` is `;` or the `{` that opens the
 /// class body. A `}` can end a method body or an initializer such as
-/// `function () {}`, so it does not count. Comments are skipped. A `//` in a
-/// string can hide the real last token; the answer is then `false`, and the
-/// extra `;` that follows is still valid.
+/// `function () {}`, so it does not count. The scan does not read comments,
+/// strings or regular expressions, so a last line with `//` in it or a last
+/// token `*/` gives `false`. The fixer then adds a `;`, which is always
+/// valid in a class body.
 fn previous_token_ends_element(bytes: &[u8], start: usize) -> bool {
-    let mut end = start;
-    loop {
-        let text = &bytes[..end];
-        let Some(last) = text.iter().rposition(|byte| !byte.is_ascii_whitespace()) else {
-            return false;
-        };
-        if last >= 1 && text[last - 1..=last] == *b"*/" {
-            let Some(open) = text[..last - 1].windows(2).rposition(|pair| pair == b"/*") else {
-                return false;
-            };
-            end = open;
-            continue;
-        }
-        let line_start = text[..last]
-            .iter()
-            .rposition(|byte| *byte == b'\n')
-            .map_or(0, |index| index + 1);
-        if let Some(comment) = text[line_start..=last]
-            .windows(2)
-            .position(|pair| pair == b"//")
-        {
-            end = line_start + comment;
-            continue;
-        }
-        return matches!(text[last], b';' | b'{');
+    let text = &bytes[..start];
+    let Some(last) = text.iter().rposition(|byte| !byte.is_ascii_whitespace()) else {
+        return false;
+    };
+    let line_start = text[..last]
+        .iter()
+        .rposition(|byte| *byte == b'\n')
+        .map_or(0, |index| index + 1);
+    let line = &text[line_start..=last];
+    if line.ends_with(b"*/") || line.windows(2).any(|pair| pair == b"//") {
+        return false;
     }
+    matches!(text[last], b';' | b'{')
 }
 
 #[cfg(test)]
@@ -218,16 +206,23 @@ mod tests {
         assert!(!starts_a_continuation("}"));
     }
 
-    /// A `{` or `;` inside a comment does not end the field before it.
+    /// The scan does not read comments, strings or regular expressions. A
+    /// last token that could be the end of a comment gives `false`, so the
+    /// fixer adds a `;`, which is always valid.
     #[test]
-    fn reads_the_previous_token_outside_comments() {
+    fn treats_a_possible_comment_end_as_an_open_field() {
         let ends = |before: &str| previous_token_ends_element(before.as_bytes(), before.len());
         assert!(!ends("class A {\n  v = 1 // see {\n"));
         assert!(!ends("class A {\n  v = 1 /* x; */\n"));
-        assert!(!ends("class A {\n  v = 1 /* a */ /* b; */\n"));
-        assert!(ends("class A {\n  v = 1; // note\n"));
-        assert!(ends("class A {\n  v = 1; /* note */\n"));
-        assert!(ends("class A { // body\n"));
+        assert!(!ends("class A {\n  v = 1; // note\n"));
+        assert!(!ends("class A {\n  v = \"a;//\"\n"));
+        assert!(!ends("class A {\n  /** doc */ v = /a*/\n"));
+        assert!(!ends("class A {\n  v = `{//`\n"));
+        assert!(!ends("class A {\n  v = 1 /* x; /* y */\n"));
+        assert!(!ends("class A {\n  v = 1\n"));
+        assert!(!ends("class A {\n  m() {}\n"));
+        assert!(ends("class A {\n  v = 1;\n"));
+        assert!(ends("class A {\n"));
     }
 
     #[test]
