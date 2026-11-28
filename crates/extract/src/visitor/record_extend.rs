@@ -74,10 +74,10 @@ impl ModuleInfoExtractor {
     pub(crate) fn use_script_binding_context(
         &mut self,
         context: Arc<ScriptBindingContext>,
-        locals: &[String],
+        locals: &[&str],
     ) {
         self.markup.script = Some(context);
-        self.markup.locals = locals.to_vec();
+        self.markup.locals = locals.iter().map(|local| (*local).to_string()).collect();
     }
 
     /// Add the bindings of this script that its markup can call or read.

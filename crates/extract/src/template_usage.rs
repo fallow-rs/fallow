@@ -257,7 +257,8 @@ pub fn analyze_template_snippet_into(usage: &mut TemplateUsage, input: &Template
         return;
     }
 
-    let wrapped = wrap_snippet(snippet, input.kind, input.locals);
+    let locals = named_locals(snippet, input.locals);
+    let wrapped = wrap_snippet(snippet, input.kind, &locals);
     let allocator = Allocator::default();
     let parser_return = Parser::new(&allocator, &wrapped, SourceType::ts()).parse();
 
@@ -278,7 +279,7 @@ pub fn analyze_template_snippet_into(usage: &mut TemplateUsage, input: &Template
         if parser_return.fatal_error || !parser_return.diagnostics.is_empty() {
             sink.abstain_on_unparsed(snippet);
         }
-        extractor.use_script_binding_context(std::sync::Arc::clone(&sink.context), input.locals);
+        extractor.use_script_binding_context(std::sync::Arc::clone(&sink.context), &locals);
     }
     extractor.register_template_object_locals(used_bindings.iter().cloned());
     extractor.visit_program(&parser_return.program);
@@ -407,7 +408,7 @@ pub fn collect_unresolved_refs_and_accesses(
         return (FxHashSet::default(), Vec::new());
     }
 
-    let wrapped = wrap_snippet(snippet, kind, locals);
+    let wrapped = wrap_snippet(snippet, kind, &named_locals(snippet, locals));
     let allocator = Allocator::default();
     let parser_return = Parser::new(&allocator, &wrapped, SourceType::ts()).parse();
     let semantic_ret = SemanticBuilder::new().build(&parser_return.program);
@@ -686,7 +687,40 @@ fn remap_object_name(
     None
 }
 
-fn wrap_snippet(snippet: &str, kind: TemplateSnippetKind, locals: &[String]) -> String {
+/// The locals in `locals` that `snippet` names, in order.
+///
+/// Each local becomes a declaration in the wrapped snippet, and a template
+/// can hold many snippets inside a scope with many locals. A local that the
+/// snippet does not name cannot change how its references resolve, so only
+/// the named locals are declared and passed to the markup extractor. A Svelte `$name` store read names `name`.
+/// A snippet with a non-ASCII character or a backslash (a Unicode escape in
+/// an identifier) keeps every local, because the word scan below reads ASCII
+/// identifiers only.
+fn named_locals<'l>(snippet: &str, locals: &'l [String]) -> Vec<&'l str> {
+    if locals.is_empty() {
+        return Vec::new();
+    }
+    if !snippet.is_ascii() || snippet.contains('\\') {
+        return locals.iter().map(String::as_str).collect();
+    }
+    let mut words: FxHashSet<&str> = FxHashSet::default();
+    for word in snippet
+        .split(|c: char| !(c.is_ascii_alphanumeric() || c == '_' || c == '$'))
+        .filter(|word| !word.is_empty())
+    {
+        words.insert(word);
+        if let Some(store) = word.strip_prefix('$') {
+            words.insert(store);
+        }
+    }
+    locals
+        .iter()
+        .map(String::as_str)
+        .filter(|local| words.contains(local))
+        .collect()
+}
+
+fn wrap_snippet(snippet: &str, kind: TemplateSnippetKind, locals: &[&str]) -> String {
     let mut wrapped = String::new();
     if !locals.is_empty() {
         wrapped.push_str("const __f_tpl_local = undefined;\n");
@@ -786,6 +820,18 @@ mod tests {
         );
 
         assert!(usage.is_empty());
+    }
+
+    #[test]
+    fn named_locals_keeps_the_locals_that_the_snippet_names() {
+        let locals = ["other", "item", "count", "item2"].map(str::to_string);
+        assert_eq!(
+            named_locals("$item.name + count(item2)", &locals),
+            ["item", "count", "item2"]
+        );
+        assert!(named_locals("helper(1)", &locals).is_empty());
+        assert_eq!(named_locals("caf\u{e9}(item)", &locals), locals);
+        assert_eq!(named_locals("\\u0069tem", &locals), locals);
     }
 
     #[test]

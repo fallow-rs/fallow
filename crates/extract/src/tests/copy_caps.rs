@@ -185,3 +185,26 @@ fn fixture_type_alias_bindings_stay_bounded() {
         16 * MIB,
     );
 }
+
+/// A Vue slot with many props and many markup snippets inside it. Each
+/// snippet names one import and no slot prop.
+#[test]
+fn markup_snippets_declare_only_the_locals_they_name() {
+    let props = (0..500)
+        .map(|index| format!("prop{index}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let mut source = format!(
+        "<script setup>\nimport {{ helper }} from './helper';\nimport Comp from './Comp.vue';\n\
+         </script>\n<template>\n<Comp v-slot=\"{{ {props} }}\">\n"
+    );
+    for index in 0..500 {
+        let _ = writeln!(source, "<p>{{{{ helper({index}) }}}}</p>");
+    }
+    source.push_str("</Comp>\n</template>\n");
+    assert_bytes_below(
+        "markup snippet locals",
+        extraction_work("a.vue", source),
+        160 * MIB,
+    );
+}
