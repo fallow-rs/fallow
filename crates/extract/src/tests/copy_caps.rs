@@ -95,3 +95,22 @@ fn long_callee_path_is_not_copied_per_argument() {
         16 * MIB,
     );
 }
+
+/// One local class with many members, exported under many names.
+#[test]
+fn class_members_are_not_copied_to_every_export_alias() {
+    let mut source = String::from("class Service {\n");
+    for index in 0..1_000 {
+        let _ = writeln!(source, "  method{index}() {{}}");
+    }
+    source.push_str("}\nexport {\n");
+    for index in 0..1_000 {
+        let _ = writeln!(source, "  Service as alias{index},");
+    }
+    source.push_str("};\n");
+    assert_bytes_below(
+        "class export aliases",
+        extraction_work("a.ts", source),
+        16 * MIB,
+    );
+}
