@@ -1,5 +1,6 @@
 //! Git process environment helpers owned by the engine boundary.
 
+use std::ffi::OsString;
 use std::path::Path;
 use std::process::{Command, Stdio};
 
@@ -38,22 +39,75 @@ pub fn clear_ambient_git_env(cmd: &mut Command) -> &mut Command {
 ///   subdirectories and linked worktrees are not affected.
 /// - `core.fsmonitor=false` stops Git from running a file system monitor
 ///   program that the config of the repository names.
-/// - `core.hooksPath` names the null device, so Git runs no hook of the
-///   repository, for example during `git worktree add`.
+/// - `core.hooksPath` names a folder that holds no hook, and
+///   `hook.<event>.enabled=false` turns off each hook that the config names
+///   (Git 2.54 and later). Git thus runs no hook of the repository, for
+///   example during `git worktree add`. Older Git ignores the `hook.*` keys.
 pub fn git_command(cwd: &Path) -> Command {
     let mut command = git_command_with_repository_hooks(cwd);
-    command
-        .arg("-c")
-        .arg(format!("core.hooksPath={NO_HOOKS_DIR}"));
+    let mut hooks_path = OsString::from("core.hooksPath=");
+    hooks_path.push(no_hooks_dir());
+    command.arg("-c").arg(hooks_path);
+    for event in HOOK_EVENTS {
+        command.arg("-c").arg(format!("hook.{event}.enabled=false"));
+    }
     command
 }
+
+/// Each hook event of githooks(5).
+const HOOK_EVENTS: &[&str] = &[
+    "applypatch-msg",
+    "pre-applypatch",
+    "post-applypatch",
+    "pre-commit",
+    "pre-merge-commit",
+    "prepare-commit-msg",
+    "commit-msg",
+    "post-commit",
+    "pre-rebase",
+    "post-checkout",
+    "post-merge",
+    "pre-push",
+    "pre-receive",
+    "update",
+    "proc-receive",
+    "post-receive",
+    "post-update",
+    "reference-transaction",
+    "push-to-checkout",
+    "pre-auto-gc",
+    "post-rewrite",
+    "sendemail-validate",
+    "fsmonitor-watchman",
+    "p4-changelist",
+    "p4-prepare-changelist",
+    "p4-post-changelist",
+    "p4-pre-submit",
+    "post-index-change",
+];
 
 /// Hooks folder that holds no hook. Git looks for `<folder>/<hook name>`,
 /// and no path below the null device exists.
 #[cfg(not(windows))]
-const NO_HOOKS_DIR: &str = "/dev/null";
+fn no_hooks_dir() -> &'static Path {
+    Path::new("/dev/null")
+}
+
+/// Hooks folder that holds no hook. Git reads a relative `core.hooksPath`
+/// against the work tree, and Git for Windows reads `/dev/null` as a folder
+/// on the current drive, so the folder is a path below the fallow
+/// executable. A regular file has no children, so no hook can exist there.
+/// If the executable path is not known, the folder is in the temporary
+/// directory of the user. The `hook.<event>.enabled` keys still apply then.
 #[cfg(windows)]
-const NO_HOOKS_DIR: &str = "NUL";
+fn no_hooks_dir() -> &'static Path {
+    static DIR: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+    DIR.get_or_init(|| {
+        std::env::current_exe()
+            .unwrap_or_else(|_| std::env::temp_dir().join("fallow-no-hooks"))
+            .join("no-hooks")
+    })
+}
 
 /// Build a `git` command as [`git_command`] does, but keep the hooks folder
 /// that the config of the repository names.
@@ -78,6 +132,32 @@ pub fn git_command_with_repository_hooks(cwd: &Path) -> Command {
         ])
         .current_dir(cwd);
     command
+}
+
+#[cfg(test)]
+mod path_tests {
+    use std::path::Path;
+
+    /// Git reads a relative `core.hooksPath` against the work tree, so the
+    /// value must be absolute. No path below it may exist, so a folder that
+    /// someone makes later still holds no hook.
+    #[test]
+    fn the_hooks_folder_is_absolute_and_holds_nothing() {
+        let command = super::git_command(Path::new("."));
+        let value = command
+            .get_args()
+            .filter_map(|arg| arg.to_str())
+            .find_map(|arg| arg.strip_prefix("core.hooksPath="))
+            .expect("git_command sets core.hooksPath");
+        let folder = Path::new(value);
+        assert!(folder.is_absolute(), "{value} is not absolute");
+        assert!(
+            folder
+                .ancestors()
+                .any(|ancestor| ancestor.exists() && !ancestor.is_dir()),
+            "a folder can exist at {value}"
+        );
+    }
 }
 
 #[cfg(all(test, unix))]
@@ -140,6 +220,81 @@ mod tests {
             String::from_utf8_lossy(&output.stderr)
         );
         assert!(!marker.exists(), "git worktree add ran the hook");
+    }
+
+    /// Git 2.54 added hooks that the config names (`hook.<name>.command`
+    /// with `hook.<name>.event`). Older Git has no such hooks.
+    fn git_runs_config_hooks() -> bool {
+        let version = crate::git_fixture::fixture_git_capture(Path::new("."), &["--version"]);
+        let mut numbers = version
+            .trim_start_matches("git version ")
+            .split(|c: char| !c.is_ascii_digit())
+            .filter_map(|part| part.parse::<u32>().ok());
+        let major = numbers.next().unwrap_or(0);
+        let minor = numbers.next().unwrap_or(0);
+        (major, minor) >= (2, 54)
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn git_command_runs_no_config_hook() {
+        if !git_runs_config_hooks() {
+            return;
+        }
+        let temp = tempfile::tempdir().expect("temp dir");
+        let repo = temp.path().join("repo");
+        let marker = temp.path().join("config-hook-ran");
+        std::fs::create_dir_all(&repo).expect("repo dir");
+        fixture_git(&repo, &["init", "-q", "-b", "main"]);
+        std::fs::write(repo.join("tracked.txt"), "a\n").expect("file");
+        fixture_git(&repo, &["add", "."]);
+        fixture_git(&repo, &["commit", "-q", "--no-verify", "-m", "base"]);
+        let program = format!("touch '{}'", marker.display());
+        fixture_git(&repo, &["config", "hook.probe.command", &program]);
+        for event in [
+            "reference-transaction",
+            "post-index-change",
+            "post-checkout",
+        ] {
+            fixture_git(&repo, &["config", "--add", "hook.probe.event", event]);
+        }
+
+        fixture_git(&repo, &["branch", "probe"]);
+        assert!(marker.exists(), "the fixture repository runs its hook");
+        std::fs::remove_file(&marker).expect("remove marker");
+
+        let destination = temp.path().join("worktree");
+        let commands: [Vec<std::ffi::OsString>; 3] = [
+            [
+                "worktree",
+                "add",
+                "--detach",
+                "--quiet",
+                "--no-checkout",
+                "--",
+            ]
+            .iter()
+            .map(Into::into)
+            .chain([destination.into_os_string(), "HEAD".into()])
+            .collect(),
+            ["read-tree", "--reset", "HEAD"]
+                .iter()
+                .map(Into::into)
+                .collect(),
+            ["checkout", "--quiet", "--detach", "HEAD"]
+                .iter()
+                .map(Into::into)
+                .collect(),
+        ];
+        for args in commands {
+            let output = git_command(&repo).args(&args).output().expect("git starts");
+            assert!(
+                output.status.success(),
+                "git {args:?}: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert!(!marker.exists(), "git {args:?} ran the config hook");
+        }
     }
 
     #[cfg(unix)]
