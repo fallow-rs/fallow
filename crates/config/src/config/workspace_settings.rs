@@ -388,18 +388,21 @@ mod tests {
             .collect()
     }
 
-    /// A key with escaped braces passes validation. The `\\` to `/` fold
-    /// turns the escapes into nested brace groups, whose matcher does not
-    /// compile. The key then selects no workspace.
+    /// A key with escaped braces passes validation on Unix. The `\\` to `/`
+    /// fold turns the escapes into nested brace groups, whose matcher does not
+    /// compile. The key then selects no workspace. Validation on Windows reads
+    /// `\\` as a separator and refuses the key, so the selector never builds.
     #[test]
     fn a_key_whose_matcher_does_not_compile_selects_nothing() {
         let key = format!("a{}b*{}", "\\{".repeat(126), "\\}".repeat(126));
-        assert!(
-            crate::glob_validation::compile_user_glob(&key, "workspaces.settings (key)").is_ok()
-        );
-        assert!(Selector::new(&key).is_none());
-        let s = settings(&[(key.as_str(), &["lodash"], None)]);
-        assert!(!s.suppresses_dependency_at(Path::new("/p/a/index.ts"), "lodash"));
+        let validated =
+            crate::glob_validation::compile_user_glob(&key, "workspaces.settings (key)").is_ok();
+        assert_eq!(validated, !cfg!(windows));
+        if validated {
+            assert!(Selector::new(&key).is_none());
+            let s = settings(&[(key.as_str(), &["lodash"], None)]);
+            assert!(!s.suppresses_dependency_at(Path::new("/p/a/index.ts"), "lodash"));
+        }
     }
 
     #[test]
