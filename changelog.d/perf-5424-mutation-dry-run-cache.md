@@ -1,4 +1,0 @@
-### Changed
-
-- **`fallow mutation` reuses the dry run of each unchanged test file.** A run keeps the dry-run facts of each test file in `dry-runs.json`, next to the result cache. A later run dry-runs only the test files whose inputs changed. When no test file changed and each result is in the result cache, the run starts no dry run. The key holds the parts of the result cache key, the instrumented code of each source file that the test file reaches, the operators and the runner options. The `cache` object of the JSON report adds `dry_run_hits`, `dry_run_misses` and `dry_run_stored`. `--no-cache` turns the dry-run cache off. On a project with 7 test files, a repeat run with no change went from 21 seconds to 1 second, with the same verdict for each mutant. On a project with 673 test files, a repeat run took 6 seconds after a first run of 500 seconds.
-  (Closes [#5424](https://github.com/fallow-rs/fallow/issues/5424))

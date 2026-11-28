@@ -3,7 +3,7 @@
   "maximum_minor_lag": 6,
   "waiver": {
     "issue": "https://github.com/fallow-rs/fallow/issues/5287",
-    "until_version": "3.50.0",
-    "reason": "The full corpus gate runs before v3.51.0."
+    "until_version": "3.51.0",
+    "reason": "The full corpus gate runs before v3.52.0."
   }
 }

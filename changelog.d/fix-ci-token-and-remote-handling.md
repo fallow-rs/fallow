@@ -1,5 +1,0 @@
-### Fixed
-
-- **The project id from the git remote no longer contains the user part of the URL.** When `--project-id` and `--repo` are not set, the coverage upload and `coverage analyze --cloud` commands read the repository from `git remote get-url origin`. A remote such as `https://user:password@host/app.git` gave the id `user:password@host/app`. These commands now drop the `user:password@` part before they read the owner and the repository name.
-- **GitLab requests send `GITLAB_TOKEN` as `Authorization: Bearer`.** The `PRIVATE-TOKEN` header stayed on a request that followed a redirect, also to another host. The `Authorization` header goes only to the same host. GitLab accepts personal, project and group access tokens in this header.
-- **A redirect of the GitHub or Fallow Cloud API to the same host keeps the token.** Before, the request followed the redirect without the `Authorization` header. A request for a renamed private GitHub repository then failed. A redirect to another host still drops the header.

@@ -124,7 +124,7 @@ fallow audit \
 {
   "kind": "audit",
   "schema_version": 7,
-  "version": "3.50.0",
+  "version": "3.51.0",
   "command": "audit",
   "verdict": "fail",
   "changed_files_count": 12,

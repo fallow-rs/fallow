@@ -1,4 +1,0 @@
-### Changed
-
-- **`fallow mutation` divides its dry run over the `--concurrency` companions.** The dry run ran each selected test file in one companion, one file at a time. Each other companion then ran the same dry run again before its first mutant. Now each companion dry-runs a share of the files at the same time as the others, and keeps its share for the mutant runs. A worker first takes a mutant whose covering test files are all in its share. A companion that starts later dry-runs only the test files of the covering tests, not each selected file. The Vitest companion also runs its shared-worker check only on the test files with a test that hits a mutant. On a project with 7 test files, 6 of which wait 10 seconds, the dry run went from 61 seconds to 21 seconds and the mutant phase from 62 seconds to 3 seconds, with the same verdict for each mutant.
-  (Closes [#5413](https://github.com/fallow-rs/fallow/issues/5413))

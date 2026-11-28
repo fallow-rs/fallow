@@ -1,3 +1,0 @@
-### Fixed
-
-- **A directory argument of a test runner or another file runner no longer makes its index file an entry point.** In a `package.json` script, `vitest run src/lib/` made `src/lib/index.ts` an entry point, so its unused exports were not reported. Only a script runtime (`node`, `tsx`, `bun`, `deno run`) now resolves a directory to its index file. A script argument with a non-script extension also no longer resolves to a script file: `bash scripts/deploy.sh` no longer credits `scripts/deploy.ts`. In an Nx `run-commands` target, a Vite+ task or a CI step, `node scripts/process-messages` now credits `scripts/process-messages/index.js`, the same as in a `package.json` script. ([#5370](https://github.com/fallow-rs/fallow/issues/5370))

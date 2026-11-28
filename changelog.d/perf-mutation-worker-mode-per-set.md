@@ -1,3 +1,0 @@
-### Performance
-
-- **`fallow mutation` with Vitest decides the worker mode for each set of test files.** The dry run no longer runs its test files 2 more times to check whether mutant runs can share one worker process. That check also stopped for a dry run over 45 seconds, so a large suite always started one process for each covering test file in each mutant run. Now the first mutant runs of a phase check the tests that the mutants select, one time and in one worker, and the mode holds for each set of test files that passed. A set whose tests need a fresh worker keeps that mode alone. On a public TypeScript monorepo, a run of 73 mutants took 470 s in place of 1,165 s, with the same verdicts. (Closes [#5423](https://github.com/fallow-rs/fallow/issues/5423))
