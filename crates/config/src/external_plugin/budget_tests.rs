@@ -8,6 +8,14 @@ use super::*;
 /// The wall-clock bound of one bounded discovery in a debug build.
 const DISCOVER_BOUND: Duration = Duration::from_secs(3);
 
+/// Serializes the tests that reach the plugin file limit warning.
+///
+/// `tracing` caches the interest of a callsite when the callsite first runs.
+/// When one test runs the warning on another thread while
+/// [`captured_warnings`] installs its subscriber, the callsite can cache
+/// "never" and the capture sees no warning.
+static FILE_LIMIT_WARNING: Mutex<()> = Mutex::new(());
+
 /// A valid plugin with `enablers` package names, about 12 bytes each.
 fn plugin_json(name: &str, enablers: usize) -> String {
     let enablers: Vec<String> = (0..enablers).map(|index| format!("pkg-{index}")).collect();
@@ -37,6 +45,9 @@ fn a_plugin_file_named_many_times_is_read_once() {
 #[test]
 #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
 fn plugin_files_above_the_limit_are_skipped() {
+    let _serial = FILE_LIMIT_WARNING
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let dir = tempfile::tempdir().unwrap();
     std::fs::create_dir(dir.path().join("d")).unwrap();
     for index in 0..=MAX_EXTERNAL_PLUGIN_FILES {
@@ -83,6 +94,9 @@ fn captured_warnings(run: impl FnOnce()) -> String {
 #[test]
 #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
 fn the_plugin_file_limit_warning_names_the_first_skipped_file_once() {
+    let _serial = FILE_LIMIT_WARNING
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let dir = tempfile::tempdir().unwrap();
     std::fs::create_dir(dir.path().join("d")).unwrap();
     for index in 0..=MAX_EXTERNAL_PLUGIN_FILES {
