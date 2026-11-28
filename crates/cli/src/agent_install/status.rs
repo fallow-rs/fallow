@@ -115,6 +115,9 @@ fn native_gate_probe(
         return None;
     }
     let script = root.join(&status.path);
+    if linked_out_of_root(root, &script) {
+        return None;
+    }
     let text = read_optional_text(&script).ok().flatten()?;
     if !text.contains("# Native JSON protocol: fallow-gate-json-v1") {
         return None;
@@ -397,6 +400,35 @@ fn surfaces(root: &Path, home: Option<&Path>) -> Vec<SurfaceStatus> {
     rows
 }
 
+/// The detail of a project surface that status does not read.
+const LINKED_OUT_DETAIL: &str = "not read: it is a link to a location outside the project";
+
+/// True when `path` is below `root` and has a link on its path that
+/// resolves outside `root`. Status does not read such a surface, because a
+/// cloned repository chooses where its links point.
+fn linked_out_of_root(root: &Path, path: &Path) -> bool {
+    path.starts_with(root) && fallow_types::path_guard::outside_link(root, path).is_some()
+}
+
+/// The row of a surface that [`linked_out_of_root`] refuses.
+fn linked_out_row(
+    root: &Path,
+    home: Option<&Path>,
+    path: &Path,
+    harness: Option<Harness>,
+    step: Step,
+) -> SurfaceStatus {
+    SurfaceStatus {
+        harness,
+        step,
+        state: SurfaceState::Absent,
+        path: display_path(root, home, path),
+        detail: Some(LINKED_OUT_DETAIL.to_string()),
+        blocker: None,
+        user_scope: false,
+    }
+}
+
 /// Rows for the user-level MCP entries in `home`. An entry that starts a
 /// package runner runs the fallow-mcp of each project, so it is stale.
 fn user_mcp_rows(root: &Path, home: &Path) -> Vec<SurfaceStatus> {
@@ -411,6 +443,9 @@ fn user_mcp_rows(root: &Path, home: &Path) -> Vec<SurfaceStatus> {
         let path = home.join(file);
         // The project row already covers a home directory that is the root.
         if harness == Harness::Cursor && home == root {
+            continue;
+        }
+        if linked_out_of_root(root, &path) {
             continue;
         }
         let Existing::Loaded(Some(command)) = mcp::registered_command(&path, harness) else {
@@ -512,6 +547,9 @@ fn guide_row(
     path: &Path,
     harness: Option<Harness>,
 ) -> SurfaceStatus {
+    if linked_out_of_root(root, path) {
+        return linked_out_row(root, home, path, harness, Step::Guide);
+    }
     let text = read_optional_text(path).ok().flatten();
     let (state, detail) = match text.as_deref() {
         None => (SurfaceState::Absent, None),
@@ -540,6 +578,9 @@ fn guide_row(
 }
 
 fn claude_import_row(root: &Path, home: Option<&Path>, path: &Path) -> SurfaceStatus {
+    if linked_out_of_root(root, path) {
+        return linked_out_row(root, home, path, Some(Harness::Claude), Step::Guide);
+    }
     let text = read_optional_text(path).ok().flatten();
     let (state, detail) = match text.as_deref() {
         None => (SurfaceState::Absent, None),
@@ -570,6 +611,9 @@ fn skill_row(
     name: &str,
     dir: &Path,
 ) -> SurfaceStatus {
+    if linked_out_of_root(root, &dir.join("SKILL.md")) {
+        return linked_out_row(root, home, dir, harness, Step::Skill);
+    }
     let (state, detail) = match skill::inspect(dir) {
         skill::SkillState::Absent => (SurfaceState::Absent, None),
         skill::SkillState::Foreign => (
@@ -606,6 +650,9 @@ fn skill_row(
 }
 
 fn mcp_row(root: &Path, home: Option<&Path>, harness: Harness, path: &Path) -> SurfaceStatus {
+    if linked_out_of_root(root, path) {
+        return linked_out_row(root, home, path, Some(harness), Step::Mcp);
+    }
     let (state, detail) = match mcp::registered_command(path, harness) {
         Existing::Loaded(Some(command)) if mcp::registered_is_managed(&command) => {
             (SurfaceState::Installed, Some(command.shell_words()))
@@ -1274,6 +1321,59 @@ mod tests {
         assert_eq!(row.state, SurfaceState::Absent);
         let detail = row.detail.unwrap_or_default();
         assert!(detail.contains("does not parse"), "{detail}");
+    }
+
+    #[test]
+    fn a_codex_parse_error_names_a_position_and_no_file_text() {
+        let dir = tempfile::tempdir().unwrap();
+        let row = mcp_row_for(
+            dir.path(),
+            Harness::Codex,
+            mcp::codex_file(),
+            Some("first_key = 1\nsecond_value = [unclosed\n"),
+        );
+        let detail = row.detail.unwrap_or_default();
+        assert!(detail.contains("line 2"), "{detail}");
+        assert!(!detail.contains("second_value"), "{detail}");
+        assert!(!detail.contains("unclosed"), "{detail}");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn a_project_surface_link_out_of_the_root_is_not_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let target = outside.path().join("servers.json");
+        std::fs::write(
+            &target,
+            r#"{"mcpServers": {"fallow": {"command": "outside-command"}}}"#,
+        )
+        .unwrap();
+        std::fs::write(outside.path().join("guide.md"), "@AGENTS.md\n").unwrap();
+        let mcp_path = dir.path().join(mcp::claude_project_file());
+        std::os::unix::fs::symlink(&target, &mcp_path).unwrap();
+        std::os::unix::fs::symlink(
+            outside.path().join("guide.md"),
+            dir.path().join("CLAUDE.md"),
+        )
+        .unwrap();
+
+        let mcp = mcp_row(dir.path(), None, Harness::Claude, &mcp_path);
+        let import = claude_import_row(dir.path(), None, &dir.path().join("CLAUDE.md"));
+
+        assert_eq!(mcp.state, SurfaceState::Absent);
+        let detail = mcp.detail.unwrap_or_default();
+        assert!(detail.contains("outside the project"), "{detail}");
+        assert!(!detail.contains("outside-command"), "{detail}");
+        assert_eq!(import.state, SurfaceState::Absent);
+        assert!(
+            import
+                .detail
+                .as_deref()
+                .is_some_and(|detail| detail.contains("outside the project")),
+            "{:?}",
+            import.detail
+        );
     }
 
     #[test]

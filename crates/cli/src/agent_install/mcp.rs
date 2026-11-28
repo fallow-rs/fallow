@@ -1208,10 +1208,28 @@ pub fn registered_command(path: &Path, harness: Harness) -> Existing<Option<McpC
         Harness::Codex => {
             let doc = text
                 .parse::<toml_edit::DocumentMut>()
-                .map_err(|e| e.to_string())?;
+                .map_err(|e| toml_error_position(&e, text))?;
             Ok(toml_entry_command(&doc))
         }
     })
+}
+
+/// The position of a TOML parse error, without the message of the parser.
+/// That message quotes the line of the file.
+fn toml_error_position(err: &toml_edit::TomlError, text: &str) -> String {
+    let Some(span) = err.span() else {
+        return "TOML parse error".to_owned();
+    };
+    let before = text.get(..span.start).unwrap_or(text);
+    let line = before.matches('\n').count() + 1;
+    let column = before
+        .rsplit('\n')
+        .next()
+        .unwrap_or_default()
+        .chars()
+        .count()
+        + 1;
+    format!("TOML parse error at line {line}, column {column}")
 }
 
 fn json_entry_command(value: &serde_json::Value, harness: Harness) -> Option<McpCommand> {
