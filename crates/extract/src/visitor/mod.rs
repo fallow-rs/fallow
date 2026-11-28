@@ -36,7 +36,7 @@ mod worker_env;
 pub(crate) use record_extend::{extend_member_accesses, extend_whole_object_uses};
 pub(crate) use semantic_calls::mark_template_callers;
 pub(crate) use ssr_load_module::{ssr_load_module_call, ssr_load_module_source};
-pub(crate) use visit_impl::push_member_tag_accesses;
+pub(crate) use visit_impl::{MAX_RECORDED_CHAIN_LINKS, push_member_tag_accesses};
 
 use oxc_ast::ast::{
     Argument, ArrayExpressionElement, ArrowFunctionBody, BindingPattern, CallExpression,

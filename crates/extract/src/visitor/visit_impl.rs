@@ -175,6 +175,7 @@ mod visit_value_bindings;
 mod visit_walk_records;
 use taint_chain::collect_chained_taint_idents;
 use visit_expression_shapes::*;
+pub use visit_source_paths::MAX_RECORDED_CHAIN_LINKS;
 pub(super) use visit_source_paths::join_member_path;
 use visit_source_paths::{
     binding_source_path_candidates, flatten_member_path, push_unique_string, source_path_candidates,

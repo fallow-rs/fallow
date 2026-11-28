@@ -12,7 +12,7 @@ use rustc_hash::FxHashSet;
 /// builders return `None` past the cap, so every caller treats a deeper
 /// receiver as a name it cannot read: it records no member access and no
 /// binding key for it.
-pub(super) const MAX_RECORDED_CHAIN_LINKS: usize = 64;
+pub const MAX_RECORDED_CHAIN_LINKS: usize = 64;
 
 /// Flatten an expression to a dotted member path, unwrapping `await` and parens.
 /// Returns `None` for anything that is not an identifier-rooted static-member

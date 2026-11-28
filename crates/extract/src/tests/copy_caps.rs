@@ -114,3 +114,19 @@ fn class_members_are_not_copied_to_every_export_alias() {
         16 * MIB,
     );
 }
+
+/// A Glimmer mustache with a long `this.` chain.
+#[test]
+fn glimmer_chain_member_accesses_stay_bounded() {
+    let chain = format!("this{}", ".aaaa".repeat(3_000));
+    let source = format!("<template>{{{{{chain}}}}}</template>\n");
+    let work = work_on_large_stack(move || {
+        let ranges = crate::glimmer::find_template_ranges(&source);
+        crate::sfc_template::glimmer::collect_glimmer_template_usage(
+            &source,
+            &ranges,
+            &rustc_hash::FxHashSet::default(),
+        )
+    });
+    assert_bytes_below("glimmer chain", work, MIB);
+}
