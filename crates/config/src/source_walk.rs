@@ -441,6 +441,35 @@ mod tests {
         assert_eq!(walked, PARENT_RE_INCLUDE_KEPT.map(String::from).to_vec());
     }
 
+    /// The walk mode does not depend on the files above the top level, so a
+    /// `.ignore` file that appears there after the builder is made does not
+    /// apply either.
+    #[cfg(unix)]
+    #[test]
+    fn source_walk_ignores_a_file_above_the_top_level_that_appears_later() {
+        for nested in [false, true] {
+            let directory = tempfile::tempdir().expect("temporary directory");
+            let base = directory.path();
+            let repository = base.join("repo");
+            std::fs::create_dir_all(repository.join(".git")).expect("git directory");
+            let root = if nested {
+                repository.join("pkg")
+            } else {
+                repository
+            };
+            write_file(&root.join("src/consumer.ts"), "");
+
+            let builder = source_walk_builder(&root, |_| true);
+            write_file(&base.join(".ignore"), "consumer.ts\n");
+            let walked = walked_files_within(builder, &root).expect("walk ends");
+            assert_eq!(
+                walked,
+                vec!["src/consumer.ts".to_string()],
+                "nested: {nested}"
+            );
+        }
+    }
+
     #[cfg(unix)]
     #[test]
     fn source_walk_reads_a_parent_gitignore_that_links_outside_the_project() {

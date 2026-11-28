@@ -1493,11 +1493,12 @@ Shared invariants (`crates/cli/src/base_worktree.rs`):
   The upward lookups use `lookup_ancestors`, and the resolver file system
   (`resolver_for_root` in `crates/graph/src/read_trace.rs`) finds no lookup
   name above the root. The source walk applies no `.ignore` file above the
-  repository top level, which the `.git` stub of the snapshot marks. When
-  such a file exists and the root is below the top level, the crate applies
-  only the `.ignore` files of the walk, and
-  `crates/config/src/ignore_parent_rules.rs` applies the other kinds with
-  the precedence of the crate.
+  repository top level, which the `.git` stub of the snapshot marks. The
+  walk sets `parents(false)` without a check of the files above the top
+  level, so a file that appears there during the run cannot apply. For a
+  root below the top level, the crate applies only the `.ignore` files of
+  the walk, and `crates/config/src/ignore_parent_rules.rs` applies the
+  other kinds with the precedence of the crate.
 
 - Both prune modes and the per-audit sweep share one decision code path
   (`sweep_reusable_caches_with_report`), so prune can never drift from what

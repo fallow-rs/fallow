@@ -159,14 +159,6 @@ fn has_git_entry(dir: &Path) -> bool {
     std::fs::symlink_metadata(dir.join(".git")).is_ok()
 }
 
-/// True when a directory above the top level `top` holds a `.ignore` file
-/// that the `ignore` crate would read.
-fn dot_ignore_above(top: &Path) -> bool {
-    top.ancestors()
-        .skip(1)
-        .any(|dir| check(&dir.join(".ignore"), None) == Ok(true))
-}
-
 /// The ignore files of one directory that a walk reads.
 #[derive(Debug, Clone, Copy)]
 struct DirReads {
@@ -328,19 +320,20 @@ where
     // level, the same as Git. The `ignore` crate stops `.gitignore` rules at
     // a repository but applies each parent `.ignore` file. An audit walks its
     // base snapshot in the temp dir, where these files belong to whoever can
-    // write the temp dir. Without a `.ignore` above the top level, the crate
-    // gives exactly that. With one, the crate gets `parents(false)`. A root
-    // below the top level then also needs the rules between the root and
-    // the top level: the crate applies only the `.ignore` files of the walk,
-    // and `ParentRules` applies the other kinds with the crate precedence.
-    let ignore_above_top = reads.dot_ignore && has_git_entry(&scope) && dot_ignore_above(&scope);
-    let emulated = ignore_above_top && scope != canonical_root;
+    // write the temp dir. The choice does not read those files, so a file
+    // that appears there during the run cannot change it. The crate gets
+    // `parents(false)`. A root below the top level also needs the rules
+    // between the root and the top level: the crate applies only the
+    // `.ignore` files of the walk, and opens no parent file. `ParentRules`
+    // applies the other kinds with the precedence of the crate.
+    let in_repository = has_git_entry(&scope);
+    let emulated = in_repository && scope != canonical_root;
     let parent_rules =
         emulated.then(|| parent_rules::ParentRules::load(root, &canonical_root, &scope, reads));
     let mut builder = WalkBuilder::new(root);
     builder
         .hidden(false)
-        .parents(!ignore_above_top)
+        .parents(!in_repository)
         .ignore(reads.dot_ignore)
         .git_ignore(reads.sources.git_ignore && !emulated)
         .git_global(reads.sources.git_global && !emulated)

@@ -1,9 +1,9 @@
-//! The ignore rules of a walk inside a repository that has an `.ignore`
-//! file above its top level.
+//! The ignore rules of a walk from a root below the top level of a
+//! repository.
 //!
 //! The `ignore` crate applies the `.ignore` file of each parent directory of
 //! the walk root, also above the top level of the repository. Git applies no
-//! ignore file from above a repository. When such a file exists, the walk
+//! ignore file from above a repository. A walk below the top level therefore
 //! sets `parents(false)` on the crate, and the crate applies only the
 //! `.ignore` files inside the walk. These rules apply every other kind with
 //! the precedence of the crate, over the directories of the walk and the
