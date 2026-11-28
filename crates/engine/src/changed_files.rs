@@ -617,7 +617,13 @@ fn changed_diff(
         ));
     }
 
-    let mut args = vec!["diff", "--relative", "--unified=0"];
+    let mut args = vec![
+        "diff",
+        "--no-ext-diff",
+        "--no-textconv",
+        "--relative",
+        "--unified=0",
+    ];
     if detect_copies {
         args.extend(["-M", "-C"]);
     }
@@ -669,7 +675,17 @@ fn append_untracked_diffs(
     let empty_file = "/dev/null";
 
     for path in untracked {
-        let mut command = git_command(root, &["diff", "--no-index", "--unified=0", "--"]);
+        let mut command = git_command(
+            root,
+            &[
+                "diff",
+                "--no-index",
+                "--no-ext-diff",
+                "--no-textconv",
+                "--unified=0",
+                "--",
+            ],
+        );
         command.arg(empty_file).arg(untracked_path_arg(&path));
         let output =
             spawn_output(&mut command).map_err(|e| ChangedFilesError::GitMissing(e.to_string()))?;
@@ -1270,6 +1286,50 @@ mod tests {
         );
         let diff = try_get_changed_diff(&root, "base").expect("changed diff");
         assert!(diff.contains("b/HEAD"), "{diff}");
+    }
+
+    /// A `diff.external` program of the user prints its own diff format, so
+    /// the changed diff must not use it.
+    #[cfg(unix)]
+    #[test]
+    fn the_changed_diff_ignores_an_external_diff_program() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let repo = tempfile::tempdir().expect("tempdir");
+        let root = dunce::canonicalize(repo.path()).expect("canonical root");
+        for args in [
+            &["init", "--quiet", "-b", "main"][..],
+            &["config", "user.email", "test@example.com"][..],
+            &["config", "user.name", "Test User"][..],
+            &["config", "commit.gpgsign", "false"][..],
+        ] {
+            run_git(&root, args);
+        }
+        std::fs::write(root.join("a.ts"), "old\n").expect("initial file");
+        run_git(&root, &["add", "."]);
+        run_git(&root, &["commit", "--quiet", "-m", "base"]);
+        run_git(&root, &["branch", "base"]);
+        std::fs::write(root.join("a.ts"), "new\n").expect("change");
+        std::fs::write(root.join("b.ts"), "added\n").expect("untracked file");
+        let tool = repo.path().join("silent-diff.sh");
+        std::fs::write(&tool, "#!/bin/sh\nexit 0\n").expect("diff program");
+        std::fs::set_permissions(&tool, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+        run_git(
+            &root,
+            &[
+                "config",
+                "diff.external",
+                tool.to_str().expect("utf-8 path"),
+            ],
+        );
+
+        for diff in [
+            try_get_changed_diff(&root, "base").expect("changed diff"),
+            try_get_mutation_diff(&root, "base").expect("mutation diff"),
+        ] {
+            assert!(diff.contains("+new"), "{diff}");
+            assert!(diff.contains("+added"), "{diff}");
+        }
     }
 
     fn run_git(root: &Path, args: &[&str]) {
