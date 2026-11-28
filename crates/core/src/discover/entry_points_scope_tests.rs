@@ -123,3 +123,24 @@ fn probed_link_out_of_the_project_counts_as_missing() {
 
     assert!(skipped.is_empty(), "{skipped:?}");
 }
+
+/// An output entry whose same-stem source file is a link out of the project
+/// maps to no source file, whether the link target exists or not.
+#[cfg(unix)]
+#[test]
+fn output_entry_source_link_out_of_the_project_counts_as_missing() {
+    let sandbox = tempfile::tempdir().expect("create sandbox");
+    let root = sandbox.path().join("project");
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::create_dir_all(sandbox.path().join("other")).unwrap();
+    std::fs::write(sandbox.path().join("other/present.ts"), "").unwrap();
+    for (link, target) in [("src/x.ts", "present.ts"), ("src/y.ts", "missing.ts")] {
+        std::os::unix::fs::symlink(sandbox.path().join("other").join(target), root.join(link))
+            .unwrap();
+    }
+    let entries = ["dist/x.js", "dist/y.js", "./lib/x.js", "./lib/y.js"];
+
+    let skipped = skipped_for(&root, &entries);
+
+    assert!(skipped.is_empty(), "{skipped:?}");
+}

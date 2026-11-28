@@ -34,14 +34,38 @@ pub fn output_entry_to_source_path(
     source_extensions: &[&str],
     is_discovered: impl Fn(&Path) -> bool,
 ) -> Option<PathBuf> {
-    output_dir_to_source_path(base, entry, OUTPUT_DIRS, source_extensions).or_else(|| {
+    output_entry_to_source_path_where(
+        base,
+        entry,
+        source_extensions,
+        |path| path.traced_is_file(),
+        is_discovered,
+    )
+}
+
+/// [`output_entry_to_source_path`] with `is_file` as the test of each
+/// candidate file, such as a test that also checks the candidate against the
+/// project root.
+pub fn output_entry_to_source_path_where(
+    base: &Path,
+    entry: &str,
+    source_extensions: &[&str],
+    is_file: impl Fn(&Path) -> bool,
+    is_discovered: impl Fn(&Path) -> bool,
+) -> Option<PathBuf> {
+    output_dir_to_source_path(base, entry, OUTPUT_DIRS, source_extensions, &is_file).or_else(|| {
         let resolved = base.join(entry);
         if is_bare_missing_only_dir(&resolved) {
             return None;
         }
-        let source =
-            output_dir_to_source_path(base, entry, MISSING_ONLY_OUTPUT_DIRS, source_extensions)?;
-        let target_present = probed_entry_target(&resolved, source_extensions)
+        let source = output_dir_to_source_path(
+            base,
+            entry,
+            MISSING_ONLY_OUTPUT_DIRS,
+            source_extensions,
+            &is_file,
+        )?;
+        let target_present = probed_entry_target(&resolved, source_extensions, &is_file)
             .is_some_and(|target| is_discovered(&target));
         (!target_present).then_some(source)
     })
@@ -61,6 +85,7 @@ fn output_dir_to_source_path(
     entry: &str,
     dirs: &[&str],
     source_extensions: &[&str],
+    is_file: &dyn Fn(&Path) -> bool,
 ) -> Option<PathBuf> {
     let components: Vec<_> = Path::new(entry).components().collect();
 
@@ -99,7 +124,7 @@ fn output_dir_to_source_path(
     same_stem
         .chain(declaration)
         .chain(directory_index)
-        .find(|candidate| candidate.traced_is_file())
+        .find(|candidate| is_file(candidate))
 }
 
 /// Return `true` when `path` ends in a missing-only output directory, such as
@@ -112,15 +137,23 @@ fn is_bare_missing_only_dir(path: &Path) -> bool {
 
 /// Return the file that the filesystem probe finds for `resolved`: the exact
 /// file, then an extension variant, then a directory index.
-fn probed_entry_target(resolved: &Path, source_extensions: &[&str]) -> Option<PathBuf> {
-    if resolved.traced_is_file() {
+fn probed_entry_target(
+    resolved: &Path,
+    source_extensions: &[&str],
+    is_file: &dyn Fn(&Path) -> bool,
+) -> Option<PathBuf> {
+    if is_file(resolved) {
         return Some(resolved.to_path_buf());
     }
     source_extensions
         .iter()
         .map(|ext| resolved.with_extension(ext))
-        .find(|candidate| candidate.traced_is_file())
-        .or_else(|| directory_index_entry(resolved, source_extensions))
+        .chain(
+            source_extensions
+                .iter()
+                .map(|ext| resolved.join(format!("index.{ext}"))),
+        )
+        .find(|candidate| is_file(candidate))
 }
 
 #[cfg(test)]

@@ -48,7 +48,9 @@ mod workspace_alias;
 pub use auto_imports::{UnreadableAutoImportRead, unreadable_auto_import_reads};
 pub use fallbacks::extract_package_name_from_node_modules_path;
 pub use inline_loaders::InlineLoaderRequest;
-pub use output_entry::{directory_index_entry, output_entry_to_source_path};
+pub use output_entry::{
+    directory_index_entry, output_entry_to_source_path, output_entry_to_source_path_where,
+};
 pub use path_info::{
     extract_package_name, is_bare_specifier, is_path_alias, is_valid_package_name,
     normalize_npm_specifier,
