@@ -27,7 +27,8 @@
 //! glob with `literal_separator(true)`, so that its `*` stays in one path
 //! segment. Then an exclude glob never removes a path that the tool matches
 //! through a different path segment. A negated group inside another group
-//! becomes `*` and excludes nothing.
+//! becomes `*` and excludes nothing. A pattern with more than
+//! 32 negated groups gets no exclude glob.
 //!
 //! Compile every rewritten glob with `empty_alternates(true)`, because the
 //! rewrite of `?(a|b)` has an empty alternative.
@@ -36,12 +37,19 @@ use std::path::Path;
 
 use globset::{Candidate, GlobBuilder, GlobMatcher, GlobSet, GlobSetBuilder};
 
+/// Most top-level negated groups that get an exclude glob. Each exclude glob
+/// repeats the whole pattern, so the exclude size grows with the square of
+/// the group count. A pattern with more groups gets no exclude glob and
+/// matches more paths, which is safe for an include pattern.
+const MAX_NEGATED_GROUPS: usize = 32;
+
 /// The `globset` form of an include pattern with extglob groups.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExtglobInclude {
     /// The include glob. It matches each path that the pattern matches.
     pub include: String,
-    /// One exclude glob per negated group. A path that an exclude glob
+    /// One exclude glob per negated group, or none for a pattern with more
+    /// than 32 negated groups. A path that an exclude glob
     /// matches does not match the pattern.
     pub excludes: Vec<String>,
 }
@@ -52,6 +60,12 @@ pub struct ExtglobInclude {
 pub fn rewrite_include(pattern: &str) -> ExtglobInclude {
     let (include, negated_groups) =
         rewrite(pattern, Mode::Include { focus: None }).unwrap_or_else(|| (pattern.to_string(), 0));
+    if negated_groups > MAX_NEGATED_GROUPS {
+        return ExtglobInclude {
+            include,
+            excludes: Vec::new(),
+        };
+    }
     let excludes = (0..negated_groups)
         .filter_map(|group| rewrite(pattern, Mode::Include { focus: Some(group) }))
         .map(|(exclude, _)| exclude)
@@ -517,5 +531,29 @@ mod tests {
         assert!(!matches(pattern, "i/page.js"));
         assert!(matches("[{]group[}]/[*][?]/*.js", "{group}/*?/a.js"));
         assert!(matches("x[(]a)/*.js", "x(a)/b.js"));
+    }
+
+    #[test]
+    fn many_negated_groups_keep_the_exclude_size_linear() {
+        let groups = 2_000;
+        let pattern = format!("./pages/{}", "!(a)".repeat(groups));
+
+        let rewritten = rewrite_include(&pattern);
+
+        let exclude_bytes: usize = rewritten.excludes.iter().map(String::len).sum();
+        assert!(
+            exclude_bytes <= MAX_NEGATED_GROUPS * pattern.len(),
+            "exclude bytes: {exclude_bytes}"
+        );
+        assert!(rewritten.excludes.is_empty());
+        let matcher = ExtglobMatcher::new(pattern.trim_start_matches("./"), &[])
+            .expect("include glob compiles");
+        assert!(matcher.is_match(Path::new("pages/a")));
+    }
+
+    #[test]
+    fn negated_groups_up_to_the_limit_keep_their_excludes() {
+        let pattern = format!("./pages/{}.js", "!(a)".repeat(MAX_NEGATED_GROUPS));
+        assert_eq!(rewrite_include(&pattern).excludes.len(), MAX_NEGATED_GROUPS);
     }
 }
