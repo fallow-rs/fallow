@@ -157,6 +157,35 @@ fn rule_pack_init_refuses_to_overwrite_existing_pack() {
     assert_eq!(std::fs::read_to_string(pack).unwrap(), "sentinel");
 }
 
+/// A pack directory that links out of the project gives the same refusal
+/// whether the target file exists or not.
+#[cfg(unix)]
+#[test]
+fn rule_pack_init_refuses_a_link_out_of_the_project_before_the_exists_check() {
+    let mut stderrs = Vec::new();
+    for target_exists in [true, false] {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let outside = tempfile::tempdir().expect("create outside dir");
+        write_project(dir.path());
+        if target_exists {
+            std::fs::write(outside.path().join("team-policy.jsonc"), "{}").expect("write file");
+        }
+        std::os::unix::fs::symlink(outside.path(), dir.path().join("rule-packs"))
+            .expect("link pack dir");
+
+        let output = run_rule_pack(dir.path(), &["init"]);
+
+        assert_eq!(output.code, 2, "stderr: {}", output.stderr);
+        assert!(
+            !output.stderr.contains("already exists"),
+            "{}",
+            output.stderr
+        );
+        stderrs.push(output.stderr);
+    }
+    assert_eq!(stderrs[0], stderrs[1]);
+}
+
 #[test]
 fn rule_pack_init_unknown_template_lists_available_templates() {
     let dir = tempfile::tempdir().expect("create temp dir");
