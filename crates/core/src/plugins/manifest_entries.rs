@@ -565,52 +565,42 @@ fn expand_interpolations(
     path: &ManifestPathTemplate,
     manifest: &Value,
 ) -> Result<Vec<String>, ExpansionError> {
+    let too_large = || ExpansionError::EntryPaths {
+        template: path.as_str().to_string(),
+    };
     let mut expanded = vec![String::new()];
     for part in path.parts() {
-        match part {
-            ManifestPathPart::Literal(literal) => {
-                if longest(&expanded) + literal.len() > MAX_GLOB_BYTES {
-                    return Err(ExpansionError::EntryPaths {
-                        template: path.as_str().to_string(),
-                    });
-                }
-                for value in &mut expanded {
-                    value.push_str(literal);
-                }
-            }
-            ManifestPathPart::Field(field) => {
-                let values = field_segment_values(manifest, field)?;
-                if values.is_empty() {
-                    return Ok(Vec::new());
-                }
-
-                let Some(next_len) = expanded.len().checked_mul(values.len()) else {
-                    return Err(ExpansionError::EntryPaths {
-                        template: path.as_str().to_string(),
-                    });
-                };
-                if next_len > MAX_MANIFEST_ENTRY_EXPANSIONS
-                    || longest(&expanded) + longest(&values) > MAX_GLOB_BYTES
-                {
-                    return Err(ExpansionError::EntryPaths {
-                        template: path.as_str().to_string(),
-                    });
-                }
-
-                let mut next = Vec::with_capacity(next_len);
-                for prefix in &expanded {
-                    for value in &values {
-                        let mut concrete = String::with_capacity(prefix.len() + value.len());
-                        concrete.push_str(prefix);
-                        concrete.push_str(value);
-                        next.push(concrete);
-                    }
-                }
-                expanded = next;
-            }
+        let values = match part {
+            ManifestPathPart::Literal(literal) => vec![literal.clone()],
+            ManifestPathPart::Field(field) => field_segment_values(manifest, field)?,
+        };
+        if values.is_empty() {
+            return Ok(Vec::new());
         }
+        expanded = append_each(&expanded, &values).ok_or_else(too_large)?;
     }
     Ok(expanded)
+}
+
+/// Each of `prefixes` followed by each of `values`. Returns `None` when the
+/// result has more than [`MAX_MANIFEST_ENTRY_EXPANSIONS`] paths or a path
+/// longer than [`MAX_GLOB_BYTES`].
+fn append_each(prefixes: &[String], values: &[String]) -> Option<Vec<String>> {
+    let count = prefixes.len().checked_mul(values.len())?;
+    if count > MAX_MANIFEST_ENTRY_EXPANSIONS || longest(prefixes) + longest(values) > MAX_GLOB_BYTES
+    {
+        return None;
+    }
+    let mut next = Vec::with_capacity(count);
+    for prefix in prefixes {
+        for value in values {
+            let mut concrete = String::with_capacity(prefix.len() + value.len());
+            concrete.push_str(prefix);
+            concrete.push_str(value);
+            next.push(concrete);
+        }
+    }
+    Some(next)
 }
 
 /// The path-segment string values a field yields: a string or number yields
