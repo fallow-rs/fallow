@@ -1,5 +1,5 @@
+use fallow_config::PathMatcher;
 use fallow_config::{ScopedUsedClassMemberRule, UsedClassMemberRule};
-use globset::GlobMatcher;
 use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::Path;
@@ -166,13 +166,13 @@ struct ClassMemberAllowlist<'a> {
 
 struct MemberPattern<'a> {
     raw: &'a str,
-    matcher: GlobMatcher,
+    matcher: PathMatcher,
     matched: AtomicBool,
 }
 
 struct ScopedMemberPattern<'a> {
     raw: &'a str,
-    matcher: GlobMatcher,
+    matcher: PathMatcher,
     rule: &'a ScopedUsedClassMemberRule,
     matched: AtomicBool,
 }
@@ -314,7 +314,7 @@ impl ScopedMemberPattern<'_> {
     }
 }
 
-fn compile_member_pattern(member: &str) -> Option<GlobMatcher> {
+fn compile_member_pattern(member: &str) -> Option<PathMatcher> {
     if !member.contains('*') && !member.contains('?') {
         return None;
     }

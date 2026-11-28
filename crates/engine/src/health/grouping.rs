@@ -141,7 +141,7 @@ struct GroupSelector {
 
 struct KeyPattern {
     raw: String,
-    glob: globset::GlobMatcher,
+    glob: fallow_config::PathMatcher,
 }
 
 impl KeyPattern {

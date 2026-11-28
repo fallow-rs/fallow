@@ -116,7 +116,7 @@ fn must_parse_workspace_config_when_root_active(plugin_name: &str) -> bool {
 
 fn compile_config_matchers<'a>(
     active: &[&'a dyn Plugin],
-) -> Vec<(&'a dyn Plugin, Vec<globset::GlobMatcher>)> {
+) -> Vec<(&'a dyn Plugin, Vec<fallow_config::PathMatcher>)> {
     active
         .iter()
         .filter(|plugin| !plugin.config_patterns().is_empty())
@@ -124,7 +124,7 @@ fn compile_config_matchers<'a>(
         .collect()
 }
 
-fn compile_plugin_config_matchers(plugin: &dyn Plugin) -> Vec<globset::GlobMatcher> {
+fn compile_plugin_config_matchers(plugin: &dyn Plugin) -> Vec<fallow_config::PathMatcher> {
     plugin
         .config_patterns()
         .iter()
@@ -139,7 +139,7 @@ fn compile_plugin_config_matchers(plugin: &dyn Plugin) -> Vec<globset::GlobMatch
 
 struct CachedPluginConfigMatchers {
     patterns: &'static [&'static str],
-    matchers: Vec<globset::GlobMatcher>,
+    matchers: Vec<fallow_config::PathMatcher>,
 }
 
 #[derive(Default)]
@@ -148,7 +148,7 @@ struct PluginConfigMatcherCache {
 }
 
 impl PluginConfigMatcherCache {
-    fn get_or_compile(&self, plugin: &dyn Plugin) -> Vec<globset::GlobMatcher> {
+    fn get_or_compile(&self, plugin: &dyn Plugin) -> Vec<fallow_config::PathMatcher> {
         let patterns = plugin.config_patterns();
         let cached = self
             .by_name
@@ -185,7 +185,7 @@ impl PluginConfigMatcherCache {
     }
 }
 
-fn cached_plugin_config_matchers(plugin: &dyn Plugin) -> Vec<globset::GlobMatcher> {
+fn cached_plugin_config_matchers(plugin: &dyn Plugin) -> Vec<fallow_config::PathMatcher> {
     static MATCHERS: OnceLock<PluginConfigMatcherCache> = OnceLock::new();
     MATCHERS
         .get_or_init(PluginConfigMatcherCache::default)
@@ -208,7 +208,7 @@ fn log_active_plugins(active: &[&dyn Plugin]) {
 /// active plugin needs config matching or a package.json config key. Returns an
 /// empty vec otherwise to skip the per-file path work.
 fn compute_relative_files(
-    config_matchers: &[(&dyn Plugin, Vec<globset::GlobMatcher>)],
+    config_matchers: &[(&dyn Plugin, Vec<fallow_config::PathMatcher>)],
     active: &[&dyn Plugin],
     discovered_files: &[PathBuf],
     root: &Path,
@@ -264,7 +264,8 @@ pub(crate) struct WorkspacePluginRunInput<'a> {
     /// them, so a workspace script can call their binaries without its own
     /// declaration.
     pub(crate) root_dependencies: &'a [String],
-    pub(crate) precompiled_config_matchers: &'a [(&'a dyn Plugin, Vec<globset::GlobMatcher>)],
+    pub(crate) precompiled_config_matchers:
+        &'a [(&'a dyn Plugin, Vec<fallow_config::PathMatcher>)],
     pub(crate) relative_files: &'a [(PathBuf, String)],
     pub(crate) skip_config_plugins: &'a FxHashSet<&'a str>,
     pub(crate) production_mode: bool,
@@ -1083,7 +1084,7 @@ impl PluginRegistry {
     #[must_use]
     pub(crate) fn precompile_config_matchers(
         &self,
-    ) -> Vec<(&dyn Plugin, Vec<globset::GlobMatcher>)> {
+    ) -> Vec<(&dyn Plugin, Vec<fallow_config::PathMatcher>)> {
         self.plugins
             .iter()
             .filter(|p| !p.config_patterns().is_empty())
@@ -1326,7 +1327,7 @@ fn plugin_warn_dedupe() -> &'static std::sync::Mutex<FxHashSet<String>> {
 }
 
 struct PluginConfigResolutionInput<'a> {
-    config_matchers: &'a [(&'a dyn Plugin, Vec<globset::GlobMatcher>)],
+    config_matchers: &'a [(&'a dyn Plugin, Vec<fallow_config::PathMatcher>)],
     relative_files: &'a [(PathBuf, String)],
     config_search_roots: &'a [&'a Path],
     production_mode: bool,
@@ -1339,10 +1340,10 @@ struct PluginConfigResolutionInput<'a> {
 /// Filter pre-compiled matchers down to active plugins, keeping a config-skipped
 /// plugin only when it must still parse its workspace config while root-active.
 fn select_workspace_matchers<'a>(
-    precompiled_config_matchers: &[(&'a dyn Plugin, Vec<globset::GlobMatcher>)],
+    precompiled_config_matchers: &[(&'a dyn Plugin, Vec<fallow_config::PathMatcher>)],
     active: &[&dyn Plugin],
     skip_config_plugins: &FxHashSet<&str>,
-) -> Vec<(&'a dyn Plugin, Vec<globset::GlobMatcher>)> {
+) -> Vec<(&'a dyn Plugin, Vec<fallow_config::PathMatcher>)> {
     let active_names: FxHashSet<&str> = active.iter().map(|p| p.name()).collect();
     precompiled_config_matchers
         .iter()
@@ -1356,7 +1357,7 @@ fn select_workspace_matchers<'a>(
 }
 
 struct WorkspaceFsConfigInput<'a> {
-    workspace_matchers: &'a [(&'a dyn Plugin, Vec<globset::GlobMatcher>)],
+    workspace_matchers: &'a [(&'a dyn Plugin, Vec<fallow_config::PathMatcher>)],
     resolved_ws_plugins: &'a FxHashSet<&'a str>,
     root: &'a Path,
     project_root: &'a Path,
@@ -1452,7 +1453,7 @@ fn resolve_plugin_config_files(input: &mut PluginConfigResolutionInput<'_>) {
 
 struct PluginMatchingFilesInput<'plugins, 'data, 'state> {
     plugin: &'plugins dyn Plugin,
-    matchers: &'data [globset::GlobMatcher],
+    matchers: &'data [fallow_config::PathMatcher],
     relative_files: &'data [(PathBuf, String)],
     root: &'data Path,
     project_root: &'data Path,
@@ -1657,7 +1658,7 @@ fn process_package_json_inline_configs(
 /// The inputs of [`process_package_json_inline_configs`] for one manifest.
 struct InlineConfigInput<'a> {
     active: &'a [&'a dyn Plugin],
-    config_matchers: &'a [(&'a dyn Plugin, Vec<globset::GlobMatcher>)],
+    config_matchers: &'a [(&'a dyn Plugin, Vec<fallow_config::PathMatcher>)],
     relative_files: &'a [(PathBuf, String)],
     pkg: &'a PackageJson,
     root: &'a Path,

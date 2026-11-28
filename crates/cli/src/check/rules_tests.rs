@@ -3546,9 +3546,10 @@ fn config_with_private_type_leak_override() -> ResolvedConfig {
         overrides: vec![fallow_config::ResolvedOverride {
             files: vec!["src/ui/**".to_owned()],
             matchers: vec![
-                globset::Glob::new("src/ui/**")
-                    .expect("override glob compiles")
-                    .compile_matcher(),
+                fallow_config::try_compile_matcher(
+                    &globset::Glob::new("src/ui/**").expect("override glob compiles"),
+                )
+                .expect("override glob compiles"),
             ],
             rules: fallow_config::PartialRulesConfig {
                 private_type_leaks: Some(Severity::Off),

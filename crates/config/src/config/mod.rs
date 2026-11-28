@@ -53,7 +53,9 @@ pub use entry_span::ConfigEntrySpan;
 pub use finding_ignore::FindingIgnoreMatcher;
 pub use flags::{FlagsConfig, SdkPattern};
 pub use format::OutputFormat;
-pub use glob_validation::{compile_path_glob, try_compile_matcher};
+pub use glob_validation::{
+    PathMatcher, compile_path_glob, normalize_match_path, try_compile_matcher,
+};
 pub use health::{
     ChangeCouplingConfig, CyclomaticPolicy, EmailMode, HealthConfig, HealthThresholdOverride,
     OwnershipConfig, ShallowDirectoriesConfig,

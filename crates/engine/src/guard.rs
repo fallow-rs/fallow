@@ -228,8 +228,8 @@ fn guard_policy_rules(
 struct RuleScope<'a> {
     pack: &'a str,
     rule: &'a RulePackRule,
-    files: Vec<globset::GlobMatcher>,
-    exclude: Vec<globset::GlobMatcher>,
+    files: Vec<fallow_config::PathMatcher>,
+    exclude: Vec<fallow_config::PathMatcher>,
     zones: FxHashSet<String>,
 }
 
@@ -249,7 +249,7 @@ fn compile_rule_scopes(config: &ResolvedConfig) -> Vec<RuleScope<'_>> {
         .collect()
 }
 
-fn compile_scope_globs(patterns: &[String]) -> Vec<globset::GlobMatcher> {
+fn compile_scope_globs(patterns: &[String]) -> Vec<fallow_config::PathMatcher> {
     patterns
         .iter()
         .filter_map(|pattern| fallow_config::compile_path_glob(pattern).ok())
@@ -258,8 +258,8 @@ fn compile_scope_globs(patterns: &[String]) -> Vec<globset::GlobMatcher> {
 }
 
 fn compiled_scope_applies(
-    files: &[globset::GlobMatcher],
-    exclude: &[globset::GlobMatcher],
+    files: &[fallow_config::PathMatcher],
+    exclude: &[fallow_config::PathMatcher],
     zones: &FxHashSet<String>,
     relative: &str,
     zone: Option<&str>,

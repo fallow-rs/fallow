@@ -21,7 +21,7 @@ use std::borrow::Cow;
 use std::fmt;
 use std::path::{Component, Path};
 
-use globset::{Glob, GlobBuilder, GlobMatcher};
+use globset::{Glob, GlobBuilder};
 
 use super::finding_ignore::FindingIgnoreMatcher;
 
@@ -321,34 +321,87 @@ pub fn compile_path_glob(pattern: &str) -> Result<Glob, globset::Error> {
 /// The NFA size limit that `globset` sets for the regex of one glob.
 const GLOB_REGEX_SIZE_LIMIT: usize = 10 * (1 << 20);
 
+/// The matcher of one compiled path glob.
+///
+/// It matches a path the same way as [`globset::GlobMatcher`], but
+/// [`try_compile_matcher`] builds it without a panic, and it builds the regex
+/// of the glob only once.
+#[derive(Clone, Debug)]
+pub struct PathMatcher {
+    glob: Glob,
+    regex: regex::bytes::Regex,
+}
+
+impl PathMatcher {
+    /// The glob that this matcher compiled.
+    #[must_use]
+    pub const fn glob(&self) -> &Glob {
+        &self.glob
+    }
+
+    /// Whether `path` matches the glob.
+    #[must_use]
+    pub fn is_match<P: AsRef<Path>>(&self, path: P) -> bool {
+        self.regex.is_match(&normalize_match_path(path.as_ref()))
+    }
+
+    /// Whether a path that [`normalize_match_path`] gave matches the glob.
+    #[must_use]
+    pub fn is_match_normalized(&self, path: &[u8]) -> bool {
+        self.regex.is_match(path)
+    }
+}
+
+/// The bytes of `path` that a [`PathMatcher`] matches: the path as it is on
+/// Unix, with `/` for `\` on Windows, as `globset` does.
+#[must_use]
+pub fn normalize_match_path(path: &Path) -> Cow<'_, [u8]> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStrExt;
+        Cow::Borrowed(path.as_os_str().as_bytes())
+    }
+    #[cfg(not(unix))]
+    {
+        let mut bytes = path.to_string_lossy().into_owned().into_bytes();
+        if cfg!(windows) {
+            for byte in &mut bytes {
+                if *byte == b'\\' {
+                    *byte = b'/';
+                }
+            }
+        }
+        Cow::Owned(bytes)
+    }
+}
+
 /// Compile the matcher of `glob` without a panic.
 ///
 /// `Glob::compile_matcher` panics when the regex of the glob does not
 /// compile: brace groups that nest past the nesting limit of the regex
-/// parser, or a regex past the size limit. This function compiles the regex
-/// first, with the settings of `globset`, and returns that failure as an
-/// error. Only a brace group makes nested regex groups, so a glob without
-/// `{` that is not longer than [`MAX_GLOB_BYTES`] skips the check.
+/// parser, or a regex past the size limit. This function builds the regex
+/// once, with the settings of `globset`, and returns that failure as an
+/// error.
 ///
 /// # Errors
 ///
 /// Returns the regex error when the regex of the glob does not compile.
-pub fn try_compile_matcher(glob: &Glob) -> Result<GlobMatcher, regex::Error> {
-    let text = glob.glob();
-    if text.contains('{') || text.len() > MAX_GLOB_BYTES {
-        regex::bytes::RegexBuilder::new(glob.regex())
-            .dot_matches_new_line(true)
-            .size_limit(GLOB_REGEX_SIZE_LIMIT)
-            .build()?;
-    }
-    Ok(glob.compile_matcher())
+pub fn try_compile_matcher(glob: &Glob) -> Result<PathMatcher, regex::Error> {
+    let regex = regex::bytes::RegexBuilder::new(glob.regex())
+        .dot_matches_new_line(true)
+        .size_limit(GLOB_REGEX_SIZE_LIMIT)
+        .build()?;
+    Ok(PathMatcher {
+        glob: glob.clone(),
+        regex,
+    })
 }
 
 /// Compile the matcher of a config path glob. Config validation refuses a
 /// glob that does not parse or compile, so this gives `None` only for a glob
 /// that the code built after the validation. That glob matches no path, and
 /// a warning names it.
-pub(crate) fn compile_config_matcher(pattern: &str, field: &str) -> Option<GlobMatcher> {
+pub(crate) fn compile_config_matcher(pattern: &str, field: &str) -> Option<PathMatcher> {
     let compiled = compile_path_glob(pattern)
         .map_err(|error| error.to_string())
         .and_then(|glob| try_compile_matcher(&glob).map_err(|error| error.to_string()));
@@ -1401,6 +1454,47 @@ mod tests {
         assert!(try_compile_matcher(&braces).unwrap().is_match("src/a/x.ts"));
         let long = compile_path_glob(&"a".repeat(MAX_GLOB_BYTES + 1)).unwrap();
         assert!(try_compile_matcher(&long).is_ok());
+    }
+
+    #[test]
+    fn path_matcher_matches_the_same_paths_as_the_globset_matcher() {
+        let patterns = [
+            "src/**/*.ts",
+            "app/**/page.{ts,tsx,js,jsx}",
+            "*.config.{js,mjs,cjs}",
+            "**/__tests__/**",
+            "packages/*/src/[a-c]*.ts",
+            "docs/?.md",
+            "src/{a,{b,c}}/**",
+        ];
+        let paths = [
+            "src/index.ts",
+            "src/a/b/c.ts",
+            "app/page.tsx",
+            "app/blog/[slug]/page.js",
+            "vite.config.mjs",
+            "nested/vite.config.mjs",
+            "a/__tests__/x.test.ts",
+            "packages/core/src/b.ts",
+            "packages/core/src/d.ts",
+            "docs/a.md",
+            "docs/ab.md",
+            "src/c/x/y.ts",
+            "src/d/x.ts",
+            "",
+        ];
+        for pattern in patterns {
+            let glob = compile_path_glob(pattern).unwrap();
+            let ours = try_compile_matcher(&glob).unwrap();
+            let theirs = glob.compile_matcher();
+            for path in paths {
+                assert_eq!(
+                    ours.is_match(path),
+                    theirs.is_match(path),
+                    "{pattern} on {path}"
+                );
+            }
+        }
     }
 
     #[test]

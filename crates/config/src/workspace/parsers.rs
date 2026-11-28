@@ -521,8 +521,8 @@ fn expand_recursive_workspace_pattern(
 
 /// Borrowed inputs of the recursive workspace directory walk.
 struct WorkspaceDirWalkInput<'a> {
-    matcher: &'a globset::GlobMatcher,
-    zero_depth_matcher: Option<&'a globset::GlobMatcher>,
+    matcher: &'a crate::PathMatcher,
+    zero_depth_matcher: Option<&'a crate::PathMatcher>,
     root: &'a Path,
     canonical_root: &'a Path,
     results: &'a mut Vec<(PathBuf, PathBuf)>,

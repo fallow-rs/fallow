@@ -11,7 +11,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
 
-use globset::GlobMatcher;
+use crate::PathMatcher;
 use rustc_hash::FxHashSet;
 
 use super::dependency_ignore::IgnoreDependencyMatcher;
@@ -25,7 +25,7 @@ enum Selector {
     Exact(String),
     /// A glob over project-root-relative workspace roots.
     Glob {
-        matcher: GlobMatcher,
+        matcher: PathMatcher,
         /// Path segments without glob characters. A glob with more literal
         /// segments is more specific.
         literal_segments: usize,

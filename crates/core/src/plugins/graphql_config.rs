@@ -172,13 +172,13 @@ impl Plugin for GraphqlConfigPlugin {
 }
 
 /// The matcher for config file names, used for activation.
-fn config_file_matcher() -> Option<&'static globset::GlobMatcher> {
-    static MATCHER: OnceLock<Option<globset::GlobMatcher>> = OnceLock::new();
+fn config_file_matcher() -> Option<&'static fallow_config::PathMatcher> {
+    static MATCHER: OnceLock<Option<fallow_config::PathMatcher>> = OnceLock::new();
     MATCHER
         .get_or_init(|| {
             globset::Glob::new(ACTIVATION_PATTERN)
                 .ok()
-                .map(|glob| glob.compile_matcher())
+                .and_then(|glob| fallow_config::try_compile_matcher(&glob).ok())
         })
         .as_ref()
 }

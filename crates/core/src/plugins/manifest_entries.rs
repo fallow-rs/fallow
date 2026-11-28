@@ -721,7 +721,7 @@ fn push_field_value<'a>(
 /// Walk `root` (respecting `.gitignore`, skipping `node_modules`) and return the
 /// absolute paths of files whose root-relative path matches `matcher`. Bounded
 /// to the manifest glob; runs only when an active plugin declares manifestEntries.
-fn discover_manifest_paths(root: &Path, matcher: &globset::GlobMatcher) -> Vec<PathBuf> {
+fn discover_manifest_paths(root: &Path, matcher: &fallow_config::PathMatcher) -> Vec<PathBuf> {
     let mut out = Vec::new();
     let canonical_root = root.canonicalize().ok();
     let walker =
@@ -1178,9 +1178,9 @@ mod tests {
             &plugins.join("broken-kibana.jsonc"),
         );
 
-        let matcher = globset::Glob::new("**/*-kibana.jsonc")
-            .unwrap()
-            .compile_matcher();
+        let matcher =
+            fallow_config::try_compile_matcher(&globset::Glob::new("**/*-kibana.jsonc").unwrap())
+                .expect("test glob compiles");
         let paths = discover_manifest_paths(root, &matcher);
         let relative: Vec<String> = paths
             .iter()

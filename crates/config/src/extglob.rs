@@ -34,7 +34,9 @@
 
 use std::path::Path;
 
-use globset::{Candidate, GlobBuilder, GlobMatcher, GlobSet, GlobSetBuilder};
+use globset::{Candidate, GlobBuilder, GlobSet, GlobSetBuilder};
+
+use crate::PathMatcher;
 
 /// The `globset` form of an include pattern with extglob groups.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -87,7 +89,7 @@ pub fn has_extglob_group(pattern: &str) -> bool {
 /// matches.
 #[derive(Debug, Clone)]
 pub struct ExtglobMatcher {
-    include: GlobMatcher,
+    include: PathMatcher,
     excludes: GlobSet,
 }
 
@@ -120,8 +122,7 @@ impl ExtglobMatcher {
     /// Whether `path` matches the pattern.
     #[must_use]
     pub fn is_match(&self, path: &Path) -> bool {
-        let candidate = Candidate::new(path);
-        self.include.is_match_candidate(&candidate) && !self.excludes.is_match_candidate(&candidate)
+        self.include.is_match(path) && !self.excludes.is_match_candidate(&Candidate::new(path))
     }
 }
 

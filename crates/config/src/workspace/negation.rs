@@ -3,7 +3,7 @@
 use std::path::Path;
 
 /// The compiled `!` patterns of one workspace declaration.
-pub(super) struct NegatedPatterns(Vec<globset::GlobMatcher>);
+pub(super) struct NegatedPatterns(Vec<crate::PathMatcher>);
 
 impl NegatedPatterns {
     /// Compile each pattern that starts with `!`. Other patterns are skipped,

@@ -428,7 +428,7 @@ impl ConfigCandidateIndex {
     pub(crate) fn any_descendant_matches(
         &self,
         root: &Path,
-        matcher: &globset::GlobMatcher,
+        matcher: &fallow_config::PathMatcher,
     ) -> bool {
         self.dirs_under(root)
             .any(|names| names.iter().any(|name| matcher.is_match(Path::new(name))))
@@ -442,7 +442,7 @@ impl ConfigCandidateIndex {
     pub(super) fn glob_matches_in_dir(
         &self,
         dir: &Path,
-        matcher: &globset::GlobMatcher,
+        matcher: &fallow_config::PathMatcher,
     ) -> Vec<PathBuf> {
         self.dirs.get(dir).map_or_else(Vec::new, |names| {
             names
@@ -487,7 +487,7 @@ fn count_dir_check() {
 /// set. In production mode, the file walker excludes `*.config.*` and dotfile
 /// configs, so the FS walk is still required to keep the discovery correct.
 pub fn discover_config_files<'a>(
-    config_matchers: &[(&'a dyn Plugin, Vec<globset::GlobMatcher>)],
+    config_matchers: &[(&'a dyn Plugin, Vec<fallow_config::PathMatcher>)],
     resolved_plugins: &FxHashSet<&str>,
     roots: &[&Path],
     production_mode: bool,
@@ -1002,7 +1002,7 @@ fn merge_plugin_result_fields(
 /// Check if a plugin already has a config file matched against discovered files.
 pub fn check_has_config_file(
     plugin: &dyn Plugin,
-    config_matchers: &[(&dyn Plugin, Vec<globset::GlobMatcher>)],
+    config_matchers: &[(&dyn Plugin, Vec<fallow_config::PathMatcher>)],
     relative_files: &[(PathBuf, String)],
 ) -> bool {
     !plugin.config_patterns().is_empty()
@@ -1195,9 +1195,10 @@ mod tests {
         paths.push(PathBuf::from("/project/packages/p9/tsconfig.app.json"));
         paths.push(PathBuf::from("/project/packages/p1-docs/mkdocs.yml"));
         let index = ConfigCandidateIndex::build(paths.iter().map(PathBuf::as_path));
-        let matcher = globset::Glob::new("tsconfig.*.json")
-            .expect("valid glob")
-            .compile_matcher();
+        let matcher = fallow_config::try_compile_matcher(
+            &globset::Glob::new("tsconfig.*.json").expect("valid glob"),
+        )
+        .expect("test glob compiles");
 
         let p7 = Path::new("/project/packages/p7");
         let p8 = Path::new("/project/packages/p8");
@@ -1240,9 +1241,10 @@ mod tests {
         .map(PathBuf::from)
         .collect();
         let index = ConfigCandidateIndex::build(paths.iter().map(PathBuf::as_path));
-        let matcher = globset::Glob::new("tsconfig.*.json")
-            .expect("valid glob")
-            .compile_matcher();
+        let matcher = fallow_config::try_compile_matcher(
+            &globset::Glob::new("tsconfig.*.json").expect("valid glob"),
+        )
+        .expect("test glob compiles");
         let scan = |root: &Path, hit: &dyn Fn(&OsStr) -> bool| {
             paths.iter().any(|path| {
                 path.parent().is_some_and(|dir| dir.starts_with(root))

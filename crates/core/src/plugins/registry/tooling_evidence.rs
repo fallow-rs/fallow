@@ -241,7 +241,7 @@ enum ExtraRootProbe {
     /// A file-name glob, read from the candidate index.
     IndexedGlob {
         dir: Option<PathBuf>,
-        matcher: globset::GlobMatcher,
+        matcher: fallow_config::PathMatcher,
     },
     /// A pattern that only the filesystem can answer. `dir` is the literal
     /// directory prefix of a glob pattern. One `is_dir` check on it skips a

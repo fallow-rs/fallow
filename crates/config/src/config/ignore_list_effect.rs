@@ -4,7 +4,7 @@
 
 use std::path::Path;
 
-use globset::GlobMatcher;
+use crate::PathMatcher;
 
 use super::{EntryEffectRecord, ResolvedConfig};
 
@@ -113,7 +113,7 @@ impl ResolvedConfig {
         lists: &[&[String]],
         paths: impl IntoIterator<Item = &'p Path>,
     ) -> Vec<Vec<bool>> {
-        let globs: Vec<Vec<Option<GlobMatcher>>> = lists.iter().map(|list| compile(list)).collect();
+        let globs: Vec<Vec<Option<PathMatcher>>> = lists.iter().map(|list| compile(list)).collect();
         let mut hits: Vec<Vec<bool>> = globs.iter().map(|list| initial_hits(list)).collect();
         for path in paths {
             mark_matches(&globs, &self.relative(path), &mut hits);
@@ -124,7 +124,7 @@ impl ResolvedConfig {
         hits
     }
 
-    fn mark_project_files(&self, globs: &[Vec<Option<GlobMatcher>>], hits: &mut [Vec<bool>]) {
+    fn mark_project_files(&self, globs: &[Vec<Option<PathMatcher>>], hits: &mut [Vec<bool>]) {
         let builder = crate::source_walk_builder(&self.root, |entry| {
             entry
                 .file_name()
@@ -154,7 +154,7 @@ fn any_unmatched(hits: &[Vec<bool>]) -> bool {
     hits.iter().any(|list| list.contains(&false))
 }
 
-fn mark_matches(globs: &[Vec<Option<GlobMatcher>>], relative: &str, hits: &mut [Vec<bool>]) {
+fn mark_matches(globs: &[Vec<Option<PathMatcher>>], relative: &str, hits: &mut [Vec<bool>]) {
     for (list_hits, list_globs) in hits.iter_mut().zip(globs) {
         for (hit, glob) in list_hits.iter_mut().zip(list_globs) {
             if glob.as_ref().is_some_and(|glob| glob.is_match(relative)) {
@@ -166,7 +166,7 @@ fn mark_matches(globs: &[Vec<Option<GlobMatcher>>], relative: &str, hits: &mut [
 
 /// Compile the globs of one config list. Config validation rejects a glob
 /// that does not compile, so `None` does not occur in a loaded config.
-fn compile(patterns: &[String]) -> Vec<Option<GlobMatcher>> {
+fn compile(patterns: &[String]) -> Vec<Option<PathMatcher>> {
     patterns
         .iter()
         .map(|pattern| {
@@ -179,6 +179,6 @@ fn compile(patterns: &[String]) -> Vec<Option<GlobMatcher>> {
 
 /// One flag per glob. A glob without a matcher starts as matched, so the
 /// check reports nothing for it.
-fn initial_hits(globs: &[Option<GlobMatcher>]) -> Vec<bool> {
+fn initial_hits(globs: &[Option<PathMatcher>]) -> Vec<bool> {
     globs.iter().map(Option::is_none).collect()
 }

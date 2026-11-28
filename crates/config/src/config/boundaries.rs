@@ -633,7 +633,7 @@ pub struct ResolvedBoundaryCoverageConfig {
     /// zone, also a file that no entry point reaches.
     pub require_all_files: bool,
     /// Compiled allow-list matchers for unmatched files.
-    pub allow_unmatched: Vec<globset::GlobMatcher>,
+    pub allow_unmatched: Vec<crate::PathMatcher>,
 }
 
 /// A user-declared zone that fanned out via `autoDiscover`.
@@ -697,25 +697,24 @@ pub struct ResolvedZone {
     /// Authored membership patterns.
     pub patterns: Vec<String>,
     /// Compiled matchers.
-    pub matchers: Vec<globset::GlobMatcher>,
+    pub matchers: Vec<crate::PathMatcher>,
     /// Normalized subtree scope.
     pub root: Option<String>,
     /// Authored public entry globs, after the `autoDiscover` expansion.
     pub public_files: Vec<String>,
     /// Compiled public entry matchers.
-    pub public_file_matchers: Vec<globset::GlobMatcher>,
+    pub public_file_matchers: Vec<crate::PathMatcher>,
 }
 
 impl ResolvedZone {
     /// The candidate for a project-relative path, scoped to the zone root.
     /// `None` when the path is outside the root.
-    fn candidate<'p>(&self, relative_path: &'p str) -> Option<globset::Candidate<'p>> {
-        match self.root.as_deref() {
-            Some(root) if !root.is_empty() => relative_path
-                .strip_prefix(root)
-                .map(globset::Candidate::new),
-            _ => Some(globset::Candidate::new(relative_path)),
-        }
+    fn candidate<'p>(&self, relative_path: &'p str) -> Option<std::borrow::Cow<'p, [u8]>> {
+        let scoped = match self.root.as_deref() {
+            Some(root) if !root.is_empty() => relative_path.strip_prefix(root)?,
+            _ => relative_path,
+        };
+        Some(crate::normalize_match_path(std::path::Path::new(scoped)))
     }
 }
 
@@ -1840,7 +1839,7 @@ impl ResolvedBoundaryConfig {
     pub fn classify_zone(&self, relative_path: &str) -> Option<&str> {
         // A candidate normalizes its path once. Unscoped zones share one
         // candidate, so a path is not normalized again for every glob.
-        let unscoped = globset::Candidate::new(relative_path);
+        let unscoped = crate::normalize_match_path(std::path::Path::new(relative_path));
         for zone in &self.zones {
             let scoped;
             let candidate = match zone.root.as_deref() {
@@ -1856,7 +1855,7 @@ impl ResolvedBoundaryConfig {
             if zone
                 .matchers
                 .iter()
-                .any(|m| m.is_match_candidate(candidate))
+                .any(|m| m.is_match_normalized(candidate))
             {
                 return Some(&zone.name);
             }
@@ -1908,7 +1907,7 @@ impl ResolvedBoundaryConfig {
                 zone.candidate(relative_path).is_some_and(|candidate| {
                     zone.public_file_matchers
                         .iter()
-                        .any(|m| m.is_match_candidate(&candidate))
+                        .any(|m| m.is_match_normalized(&candidate))
                 })
             })
     }
