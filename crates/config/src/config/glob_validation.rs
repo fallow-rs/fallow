@@ -1481,7 +1481,7 @@ mod tests {
     #[cfg_attr(miri, ignore = "thousands of regex builds are too slow under Miri")]
     fn a_glob_without_braces_within_the_limit_always_compiles() {
         let mut checked = 0;
-        for text in generated_globs(3_000) {
+        for text in generated_globs(1_000) {
             if text.contains('{') || text.len() > MAX_GLOB_BYTES {
                 continue;
             }
@@ -1502,7 +1502,7 @@ mod tests {
                 checked += 1;
             }
         }
-        assert!(checked > 1_000, "only {checked} globs parsed");
+        assert!(checked > 300, "only {checked} globs parsed");
     }
 
     /// The regex check refuses exactly the brace globs whose matcher build

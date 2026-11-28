@@ -111,6 +111,10 @@ fn expand_with_limit(base: &Path, pattern: &str, root: &Path, max_visited: usize
         return expansion;
     };
     let Ok(matcher) = fallow_config::try_compile_matcher(&glob) else {
+        tracing::warn!(
+            "the glob '{pattern}' in {} does not compile; it matches no file",
+            base.display()
+        );
         return expansion;
     };
     let max_depth = (!rest.contains(&"**")).then_some(rest.len());
