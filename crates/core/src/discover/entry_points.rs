@@ -2,11 +2,14 @@ use std::path::{Component, Path, PathBuf};
 
 use super::{
     project_read,
-    source_probe::{has_non_runnable_extension, probe_runnable_file, probe_source_file},
+    source_probe::{
+        has_non_runnable_extension, probe_directory_index_where, probe_runnable_file_where,
+        probe_source_file,
+    },
     walk::SOURCE_EXTENSIONS,
 };
 use fallow_config::{PackageJson, ResolvedConfig, TsconfigOutputMap, TsconfigOutputResolution};
-use fallow_graph::resolve::{OUTPUT_DIRS, directory_index_entry, output_entry_to_source_path};
+use fallow_graph::resolve::{OUTPUT_DIRS, output_entry_to_source_path_where};
 use fallow_types::discover::{DiscoveredFile, EntryPoint, EntryPointSource};
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -17,10 +20,19 @@ use crate::scripts::{IgnoredCommandEntries, ScriptCatalog, WorkspacePackages};
 mod entry_dedup;
 #[path = "manual_entries.rs"]
 mod manual_entries;
+#[cfg(test)]
+#[path = "entry_points_output_tests.rs"]
+mod output_to_source_tests;
 #[path = "plugin_entries.rs"]
 mod plugin_entries;
+#[cfg(test)]
+#[path = "entry_points_scope_tests.rs"]
+mod scope_tests;
 #[path = "script_package.rs"]
 mod script_package;
+#[cfg(test)]
+#[path = "entry_points_fallback_tests.rs"]
+mod source_index_fallback_tests;
 #[path = "wildcard_entries.rs"]
 mod wildcard_entries;
 use manual_entries::{push_manual_entry_matches, push_support_entry_matches};
@@ -316,6 +328,22 @@ fn resolve_entry_path_with_output_map(
         return None;
     }
 
+    // A package directory that does not exist holds no entry.
+    if base.symlink_metadata().is_err() {
+        return None;
+    }
+    // An absolute entry, or one behind a link out of the project, is refused
+    // before any probe. The probe result would show whether a file outside
+    // the project exists.
+    if !fallow_config::may_probe_project_path(base, Path::new(entry)) {
+        record_or_warn_skipped_entry(
+            skipped_entries.as_deref_mut(),
+            entry,
+            "Skipping entry point outside project root",
+        );
+        return None;
+    }
+
     if let OutputDirEntry::ShortCircuit(result) = resolve_entry_via_output_dir(
         base,
         entry,
@@ -395,15 +423,17 @@ pub(super) fn resolve_entry_via_output_dir(
             .discovered
             .is_none_or(|is_discovered| is_discovered(path))
     };
+    // A source candidate that resolves out of the project counts as missing.
+    let is_file = |path: &Path| project_read::is_probed_project_file(canonical_root, path);
+    let mapped =
+        output_entry_to_source_path_where(base, entry, SOURCE_EXTENSIONS, is_file, is_discovered);
     if matches!(
         resolution,
         TsconfigOutputResolution::ConfiguredWithoutSource
     ) {
         // The tsconfig claims the output but names no file, so a bundler can
         // own it. Only an analyzed source file under `src/` counts.
-        return match output_entry_to_source_path(base, entry, SOURCE_EXTENSIONS, is_discovered)
-            .filter(|source_path| is_discovered(source_path))
-        {
+        return match mapped.filter(|source_path| is_discovered(source_path)) {
             Some(source_path) => OutputDirEntry::ShortCircuit(validated_entry_point(
                 &source_path,
                 canonical_root,
@@ -414,9 +444,7 @@ pub(super) fn resolve_entry_via_output_dir(
             None => OutputDirEntry::Continue,
         };
     }
-    if let Some(source_path) =
-        output_entry_to_source_path(base, entry, SOURCE_EXTENSIONS, is_discovered)
-    {
+    if let Some(source_path) = mapped {
         return OutputDirEntry::ShortCircuit(validated_entry_point(
             &source_path,
             canonical_root,
@@ -427,7 +455,7 @@ pub(super) fn resolve_entry_via_output_dir(
     }
 
     if is_entry_in_output_dir(entry)
-        && let Some(source_path) = try_source_index_fallback(base)
+        && let Some(source_path) = try_source_index_fallback(base, canonical_root)
     {
         tracing::info!(
             entry = %entry,
@@ -457,13 +485,16 @@ fn resolve_entry_via_filesystem_probe(
     probe: EntryProbe,
 ) -> Option<EntryPoint> {
     let resolved = base.join(entry);
+    let is_file = |path: &Path| project_read::is_probed_project_file(canonical_root, path);
     let file = match probe {
-        EntryProbe::Package => probe_source_file(&resolved),
-        EntryProbe::ScriptModule | EntryProbe::ScriptPath => probe_runnable_file(&resolved),
+        EntryProbe::Package => probe_source_file(&resolved, is_file),
+        EntryProbe::ScriptModule | EntryProbe::ScriptPath => {
+            probe_runnable_file_where(&resolved, is_file)
+        }
     };
     if let Some(file) = file.or_else(|| {
         (probe != EntryProbe::ScriptPath)
-            .then(|| directory_index_entry(&resolved, SOURCE_EXTENSIONS))
+            .then(|| probe_directory_index_where(&resolved, is_file))
             .flatten()
     }) {
         return validated_entry_point(
@@ -477,7 +508,7 @@ fn resolve_entry_via_filesystem_probe(
 
     if is_package_root_index_entry(entry)
         && probe.may_map_to_source(entry)
-        && let Some(source_path) = try_source_index_fallback(base)
+        && let Some(source_path) = try_source_index_fallback(base, canonical_root)
     {
         tracing::info!(
             entry = %entry,
@@ -536,11 +567,7 @@ fn validated_entry_point(
         if let Some(skipped_entries) = skipped_entries.as_mut() {
             *skipped_entries.entry(entry.to_owned()).or_default() += 1;
         } else {
-            tracing::warn!(
-                path = %candidate.display(),
-                %entry,
-                "Skipping entry point outside project root"
-            );
+            tracing::warn!(%entry, "Skipping entry point outside project root");
         }
         return None;
     }
@@ -635,12 +662,13 @@ fn is_entry_in_output_dir(entry: &str) -> bool {
 /// Used when `package.json` points at compiled output but the canonical source
 /// entry is a standard TypeScript/JavaScript index file. Tries `src/index`,
 /// `src/main`, `index`, and `main` with each supported source extension, in
-/// that order.
-fn try_source_index_fallback(base: &Path) -> Option<PathBuf> {
+/// that order. A candidate behind a link out of the read scope of
+/// `canonical_root` counts as missing.
+fn try_source_index_fallback(base: &Path, canonical_root: &Path) -> Option<PathBuf> {
     for stem in SOURCE_INDEX_FALLBACK_STEMS {
         for ext in SOURCE_EXTENSIONS {
             let candidate = base.join(format!("{stem}.{ext}"));
-            if candidate.is_file() {
+            if project_read::is_probed_project_file(canonical_root, &candidate) {
                 return Some(candidate);
             }
         }
@@ -2033,346 +2061,6 @@ mod tests {
                 result.is_none(),
                 "should reject extension fallback paths that escape the root"
             );
-        }
-    }
-
-    mod output_to_source_tests {
-        use super::*;
-
-        /// The output mapping without a discovered file set: a `lib/` file on
-        /// disk counts as present.
-        fn try_legacy_output_to_source_path(base: &Path, entry: &str) -> Option<PathBuf> {
-            output_entry_to_source_path(base, entry, SOURCE_EXTENSIONS, |_| true)
-        }
-
-        #[test]
-        fn maps_dist_to_src_with_ts_extension() {
-            let dir = tempfile::tempdir().expect("create temp dir");
-            let src = dir.path().join("src");
-            std::fs::create_dir_all(&src).unwrap();
-            std::fs::write(src.join("utils.ts"), "export const u = 1;").unwrap();
-
-            let result = try_legacy_output_to_source_path(dir.path(), "./dist/utils.js");
-            assert!(result.is_some());
-            assert!(
-                result
-                    .unwrap()
-                    .to_string_lossy()
-                    .replace('\\', "/")
-                    .contains("src/utils.ts")
-            );
-        }
-
-        #[test]
-        fn returns_none_when_no_source_file_exists() {
-            let dir = tempfile::tempdir().expect("create temp dir");
-            let result = try_legacy_output_to_source_path(dir.path(), "./dist/missing.js");
-            assert!(result.is_none());
-        }
-
-        #[test]
-        fn ignores_non_output_directories() {
-            let dir = tempfile::tempdir().expect("create temp dir");
-            let src = dir.path().join("src");
-            std::fs::create_dir_all(&src).unwrap();
-            std::fs::write(src.join("foo.ts"), "export const f = 1;").unwrap();
-
-            let result = try_legacy_output_to_source_path(dir.path(), "./scripts/foo.js");
-            assert!(result.is_none());
-        }
-
-        #[test]
-        fn maps_lib_entry_to_source_only_when_lib_target_is_missing() {
-            let dir = tempfile::tempdir().expect("create temp dir");
-            let src = dir.path().join("src");
-            std::fs::create_dir_all(&src).unwrap();
-            std::fs::write(src.join("foo.ts"), "export const f = 1;").unwrap();
-
-            assert_eq!(
-                try_legacy_output_to_source_path(dir.path(), "./lib/foo.js"),
-                Some(src.join("foo.ts")),
-                "a missing lib/ build output maps to the same-stem source file"
-            );
-
-            let lib = dir.path().join("lib");
-            std::fs::create_dir_all(&lib).unwrap();
-            std::fs::write(lib.join("foo.js"), "exports.f = 1;").unwrap();
-            assert_eq!(
-                try_legacy_output_to_source_path(dir.path(), "./lib/foo.js"),
-                None,
-                "a lib/ file on disk stays the entry"
-            );
-        }
-
-        #[test]
-        fn lib_entry_without_extension_counts_as_present() {
-            let dir = tempfile::tempdir().expect("create temp dir");
-            std::fs::create_dir_all(dir.path().join("src")).unwrap();
-            std::fs::write(dir.path().join("src/index.ts"), "export {};").unwrap();
-            std::fs::create_dir_all(dir.path().join("lib")).unwrap();
-            std::fs::write(dir.path().join("lib/index.js"), "module.exports = {};").unwrap();
-
-            assert_eq!(
-                try_legacy_output_to_source_path(dir.path(), "./lib/index"),
-                None
-            );
-            assert_eq!(try_legacy_output_to_source_path(dir.path(), "./lib"), None);
-        }
-
-        #[test]
-        fn maps_missing_lib_entry_with_nested_prefix() {
-            let dir = tempfile::tempdir().expect("create temp dir");
-            let modules_src = dir.path().join("modules/src");
-            std::fs::create_dir_all(&modules_src).unwrap();
-            std::fs::write(modules_src.join("x.ts"), "export const x = 1;").unwrap();
-
-            assert_eq!(
-                try_legacy_output_to_source_path(dir.path(), "./modules/lib/x.mjs"),
-                Some(modules_src.join("x.ts"))
-            );
-        }
-
-        #[test]
-        fn bare_missing_lib_entry_does_not_map_to_source_directory() {
-            let dir = tempfile::tempdir().expect("create temp dir");
-            std::fs::create_dir_all(dir.path().join("src")).unwrap();
-
-            assert_eq!(try_legacy_output_to_source_path(dir.path(), "./lib"), None);
-        }
-
-        #[test]
-        fn lib_is_not_an_index_fallback_output_dir() {
-            assert!(!is_entry_in_output_dir("./lib/foo.js"));
-        }
-
-        #[test]
-        fn maps_nested_output_path_preserving_prefix() {
-            let dir = tempfile::tempdir().expect("create temp dir");
-            let modules_src = dir.path().join("modules").join("src");
-            std::fs::create_dir_all(&modules_src).unwrap();
-            std::fs::write(modules_src.join("helper.ts"), "export const h = 1;").unwrap();
-
-            let result = try_legacy_output_to_source_path(dir.path(), "./modules/dist/helper.js");
-            assert!(result.is_some());
-            assert!(
-                result
-                    .unwrap()
-                    .to_string_lossy()
-                    .replace('\\', "/")
-                    .contains("modules/src/helper.ts")
-            );
-        }
-    }
-
-    mod source_index_fallback_tests {
-        use super::*;
-
-        #[test]
-        fn detects_dist_entry_in_output_dir() {
-            assert!(is_entry_in_output_dir("./dist/esm2022/index.js"));
-            assert!(is_entry_in_output_dir("dist/index.js"));
-            assert!(is_entry_in_output_dir("./build/index.js"));
-            assert!(is_entry_in_output_dir("./out/main.js"));
-            assert!(is_entry_in_output_dir("./esm/index.js"));
-            assert!(is_entry_in_output_dir("./cjs/index.js"));
-        }
-
-        #[test]
-        fn rejects_non_output_entry_paths() {
-            assert!(!is_entry_in_output_dir("./src/index.ts"));
-            assert!(!is_entry_in_output_dir("src/main.ts"));
-            assert!(!is_entry_in_output_dir("./index.js"));
-            assert!(!is_entry_in_output_dir(""));
-        }
-
-        #[test]
-        fn root_index_entries_are_recognized_for_source_fallback() {
-            assert!(is_package_root_index_entry("./index.js"));
-            assert!(is_package_root_index_entry("index.cjs"));
-            assert!(is_package_root_index_entry("./index.d.ts"));
-            assert!(!is_package_root_index_entry("./src/index.js"));
-            assert!(!is_package_root_index_entry("./main.js"));
-            assert!(!is_package_root_index_entry(""));
-        }
-
-        #[test]
-        fn rejects_substring_match_for_output_dir() {
-            assert!(!is_entry_in_output_dir("./distro/index.js"));
-            assert!(!is_entry_in_output_dir("./build-scripts/run.js"));
-        }
-
-        #[test]
-        fn finds_src_index_ts() {
-            let dir = tempfile::tempdir().expect("create temp dir");
-            let src = dir.path().join("src");
-            std::fs::create_dir_all(&src).unwrap();
-            let index_path = src.join("index.ts");
-            std::fs::write(&index_path, "export const a = 1;").unwrap();
-
-            let result = try_source_index_fallback(dir.path());
-            assert_eq!(result.as_deref(), Some(index_path.as_path()));
-        }
-
-        #[test]
-        fn finds_src_index_tsx_when_ts_missing() {
-            let dir = tempfile::tempdir().expect("create temp dir");
-            let src = dir.path().join("src");
-            std::fs::create_dir_all(&src).unwrap();
-            let index_path = src.join("index.tsx");
-            std::fs::write(&index_path, "export default 1;").unwrap();
-
-            let result = try_source_index_fallback(dir.path());
-            assert_eq!(result.as_deref(), Some(index_path.as_path()));
-        }
-
-        #[test]
-        fn prefers_src_index_over_root_index() {
-            let dir = tempfile::tempdir().expect("create temp dir");
-            let src = dir.path().join("src");
-            std::fs::create_dir_all(&src).unwrap();
-            let src_index = src.join("index.ts");
-            std::fs::write(&src_index, "export const a = 1;").unwrap();
-            let root_index = dir.path().join("index.ts");
-            std::fs::write(&root_index, "export const b = 2;").unwrap();
-
-            let result = try_source_index_fallback(dir.path());
-            assert_eq!(result.as_deref(), Some(src_index.as_path()));
-        }
-
-        #[test]
-        fn falls_back_to_src_main() {
-            let dir = tempfile::tempdir().expect("create temp dir");
-            let src = dir.path().join("src");
-            std::fs::create_dir_all(&src).unwrap();
-            let main_path = src.join("main.ts");
-            std::fs::write(&main_path, "export const a = 1;").unwrap();
-
-            let result = try_source_index_fallback(dir.path());
-            assert_eq!(result.as_deref(), Some(main_path.as_path()));
-        }
-
-        #[test]
-        fn falls_back_to_root_index_when_no_src() {
-            let dir = tempfile::tempdir().expect("create temp dir");
-            let index_path = dir.path().join("index.js");
-            std::fs::write(&index_path, "module.exports = {};").unwrap();
-
-            let result = try_source_index_fallback(dir.path());
-            assert_eq!(result.as_deref(), Some(index_path.as_path()));
-        }
-
-        #[test]
-        fn returns_none_when_nothing_matches() {
-            let dir = tempfile::tempdir().expect("create temp dir");
-            let result = try_source_index_fallback(dir.path());
-            assert!(result.is_none());
-        }
-
-        #[test]
-        fn resolve_entry_path_falls_back_to_src_index_for_dist_entry() {
-            let dir = tempfile::tempdir().expect("create temp dir");
-            let canonical = dunce::canonicalize(dir.path()).unwrap();
-
-            let dist_dir = canonical.join("dist").join("esm2022");
-            std::fs::create_dir_all(&dist_dir).unwrap();
-            std::fs::write(dist_dir.join("index.js"), "export const x = 1;").unwrap();
-
-            let src = canonical.join("src");
-            std::fs::create_dir_all(&src).unwrap();
-            let src_index = src.join("index.ts");
-            std::fs::write(&src_index, "export const x = 1;").unwrap();
-
-            let result = resolve_entry_path(
-                &canonical,
-                "./dist/esm2022/index.js",
-                &canonical,
-                EntryPointSource::PackageJsonMain,
-            );
-            assert!(result.is_some());
-            let entry = result.unwrap();
-            assert_eq!(entry.path, src_index);
-        }
-
-        #[test]
-        fn resolve_entry_path_uses_direct_src_mirror_when_available() {
-            let dir = tempfile::tempdir().expect("create temp dir");
-            let canonical = dunce::canonicalize(dir.path()).unwrap();
-
-            let src_mirror = canonical.join("src").join("esm2022");
-            std::fs::create_dir_all(&src_mirror).unwrap();
-            let mirror_index = src_mirror.join("index.ts");
-            std::fs::write(&mirror_index, "export const x = 1;").unwrap();
-
-            let src_index = canonical.join("src").join("index.ts");
-            std::fs::write(&src_index, "export const y = 2;").unwrap();
-
-            let result = resolve_entry_path(
-                &canonical,
-                "./dist/esm2022/index.js",
-                &canonical,
-                EntryPointSource::PackageJsonMain,
-            );
-            assert_eq!(result.map(|e| e.path), Some(mirror_index));
-        }
-
-        /// A tsconfig with `rootDir: "."` claims `dist/` but names no file. A
-        /// Nest build emits `dist/<path>.js` from `src/<path>.ts`.
-        #[test]
-        fn configured_output_without_source_maps_to_an_analyzed_src_file() {
-            let dir = tempfile::tempdir().expect("create temp dir");
-            let canonical = dunce::canonicalize(dir.path()).unwrap();
-            std::fs::write(
-                canonical.join("tsconfig.build.json"),
-                r#"{"compilerOptions":{"rootDir":".","outDir":"./dist"}}"#,
-            )
-            .unwrap();
-            std::fs::create_dir_all(canonical.join("src/scripts")).unwrap();
-            let script = canonical.join("src/scripts/setup.ts");
-            std::fs::write(&script, "export {};").unwrap();
-            let entry = "dist/scripts/setup.js";
-
-            let analyzed: &(dyn Fn(&Path) -> bool + Sync) = &|_| true;
-            let result = resolve_entry_path_with_discovered(
-                &canonical,
-                entry,
-                &canonical,
-                EntryPointSource::package_json_script("build"),
-                analyzed,
-            );
-            assert_eq!(result.map(|e| e.path), Some(script));
-
-            let not_analyzed: &(dyn Fn(&Path) -> bool + Sync) = &|_| false;
-            let result = resolve_entry_path_with_discovered(
-                &canonical,
-                entry,
-                &canonical,
-                EntryPointSource::package_json_script("build"),
-                not_analyzed,
-            );
-            assert_eq!(
-                result.map(|e| e.path),
-                None,
-                "a source file outside the analyzed files must not become an entry"
-            );
-        }
-
-        #[test]
-        fn resolve_entry_path_falls_back_to_src_index_for_missing_root_index() {
-            let dir = tempfile::tempdir().expect("create temp dir");
-            let canonical = dunce::canonicalize(dir.path()).unwrap();
-
-            let src = canonical.join("src");
-            std::fs::create_dir_all(&src).unwrap();
-            let src_index = src.join("index.ts");
-            std::fs::write(&src_index, "export const x = 1;").unwrap();
-
-            let result = resolve_entry_path(
-                &canonical,
-                "./index.js",
-                &canonical,
-                EntryPointSource::PackageJsonMain,
-            );
-            assert_eq!(result.map(|entry| entry.path), Some(src_index));
         }
     }
 

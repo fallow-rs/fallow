@@ -10,8 +10,10 @@ use super::{DeclaredPattern, collect_declared_patterns, nested_project::nested_d
 /// The directory part is the literal prefix of the pattern
 /// ([`fallow_types::workspace::workspace_pattern_literal_dir`]). A pattern
 /// without one never qualifies, and a directory that exists but holds no
-/// package does not qualify either. The rule stays conservative because a
-/// match suppresses the unused-catalog-entries check for the run.
+/// package does not qualify either. A directory behind a link out of the
+/// project is not probed and does not qualify, whether the link target
+/// exists or not. The rule stays conservative because a match suppresses
+/// the unused-catalog-entries check for the run.
 pub(super) fn missing_dir_patterns<'a>(
     root: &'a Path,
     declared: &'a [DeclaredPattern],
@@ -20,7 +22,9 @@ pub(super) fn missing_dir_patterns<'a>(
         !declared.pattern.starts_with('!')
             && !crate::glob_validation::escapes_project_root(&declared.pattern)
             && fallow_types::workspace::workspace_pattern_literal_dir(&declared.pattern)
-                .is_some_and(|dir| !root.join(dir).exists())
+                .is_some_and(|dir| {
+                    crate::may_probe_project_path(root, Path::new(&dir)) && !root.join(dir).exists()
+                })
     })
 }
 

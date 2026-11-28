@@ -710,3 +710,46 @@ fn a_member_dir_link_to_another_dir_inside_the_root_loads() {
     let names: Vec<&str> = workspaces.iter().map(|ws| ws.name.as_str()).collect();
     assert_eq!(names, vec!["x"], "{diagnostics:?}");
 }
+
+/// A pattern directory behind a link out of the project counts as present,
+/// whether the link target exists or not. A link inside the project keeps
+/// the plain check.
+#[cfg(unix)]
+#[test]
+fn pattern_dir_behind_a_link_out_of_the_project_is_never_missing() {
+    for (link_target, target_exists, missing) in [
+        ("../outdir", true, false),
+        ("../outdir", false, false),
+        ("real", false, true),
+    ] {
+        let sandbox = tempfile::tempdir().expect("create temp dir");
+        let root = sandbox.path().join("project");
+        std::fs::create_dir_all(root.join("real")).unwrap();
+        std::fs::create_dir_all(sandbox.path().join("outdir")).unwrap();
+        if target_exists {
+            std::fs::create_dir_all(sandbox.path().join("outdir/pkg")).unwrap();
+        }
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"name":"root","workspaces":["linkdir/pkg/*"]}"#,
+        )
+        .unwrap();
+        std::os::unix::fs::symlink(link_target, root.join("linkdir")).unwrap();
+
+        let (_, diagnostics) =
+            discover_workspaces_with_diagnostics(&root, &crate::IgnorePatternSet::empty())
+                .expect("valid root");
+
+        let reported =
+            !diagnostics_of_kind(&diagnostics, "workspace-pattern-dir-missing").is_empty();
+        assert_eq!(
+            reported, missing,
+            "{link_target} {target_exists}: {diagnostics:?}"
+        );
+        assert_eq!(
+            has_missing_workspace_pattern_dirs(&root, &[]),
+            missing,
+            "{link_target} {target_exists}"
+        );
+    }
+}

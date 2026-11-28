@@ -112,6 +112,13 @@ pub fn is_project_file(root: &Path, path: &Path) -> bool {
     path.is_file() && is_inside_scope(root, path)
 }
 
+/// [`is_project_file`] for one candidate of a probe. A missing candidate
+/// costs one `lstat` call. A candidate that resolves outside the scope
+/// counts as missing, whether its target exists or not.
+pub fn is_probed_project_file(root: &Path, path: &Path) -> bool {
+    path.symlink_metadata().is_ok() && is_inside_scope(root, path) && path.is_file()
+}
+
 /// The bounded reads of one scan of many candidate files under `root`, such
 /// as the hook scan. The read scope base of `root` and its resolved form are
 /// found once, so a missing candidate costs one `lstat` call. Each read gives

@@ -97,16 +97,18 @@ fn available_pack_path(
     let rel_path = pack_relative_path(&args.dir, pack_name)
         .map_err(|message| emit_input_error(&message, ctx.output))?;
     let abs_path = ctx.root.join(&rel_path);
-    if abs_path.exists() {
-        return Err(emit_input_error(
-            &format!("rule-pack file already exists: {}", rel_path.display()),
-            ctx.output,
-        ));
-    }
+    // The link check comes first: the exists check follows a link out of the
+    // project, so its answer would depend on the link target.
     if let Some(link) = fallow_types::path_guard::outside_link(ctx.root, &abs_path) {
         let link = link.strip_prefix(ctx.root).unwrap_or(&link);
         return Err(emit_input_error(
             &refusal_message(&rel_path.display().to_string(), &link.display().to_string()),
+            ctx.output,
+        ));
+    }
+    if abs_path.exists() {
+        return Err(emit_input_error(
+            &format!("rule-pack file already exists: {}", rel_path.display()),
             ctx.output,
         ));
     }

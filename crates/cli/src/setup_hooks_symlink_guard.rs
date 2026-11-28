@@ -24,6 +24,13 @@ pub fn refusal_message(path: &str, link: &str) -> String {
     format!("Refusing to change {path}: {link} {OUTSIDE_LINK}; {OUTSIDE_LINK_REMEDY}.")
 }
 
+/// The error text for a command that refuses to check `path`, a path that
+/// it reads or tests but does not write, because of `link`. Both are
+/// display paths.
+pub fn check_refusal_message(path: &str, link: &str) -> String {
+    format!("Refusing to check {path}: {link} {OUTSIDE_LINK}; {OUTSIDE_LINK_REMEDY}.")
+}
+
 /// A planned file and the first symlink on the way to it that resolves
 /// outside the project root.
 #[derive(Debug, PartialEq, Eq)]

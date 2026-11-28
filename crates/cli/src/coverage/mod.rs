@@ -1706,6 +1706,13 @@ fn script_invokes_vite_app(script: &str) -> bool {
 }
 
 fn detect_node_entry_path(root: &Path, package_json: Option<&PackageJson>) -> String {
+    // The scope check comes before the probe, so a path out of the project
+    // is skipped whether its file exists or not.
+    let is_project_file = |relative: &Path| {
+        fallow_config::may_probe_project_path(root, relative)
+            && fallow_types::read_guard::is_inside_root(root, relative)
+            && root.join(relative).is_file()
+    };
     for candidate in [
         "src/index.ts",
         "src/server.ts",
@@ -1714,7 +1721,7 @@ fn detect_node_entry_path(root: &Path, package_json: Option<&PackageJson>) -> St
         "index.ts",
         "server.ts",
     ] {
-        if root.join(candidate).is_file() {
+        if is_project_file(Path::new(candidate)) {
             return candidate.to_owned();
         }
     }
@@ -1722,7 +1729,7 @@ fn detect_node_entry_path(root: &Path, package_json: Option<&PackageJson>) -> St
     if let Some(package_json) = package_json {
         for entry in package_json.entry_points() {
             let normalized = entry.trim_start_matches("./");
-            if root.join(normalized).is_file() {
+            if is_project_file(Path::new(normalized)) {
                 return path_to_json_string(Path::new(normalized));
             }
         }

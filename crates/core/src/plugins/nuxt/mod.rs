@@ -543,11 +543,11 @@ fn add_content_component_entries(
     }
 }
 
-/// Whether a directory holds a Nuxt config, which is what makes it a layer.
-fn has_layer_config(dir: &Path) -> bool {
+/// Whether `dir` holds a Nuxt config inside the read scope of `root`: that makes it a layer.
+fn has_layer_config(root: &Path, dir: &Path) -> bool {
     LAYER_CONFIG_FILES
         .iter()
-        .any(|file| dir.join(file).is_file())
+        .any(|file| project_read::is_probed_project_file(root, &dir.join(file)))
 }
 
 /// Resolve the local directories named in `extends` to root-relative paths.
@@ -564,7 +564,7 @@ fn local_layer_dirs(
             continue;
         };
         let dir = dir.trim_end_matches('/').to_string();
-        if !dir.is_empty() && !dirs.contains(&dir) && has_layer_config(&root.join(&dir)) {
+        if !dir.is_empty() && !dirs.contains(&dir) && has_layer_config(root, &root.join(&dir)) {
             dirs.push(dir);
         }
     }
@@ -581,7 +581,7 @@ fn auto_registered_layer_dirs(root: &Path) -> Vec<String> {
     let mut dirs: Vec<String> = entries
         .flatten()
         .filter(|entry| entry.file_type().is_ok_and(|file_type| file_type.is_dir()))
-        .filter(|entry| has_layer_config(&entry.path()))
+        .filter(|entry| has_layer_config(root, &entry.path()))
         .filter_map(|entry| entry.file_name().to_str().map(str::to_string))
         .map(|name| format!("{AUTO_LAYERS_DIR}/{name}"))
         .collect();
@@ -674,7 +674,7 @@ pub fn outside_layer_roots(root: &Path) -> Vec<PathBuf> {
                     continue;
                 }
                 let layer = config_parser::lexical_normalize(&dir.join(&entry));
-                if seen.contains(&layer) || !has_layer_config(&layer) {
+                if seen.contains(&layer) || !has_layer_config(root, &layer) {
                     continue;
                 }
                 seen.push(layer.clone());

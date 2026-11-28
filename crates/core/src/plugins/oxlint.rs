@@ -408,10 +408,14 @@ fn credit_config_specifier(
     specifier: &str,
 ) {
     if is_local_specifier(specifier) {
-        let path = resolve_local_module_file(
-            root,
-            resolve_config_relative_path(config_path, root, specifier),
-        );
+        let path = resolve_config_relative_path(config_path, root, specifier);
+        // A plugin path out of the project stays as written. A probe would
+        // show whether a file there exists.
+        let path = if fallow_config::may_probe_project_path(root, &path) {
+            resolve_local_module_file(root, path)
+        } else {
+            path
+        };
         // Oxlint loads the default export of a local plugin file (issue #3871).
         if let Ok(relative) = path.strip_prefix(root) {
             result.push_entry_export_credit(
@@ -1132,6 +1136,58 @@ mod tests {
                 .referenced_dependencies
                 .contains(&"./local.json".to_string()),
             "local path must not appear in referenced_dependencies"
+        );
+    }
+
+    /// A local plugin path out of the project is not probed: it stays as
+    /// written, whether the file exists or not. The entry point step then
+    /// drops it.
+    #[test]
+    fn local_js_plugin_out_of_the_project_is_not_a_setup_file() {
+        let sandbox = tempfile::tempdir().expect("tempdir");
+        let root = sandbox.path().join("project");
+        write_file(
+            &sandbox.path().join("other/plugin.js"),
+            "export default {};",
+        );
+        std::fs::create_dir_all(&root).expect("create root");
+        let source = r#"{ "jsPlugins": ["../other/plugin", "../other/missing"] }"#;
+        let config_path = root.join(".oxlintrc.json");
+        write_file(&config_path, source);
+        let result = OxlintPlugin.resolve_config(&config_path, source, &root);
+        assert_eq!(
+            result.setup_files,
+            [
+                sandbox.path().join("other/plugin"),
+                sandbox.path().join("other/missing")
+            ]
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn local_js_plugin_behind_a_link_out_of_the_project_is_not_a_setup_file() {
+        let sandbox = tempfile::tempdir().expect("tempdir");
+        let root = sandbox.path().join("project");
+        write_file(
+            &sandbox.path().join("other/plugin.js"),
+            "export default {};",
+        );
+        write_file(&root.join("plugins/local.js"), "export default {};");
+        std::os::unix::fs::symlink(sandbox.path().join("other"), root.join("linked"))
+            .expect("link");
+        let source =
+            r#"{ "jsPlugins": ["./linked/plugin", "./linked/missing", "./plugins/local"] }"#;
+        let config_path = root.join(".oxlintrc.json");
+        write_file(&config_path, source);
+        let result = OxlintPlugin.resolve_config(&config_path, source, &root);
+        assert_eq!(
+            result.setup_files,
+            [
+                root.join("linked/plugin"),
+                root.join("linked/missing"),
+                root.join("plugins/local.js")
+            ]
         );
     }
 }

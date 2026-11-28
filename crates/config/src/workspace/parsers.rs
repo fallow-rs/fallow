@@ -199,9 +199,7 @@ pub fn parse_tsconfig_root_dir(root: &Path) -> Option<String> {
 /// Expand a workspace glob pattern to matching directories.
 ///
 /// Returns `(original_path, canonical_path)` tuples so callers can skip redundant
-/// `canonicalize()` calls. Only directories containing a `package.json` are
-/// canonicalized; this avoids expensive syscalls on the many non-workspace
-/// directories that globs like `packages/*` or `**` can match.
+/// `canonicalize()` calls.
 ///
 /// `canonical_root` is pre-computed to avoid repeated `canonicalize()` syscalls.
 ///
@@ -294,6 +292,10 @@ struct GlobbedWorkspaceContext<'a, 'b> {
 /// Process one non-recursive glob match: keep package directories, recover named
 /// packages under a bare grouping directory, or emit a no-package.json
 /// diagnostic. See issue #842 for the recovery path.
+///
+/// A match that does not resolve inside the project root is skipped before
+/// a probe of its content, so a match behind a link out of the project gives
+/// no diagnostic and no recovered package.
 fn collect_globbed_workspace_dir(path: PathBuf, ctx: &mut GlobbedWorkspaceContext<'_, '_>) {
     if !path.is_dir() {
         return;
@@ -301,13 +303,14 @@ fn collect_globbed_workspace_dir(path: PathBuf, ctx: &mut GlobbedWorkspaceContex
     if path.components().any(|c| c.as_os_str() == "node_modules") {
         return;
     }
+    let Some(cp) = dunce::canonicalize(&path)
+        .ok()
+        .filter(|cp| cp.starts_with(ctx.canonical_root))
+    else {
+        return;
+    };
     if dir_has_package_manifest(&path) {
-        if let Some(cp) = dunce::canonicalize(&path)
-            .ok()
-            .filter(|cp| cp.starts_with(ctx.canonical_root))
-        {
-            ctx.results.push((path, cp));
-        }
+        ctx.results.push((path, cp));
         return;
     }
     let recovered = recover_nested_packages(&path, ctx.canonical_root, ctx.ignore_patterns);
@@ -1590,6 +1593,36 @@ mod tests {
                 "packages/b/to-a"
             ]
         );
+    }
+
+    /// A glob match behind a link out of the project gives no diagnostic
+    /// and no recovered package, so the output does not depend on what the
+    /// link target holds.
+    #[cfg(unix)]
+    #[test]
+    fn expand_workspace_glob_skips_a_match_behind_a_link_out_of_the_project() {
+        let base = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let root = base.path();
+        std::fs::create_dir_all(outside.path().join("bare")).unwrap();
+        write_member(outside.path(), "group/pkg");
+        std::fs::create_dir_all(root.join("vendor")).unwrap();
+        std::os::unix::fs::symlink(outside.path(), root.join("vendor/linked")).unwrap();
+
+        let canonical_root = dunce::canonicalize(root).unwrap();
+        for pattern in ["vendor/*", "vendor/linked/*"] {
+            let mut diagnostics = Vec::new();
+            let results = expand_workspace_glob_with_diagnostics(
+                root,
+                pattern,
+                pattern,
+                &canonical_root,
+                &crate::IgnorePatternSet::empty(),
+                &mut diagnostics,
+            );
+            assert!(results.is_empty(), "{pattern}: {results:?}");
+            assert!(diagnostics.is_empty(), "{pattern}: {diagnostics:?}");
+        }
     }
 
     #[test]

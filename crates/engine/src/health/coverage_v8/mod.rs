@@ -148,7 +148,8 @@ pub(super) fn load_v8_coverage_map(
             let Some(generated) = mapped::GeneratedScript::parse(entry) else {
                 continue;
             };
-            for (source_index, source) in generated.source_paths(&script.url, entry.url.as_deref())
+            for (source_index, source) in
+                generated.source_paths(&script.url, entry.url.as_deref(), scope.project_root)
             {
                 if let Some(path) = project_path(source, scope) {
                     views_by_file

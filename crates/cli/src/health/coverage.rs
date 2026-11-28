@@ -1054,9 +1054,10 @@ fn remap_script_with_source_map(
     let mut remapped = Vec::new();
     let mut residual_functions = Vec::new();
 
-    let base_dir = source_map_base_dir(&script.url, entry.url.as_deref());
+    let base = source_map_base_dir(&script.url, entry.url.as_deref());
+    let resolve = |source: &str| resolve_original_source(source, base.as_deref(), Some(root));
     for function in &script.functions {
-        match remap_function(function, &sourcemap, &positions, base_dir.as_deref()) {
+        match remap_function(function, &sourcemap, &positions, &resolve) {
             Some(mapped) => remapped.push(mapped),
             None => residual_functions.push(function.clone()),
         }
@@ -1193,12 +1194,11 @@ fn remap_function(
     function: &fallow_v8_coverage::FunctionCoverage,
     sourcemap: &SourceMap,
     positions: &GeneratedPositionLookup<'_>,
-    base_dir: Option<&Path>,
+    resolve_source: &dyn Fn(&str) -> Option<PathBuf>,
 ) -> Option<RemappedFunction> {
     let outer = function.ranges.first().copied()?;
     let start_lookup = positions.original_position_for_offset(sourcemap, outer.start_offset)?;
-    let resolved_path = resolve_original_source(sourcemap.source(start_lookup.source), base_dir)?;
-    let canonical_path = dunce::canonicalize(&resolved_path).unwrap_or(resolved_path);
+    let path = resolve_source(sourcemap.source(start_lookup.source))?;
     let end_lookup = positions
         .original_position_for_offset(sourcemap, outer.end_offset)
         .filter(|lookup| lookup.source == start_lookup.source);
@@ -1217,7 +1217,7 @@ fn remap_function(
         .unwrap_or_else(|| "(anonymous)".to_owned());
 
     Some(RemappedFunction {
-        path: canonical_path,
+        path: dunce::canonicalize(&path).unwrap_or(path),
         name,
         decl: Location {
             start: Position {

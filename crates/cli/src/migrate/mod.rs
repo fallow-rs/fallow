@@ -19,7 +19,7 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use crate::exit_codes::exit_invalid_input;
-use crate::setup_hooks::symlink_guard::refusal_message;
+use crate::setup_hooks::symlink_guard::{check_refusal_message, refusal_message};
 use jscpd::migrate_jscpd;
 use jsonc::generate_jsonc;
 use knip::migrate_knip;
@@ -177,7 +177,17 @@ fn reject_existing_fallow_config(root: &Path) -> Option<ExitCode> {
         "fallow.toml",
         ".fallow.toml",
     ];
+    // The link check comes before the exists check, so a link out of the
+    // project gets the same answer whether its target exists or not.
     for name in &existing_names {
+        if let Some(link) = fallow_types::path_guard::outside_link(root, &root.join(name)) {
+            let link = link.strip_prefix(root).unwrap_or(&link);
+            eprintln!(
+                "Error: {}",
+                check_refusal_message(name, &link.display().to_string())
+            );
+            return Some(exit_invalid_input());
+        }
         if root.join(name).exists() {
             eprintln!("Error: {name} already exists. Remove it first or use --dry-run to preview.");
             return Some(exit_invalid_input());

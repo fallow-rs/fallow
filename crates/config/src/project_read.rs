@@ -299,6 +299,26 @@ pub fn absolute_path_text_inside(path: &Path, canonical_base: &Path, base_as_giv
     normalized.starts_with(canonical_base) || given.is_ok_and(|given| normalized.starts_with(given))
 }
 
+/// Whether a probe of `path` stays inside the read scope of the project
+/// root `root` (see [`project_scope_base`]). A relative `path` is taken
+/// relative to the root.
+///
+/// The check runs before any probe of `path`. An absolute `path` must name
+/// an entry below the scope base by its text. Then no part of `path` that
+/// exists may resolve outside the scope base. So a probe of `path`, or of a
+/// missing file below it, never follows a link out of the scope. A path
+/// that fails the check gets the same answer whether its target exists or
+/// not.
+#[must_use]
+pub fn may_probe_project_path(root: &Path, path: &Path) -> bool {
+    let Ok(canonical_root) = dunce::canonicalize(root) else {
+        return false;
+    };
+    let canonical_base = project_scope_base(root);
+    let given = base_as_given(root, &canonical_root, &canonical_base);
+    project_path_entry(&canonical_base, &given, &canonical_root, path) != ProjectEntry::Outside
+}
+
 /// Whether `path` starts with two separators, or with a Windows prefix
 /// other than a plain drive letter.
 fn is_share_or_device_text(path: &Path) -> bool {
