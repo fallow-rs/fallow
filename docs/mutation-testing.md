@@ -2185,9 +2185,12 @@ A test file T stays out of the dry run only when each of these holds:
      key, and each binding that changed is named by no module code and by no
      function that T entered. A new binding must not take a name that the
      recorded text used, because it would hide a global.
-4. No mutant of the run is outside the function bodies of a file that T
-   loaded, in a function that T entered, or in a file without probes that T
-   reaches.
+4. No mutant of the run is in module code of a file that T loaded, in a
+   function that T entered, or in a file without probes that T reaches. A
+   mutant in a pure variable declaration counts only when module code or a
+   function that T entered names the variable: T runs the declaration when
+   it loads the module, but no code of T reads the value. A dropped file then
+   no longer counts as a covering test of that mutant.
 
 Each other case keeps T. With an equal environment, equal module code of
 each loaded file, equal entered functions and equal values of each name that
@@ -2225,7 +2228,8 @@ file: `no-record`,
 `mutant-in-entered-function`, `mutant-in-file-without-probes`), `recorded`
 (the test files whose record the run wrote), and `violations` (each
 `test_file` and `mutant_id` of a check run where a dropped file covers a
-mutant).
+mutant; for a mutant that runs when its module loads, where a dropped file
+kills it).
 
 The human report adds a line, for example `Reach selection: left out the
 dry run of 12 of 40 test files.`

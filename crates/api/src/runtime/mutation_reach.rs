@@ -158,14 +158,27 @@ pub(super) fn finish(
     Some(output)
 }
 
-/// Each mutant that a test of a `dropped` file covers, sorted.
+/// Each mutant that a test of a `dropped` file covers, sorted. For a static
+/// mutant, each mutant that a test of a `dropped` file kills.
 fn violations(dropped: &[String], outcome: &ScheduleOutcome) -> Vec<MutationReachViolation> {
     let dropped: FxHashSet<&str> = dropped.iter().map(String::as_str).collect();
     let mut violations: Vec<MutationReachViolation> = outcome
         .results
         .iter()
         .flat_map(|(mutant_id, result)| {
-            result.covering_tests.iter().filter_map(|test| {
+            // A static mutant runs in each test file that loads its module.
+            // A dropped file covers it then, but only a kill shows that the
+            // file can observe it.
+            let tests: Vec<&String> = if result.static_mutant {
+                result
+                    .killed_by
+                    .iter()
+                    .chain(&result.killing_tests)
+                    .collect()
+            } else {
+                result.covering_tests.iter().collect()
+            };
+            tests.into_iter().filter_map(|test| {
                 let file = outcome.test_files.get(test)?;
                 dropped
                     .contains(file.as_str())

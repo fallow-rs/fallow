@@ -31,9 +31,11 @@
 //!    function unchanged under its key, and no changed binding that module
 //!    code or an entered function names). A file without probes must be
 //!    equal.
-//! 4. No mutant of the run is outside the function bodies of a file that T
-//!    loaded, in a function that T entered, or in a file without probes that
-//!    T reaches.
+//! 4. No mutant of the run is in module code of a file that T loaded, in a
+//!    function that T entered, or in a file without probes that T reaches. A
+//!    mutant in a pure variable declarator counts only when module code or a
+//!    function that T entered names the variable: T runs the declarator when
+//!    it loads the module, but no code of T reads the value.
 //!
 //! Each other case keeps T. With an equal environment, equal module code of
 //! each loaded file, equal entered functions and equal values of each name
@@ -368,6 +370,23 @@ fn same_run(
     Ok(())
 }
 
+/// True when a test file that loaded a file with `outline` and entered the
+/// `entered` functions of it can observe a mutant at `span` outside each
+/// function body. A mutant in a pure variable declarator runs when the module
+/// loads, and only code that reads the name sees its value: module code that
+/// names it, or an entered function that names it. Each other mutant outside
+/// a function body runs as module code.
+fn observes_declarator(outline: &Outline, entered: &[&OutlineBody], span: (u32, u32)) -> bool {
+    let Some(name) = outline.declarator_of(span) else {
+        return true;
+    };
+    let named = |list: &[String]| {
+        list.binary_search_by(|item| item.as_str().cmp(name))
+            .is_ok()
+    };
+    named(&outline.skeleton_refs) || entered.iter().any(|body| named(&body.refs))
+}
+
 /// The probe ids of one file in a record: the module probe and the entered
 /// ordinals.
 #[derive(Debug, Default)]
@@ -494,7 +513,10 @@ impl ReachStore {
         let entered_keys: BTreeSet<&str> = entered.iter().map(|body| body.key.as_str()).collect();
         for &span in mutants {
             match outline.body_of(span) {
-                None => return Err(KeepReason::MutantInLoadedCode),
+                None if observes_declarator(&outline, &entered, span) => {
+                    return Err(KeepReason::MutantInLoadedCode);
+                }
+                None => {}
                 Some(ordinal) if entered_keys.contains(outline.bodies[ordinal].key.as_str()) => {
                     return Err(KeepReason::MutantInEnteredFunction);
                 }

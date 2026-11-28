@@ -420,3 +420,51 @@ fn a_new_import_name_from_a_loaded_module_drops_the_file() {
     run.edit(INDEX, "import { a, b } from './a';\nexport * from './a';\nexport * from './b';\nexport const unused = () => a(1) + b(1);\n");
     assert_eq!(decide(&store, &run, &[]), Ok(()));
 }
+
+const B_WITH_KINDS: &str = "const KINDS = ['bar'];\nfunction isBar(kind: string) { return KINDS.includes(kind); }\nexport const b = (x: number): number => x * 2;\nexport function c() { return isBar('x') ? 1 : 0; }\n";
+
+#[test]
+fn a_mutant_in_a_constant_that_no_entered_function_reads_drops_the_file() {
+    let mut run = Run::new();
+    run.edit(B, B_WITH_KINDS);
+    // The file loaded the module and entered `b` (ordinal 1) only.
+    let probes = share(
+        &[module_probe(&probe_key(B))],
+        &[function_probe(&probe_key(B), 1)],
+    );
+    let store = recorded(&run, &probes, &[]);
+    run.mutant(B, "'bar'");
+    assert_eq!(decide(&store, &run, &[]), Ok(()));
+}
+
+#[test]
+fn a_mutant_in_a_constant_that_an_entered_function_reads_keeps_the_file() {
+    let mut run = Run::new();
+    run.edit(B, B_WITH_KINDS);
+    // The file entered `isBar` (ordinal 0) and `b` (ordinal 1).
+    let probes = share(
+        &[module_probe(&probe_key(B))],
+        &[
+            function_probe(&probe_key(B), 0),
+            function_probe(&probe_key(B), 1),
+        ],
+    );
+    let store = recorded(&run, &probes, &[]);
+    run.mutant(B, "'bar'");
+    assert_eq!(
+        decide(&store, &run, &[]),
+        Err(KeepReason::MutantInLoadedCode)
+    );
+}
+
+#[test]
+fn a_mutant_in_a_constant_that_module_code_reads_keeps_the_file() {
+    let mut run = Run::new();
+    run.edit(B, "const KINDS = ['bar'];\nregister(KINDS);\nexport const b = (x: number): number => x * 2;\n");
+    let store = recorded(&run, &calls_b(), &[]);
+    run.mutant(B, "'bar'");
+    assert_eq!(
+        decide(&store, &run, &[]),
+        Err(KeepReason::MutantInLoadedCode)
+    );
+}

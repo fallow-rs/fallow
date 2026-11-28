@@ -67,6 +67,11 @@ pub struct Outline {
     pub skeleton_refs: Vec<String>,
     /// Each name that the text references, sorted.
     pub refs: Vec<String>,
+    /// The span of each declarator of a pure variable declaration, with its
+    /// name, in source order. A mutant in such a declarator runs when the
+    /// module loads, and only code that reads the name can observe it.
+    #[serde(default)]
+    pub declarators: Vec<(String, (u32, u32))>,
 }
 
 impl Outline {
@@ -79,6 +84,14 @@ impl Outline {
             .checked_sub(1)?;
         let body = self.bodies.get(index)?;
         (span.1 <= body.span.1).then_some(index)
+    }
+
+    /// The name of the pure variable declarator that holds `span`.
+    pub fn declarator_of(&self, span: (u32, u32)) -> Option<&str> {
+        self.declarators
+            .iter()
+            .find(|(_, declarator)| declarator.0 <= span.0 && span.1 <= declarator.1)
+            .map(|(name, _)| name.as_str())
     }
 
     /// The ordinal of the function with `key`.
@@ -381,6 +394,7 @@ pub(crate) fn outline(program: &Program<'_>, source: &str, bodies: &[Body]) -> O
     let mut skeleton = Xxh3::new();
     let mut skeleton_refs = BTreeSet::new();
     let mut bindings = BTreeMap::new();
+    let mut pure_declarators = Vec::new();
     for statement in &program.body {
         let span = statement.span();
         let first = bodies.partition_point(|body| body.start < span.start);
@@ -429,7 +443,8 @@ pub(crate) fn outline(program: &Program<'_>, source: &str, bodies: &[Body]) -> O
                     hasher.update(kind.as_bytes());
                     hasher.update(b"\0");
                     masker.hash(declarator, &body_spans[from..to], &mut hasher);
-                    bindings.insert(name, hasher.digest());
+                    bindings.insert(name.clone(), hasher.digest());
+                    pure_declarators.push((name, declarator));
                 }
             }
             Group::Code { name } => {
@@ -473,5 +488,6 @@ pub(crate) fn outline(program: &Program<'_>, source: &str, bodies: &[Body]) -> O
         bindings,
         skeleton_refs: skeleton_refs.into_iter().collect(),
         refs: all_refs.into_iter().collect(),
+        declarators: pure_declarators,
     }
 }

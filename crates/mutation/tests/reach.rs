@@ -351,3 +351,18 @@ fn a_function_lists_the_names_that_it_references() {
     assert!(outline.skeleton_refs.contains(&"f".to_owned()));
     assert!(!outline.skeleton_refs.contains(&"LIMIT".to_owned()));
 }
+
+#[test]
+fn a_pure_declarator_names_its_span() {
+    let source =
+        "const KINDS = ['bar'];\nexport const LIMIT = 2;\nfunction f() { return KINDS; }\n";
+    let outline = ts_outline(source);
+    let kinds = source.find("'bar'").expect("literal") as u32;
+    assert_eq!(outline.declarator_of((kinds, kinds + 5)), Some("KINDS"));
+    let limit = source.find('2').expect("literal") as u32;
+    assert_eq!(
+        outline.declarator_of((limit, limit + 1)),
+        None,
+        "an export is module code"
+    );
+}
