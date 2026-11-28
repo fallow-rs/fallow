@@ -168,10 +168,13 @@ fn run_sequence_with(
     }
     let repeat = project.run(true);
     let cold = project.run(false);
-    if repeat.dry_run_hits != TEST_FILES || repeat.observation != cold.observation {
+    // A file that the reach record leaves out needs no dry run, so it counts
+    // with the stored dry runs.
+    let reused = repeat.dry_run_hits + repeat.reach_dropped;
+    if reused != TEST_FILES || repeat.observation != cold.observation {
         return Err(format!(
-            "{label}: a warm run with no edit does not reuse the dry run of each test file, or differs from the cache-free run\n  runner: {runner:?}\n  steps: {done:?}\n  dry-run hits: {} of {TEST_FILES}\n  warm: {:?}\n  cold: {:?}",
-            repeat.dry_run_hits, repeat.observation, cold.observation
+            "{label}: a warm run with no edit does not reuse the dry run of each test file, or differs from the cache-free run\n  runner: {runner:?}\n  steps: {done:?}\n  stored or dropped dry runs: {} of {TEST_FILES}\n  warm: {:?}\n  cold: {:?}",
+            reused, repeat.observation, cold.observation
         ));
     }
     Ok(())

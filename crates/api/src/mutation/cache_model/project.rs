@@ -87,6 +87,8 @@ pub struct Run {
     pub stored: usize,
     /// The test files whose dry-run facts came from the cache.
     pub dry_run_hits: usize,
+    /// The test files that the reach record left out of the dry run.
+    pub reach_dropped: usize,
 }
 
 /// A template project in a temporary directory.
@@ -139,6 +141,12 @@ impl Project {
         let (hits, stored, dry_run_hits) = report.cache.as_ref().map_or((0, 0, 0), |cache| {
             (cache.hits, cache.stored, cache.dry_run_hits)
         });
+        let reach_dropped = report
+            .cache
+            .as_ref()
+            .and_then(|cache| cache.reach_selection.as_ref())
+            .filter(|reach| matches!(reach.mode, fallow_output::MutationReachSelectionMode::On))
+            .map_or(0, |reach| reach.dropped);
         let mut observation: Observation = report
             .mutants
             .into_iter()
@@ -160,6 +168,7 @@ impl Project {
             hits,
             stored,
             dry_run_hits,
+            reach_dropped,
         }
     }
 }
