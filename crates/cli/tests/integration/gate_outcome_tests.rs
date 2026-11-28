@@ -1842,7 +1842,8 @@ fn a_narrowed_run_with_no_findings_still_points_at_the_unscoped_recheck() {
         "the pointer names the command whose baseline it is: {command}"
     );
     assert!(
-        command.ends_with("baseline.json"),
+        // A path with a shell character, such as a Windows path, is quoted.
+        command.trim_end_matches('\'').ends_with("baseline.json"),
         "the pointer names the loaded baseline, root-relative like every other \
          path on the envelope: {command}"
     );
