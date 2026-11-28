@@ -262,7 +262,7 @@ fn run_snippet(
     stop_at: Instant,
 ) -> Result<(bool, String), Stop> {
     let request = host.request;
-    process.send(start, stop_at, request)?;
+    process.send(start)?;
     loop {
         let message = process.receive(stop_at, request)?;
         if !process.is_ready() && !matches!(message, WorkerMessage::Ready { .. }) {
@@ -281,14 +281,14 @@ fn run_snippet(
                 max_output_bytes,
             } => {
                 let reply = host.call(&tool, params, max_output_bytes);
-                process.send(&reply, stop_at, request)?;
+                process.send(&reply)?;
             }
             WorkerMessage::Batch {
                 calls,
                 element_output_bytes,
             } => {
                 let reply = host.batch(calls, element_output_bytes);
-                process.send(&reply, stop_at, request)?;
+                process.send(&reply)?;
             }
         }
     }
@@ -836,11 +836,13 @@ mod tests {
         let process = worker.take().expect("spawn");
         let reply: Result<String, String> = Ok("x".repeat(4_000_000));
         let started = Instant::now();
-        let sent = process.send(&reply, started + Duration::from_millis(300), None);
-        assert_eq!(sent, Err(Stop::TimedOut));
+        process.send(&reply).expect("the reply is queued");
+        process.send(&reply).expect("the second reply is queued");
+        let answer = process.receive(started + Duration::from_millis(300), None);
+        assert!(matches!(answer, Err(Stop::TimedOut)));
         assert!(
             started.elapsed() < Duration::from_secs(2),
-            "the write ended after {:?}",
+            "the wait ended after {:?}",
             started.elapsed()
         );
     }

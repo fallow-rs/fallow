@@ -11,7 +11,7 @@ use std::ffi::OsString;
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::path::PathBuf;
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
-use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, TryRecvError};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
 use std::time::{Instant, SystemTime};
@@ -185,13 +185,13 @@ impl CodeModeWorker {
         let (message_sender, messages) = mpsc::channel();
         thread::spawn(move || read_messages(stdout, &message_sender));
         let (lines, line_receiver) = mpsc::channel::<Vec<u8>>();
-        let (written_sender, written) = mpsc::channel();
-        thread::spawn(move || write_lines(stdin, &line_receiver, &written_sender));
+        let (error_sender, write_errors) = mpsc::channel();
+        thread::spawn(move || write_lines(stdin, &line_receiver, &error_sender));
         Ok(WorkerProcess {
             child: Some(child),
             tree: Some(tree),
             lines: Some(lines),
-            written,
+            write_errors,
             messages,
             ready: false,
         })
@@ -282,7 +282,7 @@ pub(super) struct WorkerProcess {
     child: Option<Child>,
     tree: Option<ProcessTree>,
     lines: Option<Sender<Vec<u8>>>,
-    written: Receiver<Result<(), String>>,
+    write_errors: Receiver<String>,
     messages: Receiver<Result<WorkerMessage, String>>,
     /// Whether the process sent a [`WorkerMessage::Ready`] of this build.
     ready: bool,
@@ -300,15 +300,11 @@ impl WorkerProcess {
         self.child.as_ref().map(Child::id)
     }
 
-    /// Write one message line. The write runs on the writer thread, so a
-    /// process that stops reading cannot block the server past `stop_at` or
-    /// a cancel.
-    pub(super) fn send<T: Serialize>(
-        &self,
-        message: &T,
-        stop_at: Instant,
-        request: Option<&CancellationToken>,
-    ) -> Result<(), Stop> {
+    /// Queue one message line for the writer thread. The call does not wait
+    /// for the write: a process that stops reading holds only the writer
+    /// thread, and [`Self::receive`] still ends at `stop_at` or a cancel.
+    pub(super) fn send<T: Serialize>(&self, message: &T) -> Result<(), Stop> {
+        self.write_failure()?;
         let mut line = serde_json::to_vec(message)
             .map_err(|err| Stop::Failed(format!("failed to encode a code mode message: {err}")))?;
         line.push(b'\n');
@@ -318,15 +314,15 @@ impl WorkerProcess {
             .ok_or_else(|| Stop::Failed(ENDED_WITHOUT_RESULT.to_string()))?;
         lines
             .send(line)
-            .map_err(|_| Stop::Failed(ENDED_WITHOUT_RESULT.to_string()))?;
-        loop {
-            match self.written.recv_timeout(next_wait(stop_at, request)?) {
-                Ok(result) => return result.map_err(Stop::Failed),
-                Err(RecvTimeoutError::Timeout) => {}
-                Err(RecvTimeoutError::Disconnected) => {
-                    return Err(Stop::Failed(ENDED_WITHOUT_RESULT.to_string()));
-                }
-            }
+            .map_err(|_| Stop::Failed(ENDED_WITHOUT_RESULT.to_string()))
+    }
+
+    /// The error of a failed write, when the writer thread reported one.
+    fn write_failure(&self) -> Result<(), Stop> {
+        match self.write_errors.try_recv() {
+            Ok(error) => Err(Stop::Failed(error)),
+            Err(TryRecvError::Empty) => Ok(()),
+            Err(TryRecvError::Disconnected) => Err(Stop::Failed(ENDED_WITHOUT_RESULT.to_string())),
         }
     }
 
@@ -337,6 +333,7 @@ impl WorkerProcess {
         request: Option<&CancellationToken>,
     ) -> Result<WorkerMessage, Stop> {
         loop {
+            self.write_failure()?;
             match self.messages.recv_timeout(next_wait(stop_at, request)?) {
                 Ok(message) => return message.map_err(Stop::Failed),
                 Err(RecvTimeoutError::Timeout) => {}
@@ -410,25 +407,16 @@ fn log_cleanup_errors(cleanup: &ChildCleanup) {
     );
 }
 
-/// Write each line to the snippet process and report each result.
-fn write_lines(
-    mut stdin: ChildStdin,
-    lines: &Receiver<Vec<u8>>,
-    written: &Sender<Result<(), String>>,
-) {
+/// Write each line to the snippet process. Report the first failure and stop.
+fn write_lines(mut stdin: ChildStdin, lines: &Receiver<Vec<u8>>, errors: &Sender<String>) {
     for line in lines {
-        let result = stdin
-            .write_all(&line)
-            .and_then(|()| stdin.flush())
-            .map_err(|err| {
-                if err.kind() == io::ErrorKind::BrokenPipe {
-                    ENDED_WITHOUT_RESULT.to_string()
-                } else {
-                    format!("failed to write to the code mode snippet process: {err}")
-                }
-            });
-        let failed = result.is_err();
-        if written.send(result).is_err() || failed {
+        if let Err(err) = stdin.write_all(&line).and_then(|()| stdin.flush()) {
+            let error = if err.kind() == io::ErrorKind::BrokenPipe {
+                ENDED_WITHOUT_RESULT.to_string()
+            } else {
+                format!("failed to write to the code mode snippet process: {err}")
+            };
+            let _ = errors.send(error);
             return;
         }
     }
