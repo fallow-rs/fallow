@@ -6,7 +6,7 @@
 {
   "kind": "dead-code",
   "schema_version": 7,
-  "version": "3.50.0",
+  "version": "3.51.0",
   "elapsed_ms": 45,
   "total_issues": 12,
   "entry_points": {
@@ -166,7 +166,7 @@ When `--baseline` is used in combined output, the JSON includes a `baseline_delt
 {
   "kind": "dupes",
   "schema_version": 7,
-  "version": "3.50.0",
+  "version": "3.51.0",
   "elapsed_ms": 82,
   "total_clones": 15,
   "total_lines_duplicated": 230,
@@ -210,11 +210,11 @@ When running `fallow` with no subcommand (all analyses), the JSON output combine
 {
   "kind": "combined",
   "schema_version": 7,
-  "version": "3.50.0",
+  "version": "3.51.0",
   "elapsed_ms": 159,
   "check": {
     "schema_version": 7,
-    "version": "3.50.0",
+    "version": "3.51.0",
     "elapsed_ms": 45,
     "total_issues": 12,
     "unused_files": [],

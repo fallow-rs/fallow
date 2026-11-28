@@ -1,4 +1,0 @@
-### Fixed
-
-- **Symlink checks give the same answer on each machine.** fallow checks that a symlink in the project stays inside the project before it writes the cache through the link or reads a project file through it. The check looked only at where the link ends, so a link target that leaves the project and comes back through `..` passed only when the directory outside the project existed. fallow now follows a link target one step at a time and refuses the link at the first step that leaves the project. The note about a `.fallow` symlink that fallow does not use for the cache now names the link only, not its target.
-- **Write refusals name the given path, not the link target.** A refused `--save-baseline`, `--sarif-file` or other report path, and the warning about a baseline in the cache directory, named the place outside the project that a symlink leads to. These messages now name the given path and the symlink in the project only.

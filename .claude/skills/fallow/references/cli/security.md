@@ -91,7 +91,7 @@ fallow security --gate newly-reachable --changed-since origin/main
 {
   "kind": "security",
   "schema_version": "4",
-  "version": "3.50.0",
+  "version": "3.51.0",
   "elapsed_ms": 42,
   "config": {
     "rules": {
@@ -120,7 +120,7 @@ fallow security --gate newly-reachable --changed-since origin/main
 {
   "kind": "security",
   "schema_version": "4",
-  "version": "3.50.0",
+  "version": "3.51.0",
   "elapsed_ms": 42,
   "config": {
     "rules": {

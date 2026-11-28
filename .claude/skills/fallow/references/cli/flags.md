@@ -40,7 +40,7 @@ fallow flags --format json --quiet --workspace my-package
 ```json
 {
   "schema_version": 7,
-  "version": "3.50.0",
+  "version": "3.51.0",
   "elapsed_ms": 116,
   "feature_flags": [],
   "total_flags": 0

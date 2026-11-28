@@ -47,12 +47,12 @@ harness = false
 [dev-dependencies]
 criterion = { workspace = true }
 fallow-api = { workspace = true, features = ["testing"] }
-fallow-cli = { version = "3.50.0", path = "../cli" }
+fallow-cli = { version = "3.51.0", path = "../cli" }
 fallow-config = { workspace = true }
 fallow-engine = { workspace = true, features = ["testing"] }
 fallow-extract = { workspace = true }
 fallow-graph = { workspace = true }
-fallow-lsp = { version = "3.50.0", path = "../lsp" }
+fallow-lsp = { version = "3.51.0", path = "../lsp" }
 fallow-output = { workspace = true }
 fallow-types = { workspace = true }
 rayon = { workspace = true }
