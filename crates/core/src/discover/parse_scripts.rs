@@ -37,6 +37,10 @@ fn extract_script_file_refs(script: &str, context: CommandRefContext<'_>) -> Vec
 /// The body of a `$(...)` or backtick command substitution is scanned as a
 /// script of its own, because the shell runs it.
 ///
+/// Script calls are expanded within the bounds of the script parser. The
+/// expanded text counts against the expansion budget of `context.scripts`,
+/// which all calls with that catalog share.
+///
 /// The result marks the references that a script runtime runs as modules
 /// (`node scripts/build`). Only such a reference can name a directory with
 /// an index file.
@@ -156,6 +160,7 @@ fn collect_script_file_refs(
             Some(DeclaredScriptCall::Command(command)) => {
                 if depth.scripts < MAX_SCRIPT_INDIRECTION_DEPTH
                     && *expansions < MAX_SCRIPT_EXPANSIONS
+                    && context.scripts.take_expansion(command.len())
                 {
                     *expansions += 1;
                     collect_script_file_refs(&command, context, called, expansions, refs);
@@ -166,6 +171,7 @@ fn collect_script_file_refs(
                 for command in &commands {
                     if depth.scripts >= MAX_SCRIPT_INDIRECTION_DEPTH
                         || *expansions >= MAX_SCRIPT_EXPANSIONS
+                        || !context.scripts.take_expansion(command.command.len())
                     {
                         break;
                     }
@@ -646,6 +652,28 @@ mod tests {
         let scripts = catalog(&[("a", "npm run b -- x/a.ts"), ("b", "npm run a -- x/b.ts")]);
         let refs = extract_script_file_refs("npm run a -- x/c.ts", with_scripts(&scripts));
         assert!(refs.len() <= MAX_SCRIPT_EXPANSIONS * 3, "{refs:?}");
+    }
+
+    #[test]
+    fn scripts_of_one_catalog_share_one_expansion_budget() {
+        // Each call expands `fan` and its 50 calls of `leaf`: 2,500 refs.
+        // Without a shared budget, 200 calls give 500,000.
+        let leaf = "node scripts/s.js;".repeat(50);
+        let fan = vec!["npm run leaf -- y"; 50].join(";");
+        let scripts = catalog(&[("leaf", &leaf), ("fan", &fan)]);
+        let refs: usize = (0..200)
+            .map(|index| {
+                extract_script_file_refs(
+                    &format!("npm run fan -- x{index}"),
+                    with_scripts(&scripts),
+                )
+                .len()
+            })
+            .sum();
+        assert!(refs < 100_000, "{refs} refs");
+        let fresh = catalog(&[("leaf", &leaf)]);
+        let first = extract_script_file_refs("npm run leaf -- y", with_scripts(&fresh));
+        assert_eq!(first.len(), 50);
     }
 
     #[test]

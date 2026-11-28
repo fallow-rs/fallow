@@ -43,6 +43,16 @@ impl ExpansionBudget {
     }
 }
 
+impl super::ScriptCatalog {
+    /// Take `bytes` of expanded script text from the budget of this catalog.
+    /// Returns `false`, and takes nothing, when less is left. A reader that
+    /// expands script calls on its own takes from the same budget as the
+    /// script parser.
+    pub(crate) fn take_expansion(&self, bytes: usize) -> bool {
+        self.expansion_budget.take(bytes)
+    }
+}
+
 /// Bookkeeping for one top-level command while script indirection is followed.
 pub(super) struct ScriptExpansion {
     /// Script names on the current expansion path, for the cycle guard.
