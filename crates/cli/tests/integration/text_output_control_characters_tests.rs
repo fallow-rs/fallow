@@ -12,6 +12,14 @@
     clippy::expect_used,
     reason = "integration tests keep fixture setup concise"
 )]
+#![cfg_attr(
+    not(unix),
+    allow(
+        dead_code,
+        unused_imports,
+        reason = "most cases need file names that Windows cannot create"
+    )
+)]
 
 use std::path::Path;
 
