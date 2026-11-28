@@ -1,4 +1,5 @@
 use super::*;
+use regex::Regex;
 
 #[test]
 fn segment_regexes_split_on_the_native_separator() {

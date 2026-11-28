@@ -146,8 +146,11 @@ fn build_plugin_glob_meta<'a>(
 ) -> (PluginGlobIndex, Vec<CompiledEntryRule<'a>>) {
     let mut globs: Vec<(String, globset::Glob)> = Vec::new();
     let mut glob_meta: Vec<CompiledEntryRule<'a>> = Vec::new();
+    let mut excludes = crate::plugins::ExcludeCache::default();
     for (rule, pname) in plugin_result.unique_entry_patterns() {
-        if let Some((include, mut compiled)) = compile_entry_rule(rule, pname, plugin_result) {
+        if let Some((include, mut compiled)) =
+            compile_entry_rule(rule, pname, plugin_result, &mut excludes)
+        {
             compiled.production_excluded = compiled.role == EntryPointRole::Support
                 && production_skip.is_some_and(|names| names.contains(pname.as_str()));
             globs.push((rule.pattern.clone(), include));
@@ -167,9 +170,10 @@ fn build_plugin_glob_meta<'a>(
         let Ok(glob) = fallow_config::compile_path_glob(pattern) else {
             continue;
         };
-        let Some(path) = crate::plugins::CompiledPathRule::for_entry_rule(
+        let Some(path) = crate::plugins::CompiledPathRule::for_entry_rule_cached(
             &crate::plugins::PathRule::new(pattern.clone()),
             "support entry pattern",
+            &mut excludes,
         ) else {
             continue;
         };
@@ -481,6 +485,7 @@ fn compile_entry_rule<'a>(
     rule: &'a crate::plugins::PathRule,
     plugin_name: &'a str,
     plugin_result: &'a crate::plugins::AggregatedPluginResult,
+    excludes: &mut crate::plugins::ExcludeCache,
 ) -> Option<(globset::Glob, CompiledEntryRule<'a>)> {
     let include = match crate::plugins::entry_rule_glob(&rule.pattern) {
         Ok(glob) => glob,
@@ -497,7 +502,11 @@ fn compile_entry_rule<'a>(
     Some((
         include,
         CompiledEntryRule {
-            path: crate::plugins::CompiledPathRule::for_entry_rule(rule, "entry pattern")?,
+            path: crate::plugins::CompiledPathRule::for_entry_rule_cached(
+                rule,
+                "entry pattern",
+                excludes,
+            )?,
             plugin_name,
             role,
             production_excluded: false,
@@ -596,6 +605,32 @@ mod tests {
 
         assert_eq!(entries.test.len(), files.len());
         assert!(entries.runtime.is_empty());
+    }
+
+    #[test]
+    fn entry_rules_with_shared_excludes_compile_the_excludes_once() {
+        const RULES: usize = 300;
+        let mut plugin_result = AggregatedPluginResult::default();
+        let excludes: Vec<String> = (0..RULES)
+            .map(|index| format!("spec/x{index}.js"))
+            .collect();
+        for index in 0..RULES {
+            plugin_result.entry_patterns.push((
+                PathRule::new(format!("spec/i{index}.js")).with_excluded_globs(excludes.clone()),
+                "jasmine".to_string(),
+            ));
+        }
+
+        let start = std::time::Instant::now();
+        let (_, rules) = super::build_plugin_glob_meta(&plugin_result, None);
+        let elapsed = start.elapsed();
+
+        assert_eq!(rules.len(), RULES);
+        assert!(rules[0].path.matches("spec/i0.js"));
+        assert!(
+            elapsed < std::time::Duration::from_secs(3),
+            "{RULES} rules took {elapsed:?}"
+        );
     }
 
     #[test]

@@ -11,7 +11,6 @@ use fallow_config::{
     AutoImportRule, EntryPointRole, JsxImportSourceRule, PackageJson, UsedClassMemberRule,
 };
 use fallow_types::semantic::SemanticFrameworkContract;
-use regex::Regex;
 
 use entry_point_roles::builtin_entry_point_role;
 #[cfg(test)]
@@ -921,62 +920,6 @@ pub(crate) fn entry_rule_glob(pattern: &str) -> Result<globset::Glob, globset::E
         .build()
 }
 
-/// A compiled path rule matcher shared by entry-point and used-export matching.
-///
-/// Every glob accepts an empty alternative, such as `{,m}js`, because the
-/// rewrite of an extglob `?(m)` group gives one.
-#[derive(Debug, Clone)]
-pub(crate) struct CompiledPathRule {
-    include: globset::GlobMatcher,
-    exclude_globs: Vec<globset::GlobMatcher>,
-    exclude_regexes: Vec<Regex>,
-    exclude_segment_regexes: Vec<Regex>,
-}
-
-impl CompiledPathRule {
-    pub(crate) fn for_entry_rule(rule: &PathRule, rule_kind: &str) -> Option<Self> {
-        let compiled = entry_rule_glob(&rule.pattern).map_err(|err| err.to_string());
-        let include = match compiled.and_then(|glob| {
-            fallow_config::try_compile_matcher(&glob).map_err(|err| err.to_string())
-        }) {
-            Ok(matcher) => matcher,
-            Err(err) => {
-                tracing::warn!("invalid {rule_kind} '{}': {err}", rule.pattern);
-                return None;
-            }
-        };
-        Some(Self {
-            include,
-            exclude_globs: compile_excluded_globs(&rule.exclude_globs, rule_kind, &rule.pattern),
-            exclude_regexes: compile_excluded_regexes(
-                &rule.exclude_regexes,
-                rule_kind,
-                &rule.pattern,
-            ),
-            exclude_segment_regexes: compile_excluded_segment_regexes(
-                &rule.exclude_segment_regexes,
-                rule_kind,
-                &rule.pattern,
-            ),
-        })
-    }
-
-    pub(crate) fn for_used_export_rule(rule: &PathRule, rule_kind: &str) -> Option<Self> {
-        Self::for_entry_rule(rule, rule_kind)
-    }
-
-    #[must_use]
-    pub(crate) fn matches(&self, path: &str) -> bool {
-        self.include.is_match(path)
-            && !self.exclude_globs.iter().any(|glob| glob.is_match(path))
-            && !self
-                .exclude_regexes
-                .iter()
-                .any(|regex| regex.is_match(path))
-            && !matches_segment_regex(path, &self.exclude_segment_regexes)
-    }
-}
-
 fn prefix_workspace_pattern(pattern: &str, ws_prefix: &str) -> String {
     if pattern.starts_with(ws_prefix) || pattern.starts_with('/') {
         pattern.to_string()
@@ -1020,92 +963,6 @@ fn prefix_workspace_regex(pattern: &str, ws_prefix: &str) -> String {
     } else {
         format!("^{}/(?:{})", regex::escape(ws_prefix), pattern)
     }
-}
-
-fn compile_excluded_globs(
-    patterns: &[String],
-    rule_kind: &str,
-    rule_pattern: &str,
-) -> Vec<globset::GlobMatcher> {
-    patterns
-        .iter()
-        .filter_map(|pattern| {
-            match globset::GlobBuilder::new(pattern)
-                .literal_separator(true)
-                .empty_alternates(true)
-                .build()
-                .map_err(|err| err.to_string())
-                .and_then(|glob| {
-                    fallow_config::try_compile_matcher(&glob).map_err(|err| err.to_string())
-                }) {
-                Ok(matcher) => Some(matcher),
-                Err(err) => {
-                    tracing::warn!(
-                        "skipping invalid excluded glob '{}' for {} '{}': {err}",
-                        pattern,
-                        rule_kind,
-                        rule_pattern
-                    );
-                    None
-                }
-            }
-        })
-        .collect()
-}
-
-fn compile_excluded_regexes(
-    patterns: &[String],
-    rule_kind: &str,
-    rule_pattern: &str,
-) -> Vec<Regex> {
-    patterns
-        .iter()
-        .filter_map(
-            |pattern| match fallow_config::compile_config_regex(pattern) {
-                Ok(regex) => Some(regex),
-                Err(err) => {
-                    tracing::warn!(
-                        "skipping invalid excluded regex '{}' for {} '{}': {err}",
-                        pattern,
-                        rule_kind,
-                        rule_pattern
-                    );
-                    None
-                }
-            },
-        )
-        .collect()
-}
-
-fn compile_excluded_segment_regexes(
-    patterns: &[String],
-    rule_kind: &str,
-    rule_pattern: &str,
-) -> Vec<Regex> {
-    patterns
-        .iter()
-        .filter_map(
-            |pattern| match fallow_config::compile_config_regex(pattern) {
-                Ok(regex) => Some(regex),
-                Err(err) => {
-                    tracing::warn!(
-                        "skipping invalid excluded segment regex '{}' for {} '{}': {err}",
-                        pattern,
-                        rule_kind,
-                        rule_pattern
-                    );
-                    None
-                }
-            },
-        )
-        .collect()
-}
-
-/// Whether a segment of `path` matches one of `regexes`. The path can use the
-/// native separator: on Windows a caller can pass `src\pages\x.tsx`.
-fn matches_segment_regex(path: &str, regexes: &[Regex]) -> bool {
-    path.split(std::path::is_separator)
-        .any(|segment| regexes.iter().any(|regex| regex.is_match(segment)))
 }
 
 impl From<String> for PathRule {
@@ -1804,6 +1661,7 @@ mod jasmine;
 mod manifest;
 mod module_request;
 use module_request::{has_glob_syntax, has_source_extension, module_request, names_project_file};
+mod compiled_path_rule;
 pub mod manifest_entries;
 mod mise;
 mod osls;
@@ -1821,6 +1679,9 @@ mod used_export_names;
 mod used_export_rule;
 mod web_server_app;
 
+#[cfg(test)]
+use compiled_path_rule::matches_segment_regex;
+pub(crate) use compiled_path_rule::{CompiledPathRule, ExcludeCache};
 pub use config_dependencies::RequiredDependency;
 use config_dependencies::add_import_referenced_dependencies;
 pub use federation_source::{FederationSource, FederationSourceTarget};

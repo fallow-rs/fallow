@@ -39,8 +39,11 @@ impl<T> PathRuleIndex<T> {
     /// file, so the index drops it.
     pub fn build<'r>(rules: impl IntoIterator<Item = (&'r PathRule, T)>, rule_kind: &str) -> Self {
         let mut index = Self::default();
+        let mut excludes = super::ExcludeCache::default();
         for (rule, value) in rules {
-            let Some(compiled) = CompiledPathRule::for_used_export_rule(rule, rule_kind) else {
+            let Some(compiled) =
+                CompiledPathRule::for_entry_rule_cached(rule, rule_kind, &mut excludes)
+            else {
                 continue;
             };
             let position = index.rules.len();
