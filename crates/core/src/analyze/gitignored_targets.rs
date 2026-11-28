@@ -241,11 +241,10 @@ fn build_matcher(dir: &Path, repo_root: &Path, files: impl Iterator<Item = PathB
     builder.build().unwrap_or_else(|_| Gitignore::empty())
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
 
-    #[cfg(unix)]
     #[test]
     fn rules_of_a_gitignore_that_links_out_of_the_repository_do_not_apply() {
         let outside = tempfile::tempdir().expect("outside directory");
