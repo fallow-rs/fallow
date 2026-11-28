@@ -262,6 +262,46 @@ mod tests {
         assert!(walked.contains(&"src/index.ts".to_string()), "{walked:?}");
     }
 
+    /// A walk from the top level of a repository reads no ignore file of the
+    /// directories above it, the same as Git. An audit walks its base
+    /// snapshot from such a top level in the temp dir, so the files of the
+    /// temp dir must not change which base files the walk sees.
+    #[cfg(unix)]
+    #[test]
+    fn source_walk_reads_no_ignore_file_above_the_repository_top_level() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let base = directory.path();
+        write_file(&base.join(".ignore"), "consumer.ts\n");
+        let root = base.join("snapshot");
+        std::fs::create_dir_all(root.join(".git")).expect("git directory");
+        write_file(&root.join(".gitignore"), "dist\n");
+        write_file(&root.join("src/consumer.ts"), "");
+        write_file(&root.join("dist/out.js"), "");
+
+        let walked =
+            walked_files_within(source_walk_builder(&root, |_| true), &root).expect("walk ends");
+        assert!(
+            walked.contains(&"src/consumer.ts".to_string()),
+            "{walked:?}"
+        );
+        assert!(
+            !walked.contains(&"dist/out.js".to_string()),
+            "the .gitignore of the repository still applies: {walked:?}"
+        );
+
+        let app = root.join("app");
+        write_file(&root.join(".ignore"), "skipped.ts\n");
+        write_file(&app.join("skipped.ts"), "");
+        write_file(&app.join("kept.ts"), "");
+        let walked =
+            walked_files_within(source_walk_builder(&app, |_| true), &app).expect("walk ends");
+        assert_eq!(
+            walked,
+            vec!["kept.ts".to_string()],
+            "a root below the top level keeps the rules of the repository"
+        );
+    }
+
     #[cfg(unix)]
     #[test]
     fn source_walk_reads_a_parent_gitignore_that_links_outside_the_project() {

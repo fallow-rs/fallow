@@ -147,9 +147,13 @@ pub fn readable_ignore_file(path: &Path, root: &Path) -> bool {
 fn project_scope(canonical_root: &Path) -> PathBuf {
     canonical_root
         .ancestors()
-        .find(|dir| std::fs::symlink_metadata(dir.join(".git")).is_ok())
+        .find(|dir| has_git_entry(dir))
         .unwrap_or(canonical_root)
         .to_path_buf()
+}
+
+fn has_git_entry(dir: &Path) -> bool {
+    std::fs::symlink_metadata(dir.join(".git")).is_ok()
 }
 
 /// The ignore files of one directory that a walk reads.
@@ -308,10 +312,18 @@ where
 {
     let canonical_root = dunce::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
     let scope = project_scope(&canonical_root);
+    // A walk from the top level of a repository applies no ignore rule from
+    // above it, the same as Git. The `ignore` crate stops `.gitignore` rules
+    // at a repository but applies each parent `.ignore` file. An audit walks
+    // its base snapshot from a top level in the temp dir, where these files
+    // belong to whoever can write the temp dir. The crate still opens the
+    // parent files, so the check of `checked_root_reads` covers them.
+    let parents = scope != canonical_root || !has_git_entry(&canonical_root);
     let reads = checked_root_reads(&canonical_root, &scope, sources);
     let mut builder = WalkBuilder::new(root);
     builder
         .hidden(false)
+        .parents(parents)
         .ignore(reads.dot_ignore)
         .git_ignore(reads.sources.git_ignore)
         .git_global(reads.sources.git_global)
