@@ -224,3 +224,34 @@ fn nuxt_files_that_link_out_of_the_project_are_not_read() {
     assert!(!rules.iter().any(|rule| rule.name == "useOutside"));
     assert!(!rules.iter().any(|rule| rule.name == "Outside"));
 }
+
+/// A layer out of the read scope of the project is not probed, so it is
+/// never a layer root. A layer in the same workspace stays one.
+#[test]
+fn outside_layer_roots_skip_a_layer_out_of_the_project_scope() {
+    let sandbox = tempfile::tempdir().expect("tempdir");
+    let app = sandbox.path().join("app");
+    let ui = sandbox.path().join("ui");
+    std::fs::create_dir_all(&app).expect("create app");
+    std::fs::create_dir_all(&ui).expect("create ui");
+    std::fs::write(
+        app.join("nuxt.config.ts"),
+        "export default defineNuxtConfig({ extends: ['../ui'] })",
+    )
+    .expect("write app config");
+    std::fs::write(
+        ui.join("nuxt.config.ts"),
+        "export default defineNuxtConfig({})",
+    )
+    .expect("write layer config");
+    assert!(outside_layer_roots(&app).is_empty());
+
+    fallow_config::clear_project_scope_bases();
+    std::fs::write(
+        sandbox.path().join("pnpm-workspace.yaml"),
+        "packages:\n  - app\n  - ui\n",
+    )
+    .expect("write workspace");
+    assert_eq!(outside_layer_roots(&app), [ui]);
+    fallow_config::clear_project_scope_bases();
+}
