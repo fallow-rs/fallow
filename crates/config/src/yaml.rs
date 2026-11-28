@@ -9,6 +9,40 @@ use std::fmt;
 use deser_core::{Context, TrackLocations};
 use deser_value::{Kind, Map, Value};
 
+/// The memory that alias expansion may add to the parsed documents of one
+/// source, in bytes.
+///
+/// The parser limits aliases by the number of nodes that they replay, and
+/// each replayed scalar is copied into the parsed value. A short source can
+/// replay one long scalar many times, so the node limit alone does not bound
+/// memory. A replayed node never holds more text than the source, so a node
+/// limit of this budget divided by the source length bounds the copies.
+/// Real configs replay a few hundred nodes at most.
+const MAX_ALIAS_EXPANSION_BYTES: usize = 256 * 1024 * 1024;
+
+/// The memory of one parsed node beyond its text, in bytes.
+const NODE_OVERHEAD_BYTES: usize = 128;
+
+/// The node limit of the parser for aliases when the source is short.
+const MAX_ALIAS_EVENTS: usize = 1_000_000;
+
+/// The number of nodes that aliases may replay in each document of a stream
+/// of `documents` documents.
+fn alias_event_limit(source: &str, documents: usize) -> usize {
+    let per_node = source.len().saturating_add(NODE_OVERHEAD_BYTES);
+    (MAX_ALIAS_EXPANSION_BYTES / per_node / documents.max(1)).min(MAX_ALIAS_EVENTS)
+}
+
+/// An upper bound of the number of documents in a YAML stream. Each document
+/// after the first starts at a line that starts with `---` or follows a line
+/// that starts with `...`.
+fn document_count_bound(source: &str) -> usize {
+    1 + source
+        .split(['\n', '\r'])
+        .filter(|line| line.starts_with("---") || line.starts_with("..."))
+        .count()
+}
+
 /// A YAML parse error.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct YamlError(String);
@@ -40,9 +74,13 @@ impl YamlDocument {
 /// # Errors
 ///
 /// Returns an error when `source` is not valid YAML, holds more than one
-/// document, or has a duplicate mapping key.
+/// document, has a duplicate mapping key, or has aliases that expand above
+/// the memory budget for alias expansion.
 pub fn parse(source: &str) -> Result<YamlDocument, YamlError> {
-    deser_yaml::from_str::<Value>(source)
+    deser_yaml::DeserializerConfig::builder()
+        .alias_limit(alias_event_limit(source, 1))
+        .build()
+        .from_str::<Value>(source)
         .map(YamlDocument)
         .map_err(|error| YamlError(error.to_string()))
 }
@@ -60,6 +98,7 @@ pub fn parse(source: &str) -> Result<YamlDocument, YamlError> {
 pub fn parse_with_locations(source: &str) -> Result<YamlDocument, YamlError> {
     let config = deser_yaml::DeserializerConfig::builder()
         .context(Context::with(TrackLocations(true)))
+        .alias_limit(alias_event_limit(source, 1))
         .build();
     config
         .from_str::<Value>(source)
@@ -73,10 +112,14 @@ pub fn parse_with_locations(source: &str) -> Result<YamlDocument, YamlError> {
 ///
 /// # Errors
 ///
-/// Returns an error when a document is not valid YAML or has a duplicate
-/// mapping key.
+/// Returns an error when a document is not valid YAML, has a duplicate
+/// mapping key, or has aliases that expand above the memory budget for
+/// alias expansion. The budget is for the whole stream.
 pub fn parse_documents(source: &str) -> Result<Vec<YamlDocument>, YamlError> {
-    let mut deserializer = deser_yaml::Deserializer::from_str(source);
+    let config = deser_yaml::DeserializerConfig::builder()
+        .alias_limit(alias_event_limit(source, document_count_bound(source)))
+        .build();
+    let mut deserializer = deser_yaml::Deserializer::from_str_with_config(source, config);
     deserializer
         .iter::<Value>()
         .map(|document| {
@@ -405,6 +448,67 @@ mod tests {
         let document = parse_with_locations(&source).unwrap();
         assert!(document.root().get("a").unwrap().as_sequence().is_some());
         assert!(document.root().get("a").unwrap().byte_range().is_some());
+    }
+
+    /// A document whose anchored string of `length` bytes is replayed
+    /// `10^levels` times through nested lists of aliases.
+    fn nested_aliases(length: usize, levels: usize) -> String {
+        use std::fmt::Write as _;
+        let mut yaml = format!("s0: &s0 \"{}\"\n", "x".repeat(length));
+        for level in 1..=levels {
+            let items = vec![format!("*s{}", level - 1); 10].join(", ");
+            writeln!(yaml, "s{level}: &s{level} [{items}]")
+                .expect("writing to a String cannot fail");
+        }
+        yaml
+    }
+
+    #[test]
+    fn aliases_that_expand_far_beyond_the_source_are_refused() {
+        // 100,000 copies of a 4,000-byte string: about 400 MB from 4 KB.
+        let source = nested_aliases(4_000, 5);
+        let error = parse(&source).expect_err("expansion is above the budget");
+        assert!(error.to_string().contains("alias"), "{error}");
+        assert!(parse_with_locations(&source).is_err());
+    }
+
+    #[test]
+    fn the_alias_budget_covers_the_whole_stream() {
+        // 50 documents that each replay a 1,000-byte string 1,000 times.
+        let document = nested_aliases(1_000, 3);
+        let source = format!("---\n{document}").repeat(50);
+        assert!(parse_documents(&source).is_err());
+    }
+
+    #[test]
+    fn aliases_of_real_configs_still_expand() {
+        let source = "\
+defaults: &defaults
+  runs-on: ubuntu-latest
+  steps: [checkout, setup, install]
+jobs:
+  lint: *defaults
+  test: *defaults
+  build: *defaults
+";
+        let document = parse(source).unwrap();
+        let test = document
+            .root()
+            .get("jobs")
+            .and_then(|jobs| jobs.get("test"));
+        assert_eq!(
+            test.and_then(|job| job.get("runs-on"))
+                .and_then(|node| node.as_str()),
+            Some("ubuntu-latest")
+        );
+        let small = nested_aliases(20, 4);
+        assert!(parse(&small).is_ok());
+        assert_eq!(
+            parse_documents(&format!("---\n{small}").repeat(3))
+                .unwrap()
+                .len(),
+            3
+        );
     }
 
     #[test]
