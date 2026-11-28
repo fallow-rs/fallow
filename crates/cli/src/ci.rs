@@ -16,6 +16,8 @@ use input_file::{read_envelope, read_text_file};
 mod check_run;
 #[path = "ci_input_file.rs"]
 mod input_file;
+#[path = "ci_markers.rs"]
+mod markers;
 #[path = "ci_pr_comment_post.rs"]
 mod pr_comment_post;
 #[path = "ci_provider_state.rs"]
@@ -24,6 +26,7 @@ mod provider_state;
 mod review_post;
 
 use check_run::{PostCheckRunInput, post_check_run};
+use markers::{extract_fallow_fingerprint, parse_resolution_marker};
 use pr_comment_post::{PostPrCommentInput, post_pr_comment};
 use provider_state::{ProviderStateError, github_graphql_url, load_provider_state};
 use review_post::{PostReviewInput, post_review};
@@ -1381,7 +1384,7 @@ fn needs_gitlab_authenticated_user(discussions: &[Value], bot_login: BotLogin<'_
         .any(|note| {
             let body = note.get("body").and_then(Value::as_str).unwrap_or("");
             let has_marker = extract_fallow_fingerprint(body).is_some()
-                || body.contains("fallow-resolved-fingerprint:");
+                || parse_resolution_marker(body).ok().flatten().is_some();
             has_marker
                 && !gitlab_note_has_native_bot_metadata(note)
                 && note
@@ -1466,7 +1469,9 @@ fn collect_gitlab_discussion_fingerprints(
                 DiscussionStatus::Active
             };
             let mut has_resolution_marker = false;
-            for note in notes {
+            // fallow writes a resolution marker only as a reply. The root
+            // note is the finding comment, which quotes project text.
+            for note in notes.iter().skip(1) {
                 let note_body = note.get("body").and_then(Value::as_str).unwrap_or("");
                 if !is_gitlab_bot_note(note, authenticated_user, bot_login) {
                     continue;
@@ -2280,16 +2285,6 @@ fn gitlab_discussion_is_resolved(discussion: &Value) -> bool {
         .unwrap_or(false)
 }
 
-fn extract_marker(body: &str, marker: &str) -> Option<String> {
-    let rest = body.split(marker).nth(1)?.trim_start();
-    let value = rest
-        .split(|c: char| c.is_ascii_whitespace() || c == '<')
-        .next()?
-        .trim_matches('-')
-        .trim();
-    (!value.is_empty()).then(|| value.to_owned())
-}
-
 /// Return the lifecycle fingerprint encoded by either a legacy bare marker or
 /// a SHA-qualified marker. The SHA is presentation/idempotency metadata for a
 /// single discussion, never evidence that a new lifecycle began.
@@ -2315,44 +2310,6 @@ fn response_confirms_resolution_body(value: &Value, expected_body: &str) -> bool
     expected_resolution.is_some()
         && response_resolution == expected_resolution
         && fallow_output::validate_review_body_scope(response_body, expected_scope.as_ref()).is_ok()
-}
-
-fn parse_resolution_marker(body: &str) -> Result<Option<String>, String> {
-    const PREFIX: &str = "<!-- fallow-resolved-fingerprint: ";
-    const SUFFIX: &str = " -->";
-    let mut found = None;
-    for line in body.lines() {
-        if !line.contains("fallow-resolved-fingerprint") {
-            continue;
-        }
-        let value = line
-            .strip_prefix(PREFIX)
-            .and_then(|line| line.strip_suffix(SUFFIX))
-            .filter(|value| !value.is_empty() && !value.chars().any(char::is_whitespace))
-            .ok_or_else(|| "malformed fallow resolved-fingerprint marker".to_owned())?;
-        if found.replace(value.to_owned()).is_some() {
-            return Err("duplicate fallow resolved-fingerprint marker".to_owned());
-        }
-    }
-    Ok(found)
-}
-
-/// Extract a fallow fingerprint from any v1, v2 or v3 marker shape in `body`.
-/// The versioned shapes (`<!-- fallow-fingerprint:v3: <fp> -->`) win over v1
-/// because their text also matches the v1 substring search. The versioned
-/// checks have to run first, or the v1 fallback would return the literal
-/// `"v3:"` as the extracted fingerprint.
-///
-/// Returns the raw fingerprint string with any kind prefix preserved
-/// (`merged:<hex>` stays `merged:<hex>`). Consumers match the returned
-/// string against the comment's `fingerprint` field verbatim, and against its
-/// `legacy_fingerprint` field for a v1 or v2 marker that an older release
-/// wrote. A v3 fingerprint and a legacy fingerprint are both 64-bit hashes,
-/// so one lookup set holds both without a real risk of collision.
-fn extract_fallow_fingerprint(body: &str) -> Option<String> {
-    extract_marker(body, "fallow-fingerprint:v3:")
-        .or_else(|| extract_marker(body, "fallow-fingerprint:v2:"))
-        .or_else(|| extract_marker(body, "fallow-fingerprint:"))
 }
 
 /// Compute the compatibility marker rendered in a resolution reply. Provider
@@ -2383,72 +2340,6 @@ fn resolved_body(fingerprint: &str, sha: Option<&str>, review_id: Option<&Review
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn extracts_fingerprint_marker() {
-        assert_eq!(
-            extract_marker(
-                "**error**\n\n<!-- fallow-fingerprint: abc123 -->",
-                "fallow-fingerprint:",
-            )
-            .as_deref(),
-            Some("abc123")
-        );
-    }
-
-    #[test]
-    fn extracts_fingerprint_from_v2_marker() {
-        assert_eq!(
-            extract_fallow_fingerprint(
-                "**error**\n\n<!-- fallow-fingerprint:v2: abc1234567890def -->"
-            )
-            .as_deref(),
-            Some("abc1234567890def")
-        );
-        assert_eq!(
-            extract_fallow_fingerprint(
-                "**error**\n\n<!-- fallow-fingerprint:v2: merged:0123456789abcdef -->"
-            )
-            .as_deref(),
-            Some("merged:0123456789abcdef")
-        );
-    }
-
-    #[test]
-    fn extracts_fingerprint_from_v3_marker() {
-        assert_eq!(
-            extract_fallow_fingerprint(
-                "**error**\n\n<!-- fallow-fingerprint:v3: abc1234567890def -->"
-            )
-            .as_deref(),
-            Some("abc1234567890def")
-        );
-        assert_eq!(
-            extract_fallow_fingerprint(
-                "**error**\n\n<!-- fallow-fingerprint:v3: merged:0123456789abcdef -->"
-            )
-            .as_deref(),
-            Some("merged:0123456789abcdef")
-        );
-    }
-
-    #[test]
-    fn extract_fallow_fingerprint_falls_back_to_v1_shape() {
-        assert_eq!(
-            extract_fallow_fingerprint("**error**\n\n<!-- fallow-fingerprint: abc123 -->")
-                .as_deref(),
-            Some("abc123")
-        );
-    }
-
-    #[test]
-    fn extract_fallow_fingerprint_does_not_match_unrelated_body() {
-        assert_eq!(extract_fallow_fingerprint("plain comment body"), None);
-        assert_eq!(
-            extract_fallow_fingerprint("fallow-fingerprint:v2: deadbeef").as_deref(),
-            Some("deadbeef")
-        );
-    }
 
     #[test]
     fn computes_reconcile_sets() {
@@ -2833,75 +2724,6 @@ mod tests {
             gitlab_token_from("MR comment", no_env).unwrap_err(),
             "GitLab MR comment posting requires GITLAB_TOKEN"
         );
-    }
-
-    // --- extract_fallow_fingerprint: v2-first ordering (lines 1376-1388) ---
-
-    #[test]
-    fn extract_fallow_fingerprint_v2_wins_over_v1_substring_prefix() {
-        // v1 extraction would grab "v2:" as the fingerprint if it ran first
-        // because "fallow-fingerprint:" is a prefix of "fallow-fingerprint:v2:".
-        // Verify the v2-first order returns the real fingerprint.
-        let body = "<!-- fallow-fingerprint:v2: realfp123 -->";
-        assert_eq!(
-            extract_fallow_fingerprint(body).as_deref(),
-            Some("realfp123")
-        );
-    }
-
-    #[test]
-    fn extract_fallow_fingerprint_v2_preserves_merged_prefix() {
-        let body = "<!-- fallow-fingerprint:v2: merged:deadbeefcafe0123 -->";
-        assert_eq!(
-            extract_fallow_fingerprint(body).as_deref(),
-            Some("merged:deadbeefcafe0123")
-        );
-    }
-
-    #[test]
-    fn extract_fallow_fingerprint_returns_none_for_empty_body() {
-        assert_eq!(extract_fallow_fingerprint(""), None);
-    }
-
-    #[test]
-    fn extract_fallow_fingerprint_v1_shape_in_multiline_body() {
-        let body = "Some finding text.\n\n<!-- fallow-fingerprint: abc123def456 -->\n";
-        assert_eq!(
-            extract_fallow_fingerprint(body).as_deref(),
-            Some("abc123def456")
-        );
-    }
-
-    // --- extract_marker edge cases (lines 1366-1374) ---
-
-    #[test]
-    fn extract_marker_stops_at_whitespace() {
-        let body = "fallow-fingerprint: abc def";
-        assert_eq!(
-            extract_marker(body, "fallow-fingerprint:").as_deref(),
-            Some("abc")
-        );
-    }
-
-    #[test]
-    fn extract_marker_stops_at_closing_angle_bracket() {
-        let body = "<!-- fallow-fingerprint: abc123 -->";
-        assert_eq!(
-            extract_marker(body, "fallow-fingerprint:").as_deref(),
-            Some("abc123")
-        );
-    }
-
-    #[test]
-    fn extract_marker_returns_none_when_marker_absent() {
-        assert_eq!(extract_marker("plain text", "fallow-fingerprint:"), None);
-    }
-
-    #[test]
-    fn extract_marker_returns_none_when_value_is_empty_after_trim() {
-        // marker present but nothing follows except whitespace + end
-        let body = "fallow-fingerprint:   ";
-        assert_eq!(extract_marker(body, "fallow-fingerprint:"), None);
     }
 
     // --- reconcile_sets: all three set states (line 232-240) ---
@@ -4021,7 +3843,7 @@ mod tests {
     }
 
     #[test]
-    fn malformed_or_duplicate_review_markers_fail_closed() {
+    fn malformed_review_markers_fail_closed() {
         assert!(
             fallow_output::parse_review_id_marker("<!-- fallow-review-id: bad value -->").is_err()
         );
@@ -4035,16 +3857,16 @@ mod tests {
             "<!-- fallow-fingerprint:v2: abcdef0123456789 -->\n<!-- fallow-review-id : frontend -->",
             None
         ));
-        assert!(
+        assert_eq!(
             fallow_output::parse_review_id_marker(
                 "<!-- fallow-review-id: first -->\n<!-- fallow-review-id: second -->"
-            )
-            .is_err()
+            ),
+            Ok(Some(ReviewId::parse("second").unwrap()))
         );
     }
 
     #[test]
-    fn envelope_scope_preflight_rejects_missing_unexpected_malformed_and_duplicate_markers() {
+    fn envelope_scope_preflight_rejects_missing_unexpected_and_malformed_markers() {
         let cases = [
             serde_json::json!({
                 "body": "<!-- fallow-review-id: frontend -->",
@@ -4061,7 +3883,7 @@ mod tests {
                 "meta": {"review_id": "frontend"}
             }),
             serde_json::json!({
-                "body": "<!-- fallow-review-id: frontend -->\n<!-- fallow-review-id: frontend -->",
+                "body": "<!-- fallow-review-id: frontend -->\n<!-- fallow-review-id: backend -->",
                 "comments": [],
                 "meta": {"review_id": "frontend"}
             }),

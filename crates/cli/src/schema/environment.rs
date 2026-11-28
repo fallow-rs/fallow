@@ -132,7 +132,7 @@ pub(super) const ENVIRONMENT_VARIABLES: &[EnvironmentVariable] = &[
         "FALLOW_BOT_LOGIN",
         CI,
         None,
-        "Allowlisted posting username used to recognize fallow-owned finding roots and resolution replies. When set, it narrows ownership to that exact username (an empty value matches nobody); when unset, provider-native bot metadata is trusted. This is an authorship control, not a lifecycle or deduplication token.",
+        "Allowlisted posting username used to recognize fallow-owned finding roots, resolution replies and the sticky PR/MR comment. When set, it narrows ownership to that exact username (an empty value matches nobody); when unset, provider-native bot metadata is trusted, and the sticky comment also matches the token user. This is an authorship control, not a lifecycle or deduplication token.",
     ),
     var(
         "FALLOW_API_RETRIES",

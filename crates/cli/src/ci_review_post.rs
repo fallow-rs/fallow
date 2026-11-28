@@ -220,8 +220,10 @@ fn github_review_payload(envelope: &Value, comments: &[Value]) -> Value {
             })
         })
         .collect::<Vec<_>>();
+    // The envelope can come from an earlier job. Its `event` field is not
+    // trusted: the review step never approves or requests changes.
     serde_json::json!({
-        "event": envelope.get("event").and_then(Value::as_str).unwrap_or("COMMENT"),
+        "event": "COMMENT",
         "body": envelope.get("body").and_then(Value::as_str).unwrap_or(""),
         "comments": comments,
     })
@@ -249,6 +251,16 @@ fn post_gitlab_inline_comment(
         return gitlab_create_json(agent, &url, token, &payload)
             .and_then(|value| validate_gitlab_discussion_response(&value));
     }
+    let fallback_body = gitlab_fallback_body(&position, &body);
+    let payload = serde_json::json!({ "body": fallback_body });
+    let url = format!("{api}/projects/{encoded_project}/merge_requests/{mr}/discussions");
+    gitlab_create_json(agent, &url, token, &payload)
+        .and_then(|value| validate_gitlab_discussion_response(&value))
+}
+
+/// The body of a discussion that GitLab cannot anchor to a diff line. The
+/// location goes into the first line of the body.
+fn gitlab_fallback_body(position: &Value, body: &str) -> String {
     let path = position
         .get("new_path")
         .and_then(Value::as_str)
@@ -257,11 +269,22 @@ fn post_gitlab_inline_comment(
         .get("new_line")
         .and_then(Value::as_u64)
         .unwrap_or(1);
-    let fallback_body = format!("Warning: **{path}:{line}**\n\n{body}");
-    let payload = serde_json::json!({ "body": fallback_body });
-    let url = format!("{api}/projects/{encoded_project}/merge_requests/{mr}/discussions");
-    gitlab_create_json(agent, &url, token, &payload)
-        .and_then(|value| validate_gitlab_discussion_response(&value))
+    let path = escape_control_characters(path);
+    format!("Warning: **{path}:{line}**\n\n{body}")
+}
+
+/// Replace each control character with its Rust escape (`\n`, `\u{1b}`), so a
+/// value stays on one line of a provider note.
+fn escape_control_characters(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars() {
+        if c.is_control() {
+            out.extend(c.escape_default());
+        } else {
+            out.push(c);
+        }
+    }
+    out
 }
 
 fn validate_github_review_response(value: &Value) -> Result<(), String> {
@@ -415,6 +438,39 @@ mod tests {
         assert_eq!(payload["event"], "COMMENT");
         assert_eq!(payload["comments"][0]["path"], "src/a.ts");
         assert_eq!(payload["comments"][0]["side"], "RIGHT");
+    }
+
+    /// The review step only comments. An envelope cannot make it approve or
+    /// request changes.
+    #[test]
+    fn github_review_sends_the_comment_event_for_any_envelope_event() {
+        for event in ["APPROVE", "REQUEST_CHANGES", "PENDING", ""] {
+            let mut envelope = envelope();
+            envelope["event"] = Value::from(event);
+            let comments = new_comments(&envelope, &BTreeSet::new());
+
+            let review = github_review_payload(&envelope, &comments);
+
+            assert_eq!(review["event"], "COMMENT", "envelope event {event:?}");
+        }
+    }
+
+    /// A newline in a path must not start a new line in the note, where
+    /// GitLab reads a line that starts with `/` as a quick action.
+    #[test]
+    fn gitlab_fallback_body_escapes_control_characters_in_the_path() {
+        let position = serde_json::json!({
+            "new_path": "src/a.ts\n/approve\r\u{1b}[0m",
+            "new_line": 4
+        });
+
+        let body = gitlab_fallback_body(&position, "finding");
+
+        assert_eq!(
+            body,
+            "Warning: **src/a.ts\\n/approve\\r\\u{1b}[0m:4**\n\nfinding"
+        );
+        assert!(!body.lines().any(|line| line.starts_with('/')));
     }
 
     #[test]

@@ -55,24 +55,28 @@ pub fn review_id_marker(review_id: &ReviewId) -> String {
     )
 }
 
-/// Parse the sole canonical review-scope marker from a rendered body.
+/// Parse the review-scope marker from the last non-blank line of a rendered
+/// body, where fallow writes it. Other lines can quote project text, so they
+/// are not read. A last line that names the marker but has another shape is
+/// an error.
 pub fn parse_review_id_marker(body: &str) -> Result<Option<ReviewId>, String> {
-    let mut found = None;
-    for line in body.lines() {
-        if !line.contains("fallow-review-id") {
-            continue;
-        }
-        let value = line
-            .strip_prefix(REVIEW_ID_MARKER_PREFIX)
-            .and_then(|line| line.strip_suffix(REVIEW_ID_MARKER_SUFFIX))
-            .ok_or_else(|| "malformed fallow review-id marker".to_owned())?;
-        let review_id = ReviewId::parse(value.to_owned())
-            .map_err(|error| format!("invalid fallow review-id marker: {error}"))?;
-        if found.replace(review_id).is_some() {
-            return Err("duplicate fallow review-id marker".to_owned());
-        }
+    let Some(line) = body
+        .lines()
+        .map(str::trim_end)
+        .rfind(|line| !line.is_empty())
+    else {
+        return Ok(None);
+    };
+    if !line.contains("fallow-review-id") {
+        return Ok(None);
     }
-    Ok(found)
+    let value = line
+        .strip_prefix(REVIEW_ID_MARKER_PREFIX)
+        .and_then(|line| line.strip_suffix(REVIEW_ID_MARKER_SUFFIX))
+        .ok_or_else(|| "malformed fallow review-id marker".to_owned())?;
+    ReviewId::parse(value.to_owned())
+        .map(Some)
+        .map_err(|error| format!("invalid fallow review-id marker: {error}"))
 }
 
 /// Require a body marker to match the expected review scope exactly.
@@ -511,6 +515,26 @@ pub enum ReviewReconcileSchema {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A finding message can quote project text with the marker name, for
+    /// example an import path. Only the last non-blank line holds the scope.
+    #[test]
+    fn review_id_marker_is_read_only_from_the_last_line() {
+        let unscoped = "**error** Import './fallow-review-id' could not be resolved\n\n\
+            <!-- fallow-fingerprint:v3: 1111111111111111 -->\n";
+        assert_eq!(parse_review_id_marker(unscoped), Ok(None));
+
+        let scoped = "Import './fallow-review-id: x' could not be resolved\n\
+            <!-- fallow-review-id: quoted -->\n\n\
+            <!-- fallow-fingerprint:v3: 1111111111111111 -->\n\
+            <!-- fallow-review-id: web -->\n\n";
+        assert_eq!(
+            parse_review_id_marker(scoped),
+            Ok(Some(ReviewId::parse("web").expect("valid review id")))
+        );
+
+        assert!(parse_review_id_marker("text\n<!-- fallow-review-id : web -->").is_err());
+    }
 
     fn legacy_review_envelope(body: &str) -> ReviewEnvelopeOutput {
         ReviewEnvelopeOutput {

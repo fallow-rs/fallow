@@ -651,6 +651,19 @@ line states exit code 0.
   lifecycle whose marker holds a comment's `legacy_fingerprint` as that
   comment (`envelope_legacy_fingerprints`, `reconcile_sets`). Remove the
   legacy field and this matching one release after the v3 marker shipped.
+- A comment body can quote project text, so a provider comment gets its
+  lifecycle marker only from the trailer line (`trailer_marker_line`): the
+  last non-blank line, or the line before a final `fallow-review-id` marker.
+  The line must be the exact marker. A resolution marker counts only in a
+  reply (on GitLab, never in the root note of a discussion). `ci post-review`
+  always sends the `COMMENT` event and ignores the envelope `event`.
+  `ci post-pr-comment` updates only a comment that the bot wrote
+  (`is_github_bot_comment`, `is_gitlab_bot_note`) and that has the
+  `fallow-id` marker as a full line. Without `FALLOW_BOT_LOGIN`, it also
+  accepts the login of the token (GitHub `GET /user`, GitLab `GET /user`).
+  It reads that login only when a candidate has no bot metadata. On GitHub
+  a 401 or 403 from `/user` (`GITHUB_TOKEN`, app tokens) keeps the `Bot`
+  rule only.
 - An audit review comment on a complexity, styling, dead-code,
   stale-suppression or duplication finding puts the attribution after the
   severity label, and says when the gate does not count the finding:
