@@ -1,7 +1,7 @@
 use std::io::IsTerminal;
 use std::process::ExitCode;
 
-use colored::Colorize;
+use crate::report::colorize::Colorize;
 use fallow_api::{
     AuditJsonHeaderInput, AuditJsonOutputInput, AuditSarifOutputInput, DupesReportPayload,
 };
@@ -872,7 +872,7 @@ fn print_audit_styling_group(
             indent,
             format!("{}:{}", finding.path, finding.line).dimmed(),
             finding.code,
-            finding.value,
+            fallow_output::display_text(&finding.value),
             styling_finding_audit_context(result, finding).dimmed()
         );
     }

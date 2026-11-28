@@ -1,4 +1,4 @@
-use crate::report::human::colorize::Colorize;
+use crate::report::colorize::Colorize;
 use fallow_types::cache_rejection::CacheRejection;
 use fallow_types::pipeline_spans::ProcessTimings;
 use fallow_types::trace::{EntryPointSpans, PipelineCounters, PipelineTimings};

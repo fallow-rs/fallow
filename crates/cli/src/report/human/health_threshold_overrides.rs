@@ -3,7 +3,7 @@
 
 use std::path::Path;
 
-use crate::report::human::colorize::Colorize;
+use crate::report::colorize::Colorize;
 use fallow_output::{HealthReport, InlineThresholdOverrideState};
 
 use super::MAX_FLAT_ITEMS;

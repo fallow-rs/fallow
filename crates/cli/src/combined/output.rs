@@ -4,7 +4,7 @@ use std::io::IsTerminal;
 use std::path::Path;
 use std::process::ExitCode;
 
-use colored::Colorize;
+use crate::report::colorize::Colorize;
 use fallow_api::{CombinedCheckJsonSection, CombinedJsonOutputInput, DupesReportPayload};
 use fallow_config::OutputFormat;
 use fallow_output::{CodeClimateIssue, codeclimate_issues_to_value};

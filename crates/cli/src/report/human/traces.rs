@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use crate::report::human::colorize::Colorize;
+use crate::report::colorize::Colorize;
 use fallow_types::semantic::{
     SemanticCompleteness, SemanticNamespace, SemanticSymbolImpact, SemanticSymbolTrace,
 };

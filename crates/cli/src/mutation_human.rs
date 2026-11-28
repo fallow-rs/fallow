@@ -9,7 +9,7 @@
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
-use colored::Colorize as _;
+use crate::report::colorize::Colorize as _;
 use fallow_api::mutation::split_control_run_failure;
 use fallow_output::{
     DUPLICATE_TEST_IDS_CODE, MutantEquivalenceHint, MutantResult, MutantStatus,

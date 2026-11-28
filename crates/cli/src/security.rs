@@ -8,8 +8,8 @@
 //! or the `audit` gate. There is no `confidence` or `signal_strength` field; structural traces
 //! and reachability context are the only honest signals.
 
+use crate::report::colorize::Colorize;
 use crate::report::sink::outln;
-use colored::Colorize;
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};

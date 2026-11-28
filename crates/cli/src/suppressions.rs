@@ -181,7 +181,7 @@ fn kind_label(kind: Option<&str>) -> &str {
 
 /// Print a file path with dimmed directory and bold filename.
 fn print_file_path(display: &str) {
-    use colored::Colorize;
+    use crate::report::colorize::Colorize;
     if let Some(parent) = Path::new(display).parent() {
         let parent_str = parent.to_string_lossy();
         let file_name = Path::new(display)
@@ -208,7 +208,7 @@ fn print_suppressions_human(
     elapsed: std::time::Duration,
     quiet: bool,
 ) {
-    use colored::Colorize;
+    use crate::report::colorize::Colorize;
 
     if output.summary.total == 0 {
         if !quiet {
@@ -252,7 +252,7 @@ fn print_suppressions_human(
 
 /// Print one file's suppression listing (human format).
 fn print_suppression_file(file: &SuppressionInventoryFile) {
-    use colored::Colorize;
+    use crate::report::colorize::Colorize;
 
     let display = file.path.to_string_lossy().replace('\\', "/");
     print_file_path(&display);

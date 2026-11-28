@@ -1,5 +1,4 @@
 pub(super) mod check;
-mod colorize;
 mod cross_ref;
 pub(super) mod dupes;
 mod dupes_range_markers;
@@ -28,7 +27,7 @@ use std::io::IsTerminal;
 use std::path::Path;
 use std::sync::{Mutex, OnceLock};
 
-use crate::report::human::colorize::Colorize;
+use crate::report::colorize::Colorize;
 use fallow_types::issue_meta::{issue_meta_by_kind, issue_meta_for_contract_token};
 use fallow_types::suppress::{IssueKind, issue_kind_to_kebab};
 use rustc_hash::FxHashSet;
@@ -525,7 +524,7 @@ fn docs_footers() -> &'static Mutex<FxHashSet<String>> {
 ///
 /// With colors off, the renderer adds no terminal sequence, so every escape
 /// character is escaped. With colors on, the color sequences stay; the
-/// [`colorize::Colorize`] methods escaped each colored value before they
+/// [`crate::report::colorize::Colorize`] methods escaped each colored value before they
 /// added its color.
 fn report_line(entry: &str) -> Cow<'_, str> {
     let is_footer = entry.contains('\n')

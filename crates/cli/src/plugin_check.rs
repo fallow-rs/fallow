@@ -11,7 +11,7 @@
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use colored::Colorize;
+use crate::report::colorize::Colorize;
 use fallow_config::{ExternalPluginDef, OutputFormat, PackageJson, PluginDetection};
 use serde_json::{Value, json};
 

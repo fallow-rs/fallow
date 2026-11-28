@@ -19,7 +19,7 @@ use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::path::Path;
 
-use colored::Colorize as _;
+use crate::report::colorize::Colorize as _;
 use fallow_engine::code_routes::CodeRoute;
 use fallow_engine::discover::{EntryPoint, EntryPointSource};
 use rustc_hash::FxHashMap;

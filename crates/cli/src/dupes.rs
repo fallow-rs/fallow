@@ -903,7 +903,7 @@ fn print_dupes_performance(result: &DupesResult, output: OutputFormat) {
     ) {
         return;
     }
-    use colored::Colorize;
+    use crate::report::colorize::Colorize;
     let stats = &result.report.stats;
     let total_ms = result.elapsed.as_secs_f64() * 1000.0;
     let lines = [

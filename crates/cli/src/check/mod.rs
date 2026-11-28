@@ -1605,7 +1605,7 @@ fn print_finding_id_query_note(result: &CheckResult, quiet: bool) {
 /// Point a human `fallow dead-code` run that reports an architecture finding at
 /// `fallow architecture`. The line goes to stderr, so stdout stays the same.
 fn print_architecture_hint(opts: &CheckOptions<'_>, results: &AnalysisResults) {
-    use colored::Colorize;
+    use crate::report::colorize::Colorize;
 
     if opts.surface != CheckSurface::DeadCode
         || opts.quiet

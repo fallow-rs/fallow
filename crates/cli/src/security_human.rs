@@ -1,6 +1,17 @@
 //! Human rendering of `fallow security` output.
+//!
+//! A path, an evidence text or a name comes from the analyzed project, so each
+//! one goes through `display_text` or the escaping `Colorize` trait before it
+//! reaches a line.
 
 use super::*;
+use fallow_output::display_text;
+
+/// A project path for a human line: `/` separators, and each control
+/// character as a visible escape.
+fn shown_path(path: &std::path::Path) -> String {
+    display_text(&path.to_string_lossy().replace('\\', "/")).into_owned()
+}
 
 /// One-line gate verdict header. Leads with the ACTION ("REVIEW REQUIRED") and
 /// immediately qualifies with the candidate framing, so a human never reads the
@@ -31,7 +42,7 @@ fn unresolved_callee_human_hint(output: &SecurityOutput) -> Option<String> {
     Some(format!(
         "Most unresolved callees: {} in {}.",
         unresolved_callee_reason_label(top_reason.reason),
-        top_file.path
+        display_text(&top_file.path)
     ))
 }
 
@@ -175,12 +186,16 @@ fn push_human_finding(out: &mut String, finding: &SecurityFinding) {
     use std::fmt::Write as _;
 
     push_human_finding_header(out, finding);
-    let _ = writeln!(out, "    evidence: {}", finding.evidence);
+    let _ = writeln!(out, "    evidence: {}", display_text(&finding.evidence));
     if let Some(hint) = dead_code_hint(finding) {
-        let _ = writeln!(out, "    dead-code: {hint}");
+        let _ = writeln!(out, "    dead-code: {}", display_text(&hint));
     }
     if let Some(runtime) = finding.runtime.as_ref() {
-        let _ = writeln!(out, "    runtime: {}", runtime_hint_text(runtime));
+        let _ = writeln!(
+            out,
+            "    runtime: {}",
+            display_text(&runtime_hint_text(runtime))
+        );
     }
     push_human_reachability(out, finding);
     push_human_import_trace(out, finding);
@@ -189,7 +204,6 @@ fn push_human_finding(out: &mut String, finding: &SecurityFinding) {
 }
 
 fn push_human_finding_header(out: &mut String, finding: &SecurityFinding) {
-    use colored::Colorize;
     use std::fmt::Write as _;
 
     let kind = security_finding_label(finding);
@@ -198,7 +212,7 @@ fn push_human_finding_header(out: &mut String, finding: &SecurityFinding) {
         out,
         "{} {label} {kind}  {}:{}",
         glyph,
-        finding.path.to_string_lossy().replace('\\', "/").bold(),
+        shown_path(&finding.path).bold(),
         finding.line,
     );
 }
@@ -248,7 +262,7 @@ fn push_human_untrusted_trace(out: &mut String, finding: &SecurityFinding) {
             let _ = writeln!(
                 out,
                 "      {}:{} ({})",
-                hop.path.to_string_lossy().replace('\\', "/"),
+                shown_path(&hop.path),
                 hop.line,
                 hop_role_label(hop.role),
             );
@@ -267,7 +281,7 @@ fn push_human_import_trace(out: &mut String, finding: &SecurityFinding) {
         let _ = writeln!(
             out,
             "      {}:{} ({})",
-            hop.path.to_string_lossy().replace('\\', "/"),
+            shown_path(&hop.path),
             hop.line,
             hop_role_label(hop.role),
         );
@@ -359,7 +373,6 @@ fn security_finding_label(finding: &SecurityFinding) -> String {
 }
 
 fn human_severity_marker(severity: SecuritySeverity) -> (colored::ColoredString, &'static str) {
-    use colored::Colorize;
     match severity {
         SecuritySeverity::High => ("[H]".red().bold(), "high"),
         SecuritySeverity::Medium => ("[M]".yellow().bold(), "medium"),

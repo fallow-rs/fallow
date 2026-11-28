@@ -417,6 +417,69 @@ fn a_health_baseline_path_with_a_line_break_stays_on_its_stderr_line() {
     );
 }
 
+/// A git repository with a `main` commit and a `head` commit that adds
+/// `changed` files.
+#[cfg(unix)]
+fn audit_repo(root: &Path, base: &[(&str, &str)], changed: &[(&str, &str)]) {
+    use crate::common::{commit_all, git};
+    write_package(root);
+    for (path, content) in base {
+        std::fs::write(root.join(path), content).unwrap();
+    }
+    git(root, &["init", "-b", "main"]);
+    commit_all(root, "base");
+    git(root, &["checkout", "-b", "head"]);
+    for (path, content) in changed {
+        std::fs::write(root.join(path), content).unwrap();
+    }
+    commit_all(root, "head");
+}
+
+#[cfg(unix)]
+#[test]
+fn an_audit_styling_finding_keeps_its_file_name_on_its_line() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    let css = "src/sty\n::notice title=Note::\u{1b}[8mx.css";
+    audit_repo(
+        root,
+        &[
+            (
+                ".fallowrc.json",
+                r#"{"entry":["src/index.js"],"rules":{"css-selector-complexity":"error"}}"#,
+            ),
+            (
+                "src/index.js",
+                "import './sty\\n::notice title=Note::\\u001b[8mx.css';\n",
+            ),
+            (css, "#app .legacy .title { color: red; }\n"),
+        ],
+        &[(
+            css,
+            "#app .legacy .title { color: red; }\n#nav .menu .item { color: green; }\n",
+        )],
+    );
+
+    for color in [false, true] {
+        let output = run_with_color(
+            root,
+            &["audit", "--base", "main", "--no-cache", "--only", "health"],
+            color,
+        );
+        assert!(
+            output.stdout.contains("css-selector-complexity"),
+            "color {color}: the fixture must give a styling finding:\n{}",
+            output.stdout
+        );
+        assert_no_line_starts_with(&output.stdout, RUNNER_PREFIX, "audit");
+        assert!(
+            !output.stdout.contains(HIDE_SEQUENCE),
+            "color {color}: a file name sent a terminal sequence:\n{}",
+            output.stdout
+        );
+    }
+}
+
 #[cfg(unix)]
 #[test]
 fn a_markdown_clone_family_suggestion_keeps_its_file_name_on_its_line() {
@@ -442,4 +505,45 @@ fn a_markdown_clone_family_suggestion_keeps_its_file_name_on_its_line() {
         output.stdout
     );
     assert_no_line_starts_with(&output.stdout, RUNNER_PREFIX, "dupes markdown");
+}
+
+#[cfg(unix)]
+#[test]
+fn a_sink_candidate_keeps_its_file_name_on_its_line_with_color_on_and_off() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"s","main":"src/index.ts","dependencies":{"express":"4.0.0"}}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("src/index.ts"),
+        "import express from 'express';\n\
+         import { run } from './ev\\n::notice title=Note::\\u001b[8mx';\n\
+         const app = express();\n\
+         app.get('/', (req, res) => { run(req.query.q as string); res.send('ok'); });\n",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("src/ev\n::notice title=Note::\u{1b}[8mx.ts"),
+        "import { exec } from 'child_process';\nexport function run(cmd: string) { exec(cmd); }\n",
+    )
+    .unwrap();
+
+    for color in [false, true] {
+        let output = run_with_color(root, &["security"], color);
+        assert!(
+            output.stdout.contains("CWE-78"),
+            "color {color}: the fixture must give a sink candidate:\n{}",
+            output.stdout
+        );
+        assert_no_line_starts_with(&output.stdout, RUNNER_PREFIX, "sink candidates");
+        assert!(
+            !output.stdout.contains(HIDE_SEQUENCE),
+            "color {color}: a file name sent a terminal sequence:\n{}",
+            output.stdout
+        );
+    }
 }

@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use crate::report::human::colorize::Colorize;
+use crate::report::colorize::Colorize;
 
 use super::health::DOCS_HEALTH;
 use super::{plural, push_docs_footer, split_dir_filename};

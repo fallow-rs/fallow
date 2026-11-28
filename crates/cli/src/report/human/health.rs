@@ -4,7 +4,7 @@ use std::fmt::Write as _;
 use std::path::Path;
 use std::time::Duration;
 
-use crate::report::human::colorize::Colorize;
+use crate::report::colorize::Colorize;
 
 use super::health_crap_notes::{
     STATIC_CRAP_ESTIMATE_EXPLAIN, STATIC_CRAP_ESTIMATE_NOTE, crap_coverage_note,
