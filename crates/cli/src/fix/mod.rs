@@ -7,6 +7,7 @@ use fallow_config::{CatalogPrecedingCommentPolicy, OutputFormat};
 use fallow_types::output_dead_code::{MutationEvidence, ReachabilityCaveat};
 
 mod catalog;
+mod class_member_boundary;
 mod class_members;
 mod config;
 mod deps;
