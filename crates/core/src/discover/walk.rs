@@ -514,12 +514,7 @@ fn scan_for_reportable_source(
     dir: &Path,
     budget: &mut usize,
 ) -> bool {
-    let mut builder = fallow_config::source_walk_builder(dir);
-    builder
-        .follow_links(false)
-        .max_depth(Some(DOTDIR_SCAN_MAX_DEPTH + 1))
-        .threads(1);
-    builder.filter_entry(|entry| {
+    let mut builder = fallow_config::source_walk_builder(dir, |entry| {
         if entry.depth() == 0 || !entry.file_type().is_some_and(|ft| ft.is_dir()) {
             return true;
         }
@@ -528,6 +523,10 @@ fn scan_for_reportable_source(
             .to_str()
             .is_none_or(|name| !SCRIPT_SCOPE_DENYLIST.contains(&name) && name != "node_modules")
     });
+    builder
+        .follow_links(false)
+        .max_depth(Some(DOTDIR_SCAN_MAX_DEPTH + 1))
+        .threads(1);
 
     let mut per_dotdir = DOTDIR_SCAN_MAX_ENTRIES;
     for entry in builder.build() {
@@ -1323,10 +1322,6 @@ fn build_source_walk_builder(
     capture_config: bool,
     skipped_dotdirs: &SkippedDotdirSink,
 ) -> WalkBuilder {
-    let mut walk_builder = fallow_config::source_walk_builder(&config.root);
-    walk_builder
-        .types(build_walk_types(capture_config))
-        .threads(config.threads);
     // One filter, not two: `filter_entry` replaces rather than chains, and the
     // dropped-dotdir record has to happen on the same false path that decides
     // the skip so the allowlist and every plugin- or script-contributed scope
@@ -1335,7 +1330,7 @@ fn build_source_walk_builder(
     let sink = Arc::clone(skipped_dotdirs);
     let root = config.root.clone();
     let ignore_patterns = config.ignore_patterns.clone();
-    walk_builder.filter_entry(move |entry| {
+    let mut walk_builder = fallow_config::source_walk_builder(&config.root, move |entry| {
         if is_allowed_hidden_with_scopes(entry, &scopes) {
             return true;
         }
@@ -1360,6 +1355,9 @@ fn build_source_walk_builder(
         }
         false
     });
+    walk_builder
+        .types(build_walk_types(capture_config))
+        .threads(config.threads);
     walk_builder
 }
 

@@ -149,13 +149,12 @@ fn demo_patterns(root: &Path) -> Vec<String> {
 /// The Markdown files below `root`. The walk respects `.gitignore` and skips
 /// `node_modules` and hidden directories.
 fn markdown_files(root: &Path) -> Vec<PathBuf> {
-    let walker = fallow_config::source_walk_builder(root)
-        .filter_entry(|entry| {
-            let is_dir = entry.file_type().is_some_and(|kind| kind.is_dir());
-            let name = entry.file_name().to_string_lossy();
-            !(is_dir && entry.depth() > 0 && (name == "node_modules" || name.starts_with('.')))
-        })
-        .build();
+    let walker = fallow_config::source_walk_builder(root, |entry| {
+        let is_dir = entry.file_type().is_some_and(|kind| kind.is_dir());
+        let name = entry.file_name().to_string_lossy();
+        !(is_dir && entry.depth() > 0 && (name == "node_modules" || name.starts_with('.')))
+    })
+    .build();
     walker
         .flatten()
         .filter(|entry| entry.file_type().is_some_and(|kind| !kind.is_dir()))

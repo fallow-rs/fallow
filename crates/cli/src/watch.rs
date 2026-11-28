@@ -146,8 +146,7 @@ struct WatchFilter {
 
 impl WatchFilter {
     fn new(config: &fallow_config::ResolvedConfig) -> Self {
-        let (global_gitignore, _) = ignore::gitignore::Gitignore::global();
-        Self::new_with_global_gitignore(config, global_gitignore)
+        Self::new_with_global_gitignore(config, fallow_config::checked_global_gitignore())
     }
 
     fn new_with_global_gitignore(
@@ -267,13 +266,13 @@ fn build_project_gitignores(
     let mut gitignores = Vec::new();
 
     let git_exclude = root.join(".git/info/exclude");
-    if let Some(gitignore) = build_gitignore(root, &git_exclude) {
+    if let Some(gitignore) = build_gitignore(root, &git_exclude, root) {
         gitignores.push(gitignore);
     }
 
     for path in discover_project_gitignores(root, &config.ignore_patterns) {
         if let Some(base) = path.parent()
-            && let Some(gitignore) = build_gitignore(base, &path)
+            && let Some(gitignore) = build_gitignore(base, &path, root)
         {
             gitignores.push(gitignore);
         }
@@ -282,7 +281,10 @@ fn build_project_gitignores(
     gitignores
 }
 
-fn build_gitignore(base: &Path, path: &Path) -> Option<ignore::gitignore::Gitignore> {
+fn build_gitignore(base: &Path, path: &Path, root: &Path) -> Option<ignore::gitignore::Gitignore> {
+    if !fallow_config::readable_ignore_file(path, root) {
+        return None;
+    }
     let mut builder = ignore::gitignore::GitignoreBuilder::new(base);
     let _ = builder.add(path);
     builder.build().ok()
@@ -295,19 +297,18 @@ fn discover_project_gitignores(
     let root = root.to_path_buf();
     let ignore_patterns = ignore_patterns.clone();
     let filter_root = root.clone();
-    let mut walk_builder = ignore::WalkBuilder::new(&root);
-    walk_builder
-        .hidden(false)
-        .git_ignore(false)
-        .git_global(false)
-        .git_exclude(false)
-        .filter_entry(move |entry| {
-            let relative = entry
-                .path()
-                .strip_prefix(&filter_root)
-                .unwrap_or_else(|_| entry.path());
-            !has_disallowed_hidden_dir(relative) && !ignore_patterns.is_match(relative)
-        });
+    let sources = fallow_config::IgnoreFileSources {
+        git_ignore: false,
+        git_exclude: false,
+        git_global: false,
+    };
+    let walk_builder = fallow_config::checked_walk_builder(&root, sources, move |entry| {
+        let relative = entry
+            .path()
+            .strip_prefix(&filter_root)
+            .unwrap_or_else(|_| entry.path());
+        !has_disallowed_hidden_dir(relative) && !ignore_patterns.is_match(relative)
+    });
 
     let mut paths = Vec::new();
     for entry in walk_builder.build().flatten() {
@@ -1163,6 +1164,34 @@ mod tests {
         let event = make_event(&[&dir.path().join("ignored/file.ts")]);
         let paths = filter_event_paths(event, &filter);
         assert!(paths.is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn watch_filter_skips_ignore_files_that_never_end() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path().to_path_buf();
+        std::fs::write(root.join(".gitignore"), "ignored/**\n").expect("write gitignore");
+        std::fs::create_dir_all(root.join("generated")).expect("create generated dir");
+        std::os::unix::fs::symlink("/dev/zero", root.join("generated/.ignore"))
+            .expect("link .ignore to /dev/zero");
+        std::fs::create_dir_all(root.join("packages/web")).expect("create package dir");
+        let status = std::process::Command::new("mkfifo")
+            .arg(root.join("packages/web/.gitignore"))
+            .status()
+            .expect("run mkfifo");
+        assert!(status.success());
+        let config = make_config(&root, OutputFormat::Human, 1, false);
+
+        let (sender, receiver) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let filter = WatchFilter::new(&config);
+            let _ = sender.send(filter.gitignores.len());
+        });
+        let gitignores = receiver
+            .recv_timeout(std::time::Duration::from_secs(3))
+            .expect("the watch filter must build although ignore files never end");
+        assert_eq!(gitignores, 1, "only the regular root .gitignore is read");
     }
 
     #[test]

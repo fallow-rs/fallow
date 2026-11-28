@@ -1207,6 +1207,41 @@ directory removes the matched segment and the files become visible: that is the
 keeps matching at every root, so re-rooting re-excludes the same file; those
 entries say so and point at renaming instead.
 
+### Checked ignore files
+
+Each directory walk that reads ignore files starts from
+`checked_walk_builder` in `crates/config/src/ignore_files.rs`
+(`source_walk_builder` is its source-discovery form). The `ignore` crate reads
+each ignore file to its end, so a FIFO or a link to a device stops the walk.
+The builder checks each file before the crate opens it: the `.gitignore` and
+`.ignore` files of the root and of its parent directories, the
+`.git/info/exclude` file, and the global excludes file of Git. For a linked
+worktree, it checks the `.git` file, the `commondir` file of the repository
+directory and the `info/exclude` file that `commondir` names, in the order the
+crate reads them. A file passes when it is a regular file of at most 1 MiB, or
+a link to such a file inside the project. The project is the nearest directory
+at or above the root that has a `.git` entry. A file above the project, the
+repository files that a `.git` file names, and the global excludes file get
+only the type and size check, because a link there to a file of the user (for
+example a dotfiles repository) is normal.
+
+- A skipped file in the root or in a parent directory turns off that kind of
+  ignore file for the whole walk.
+- A filter checks the ignore files of each directory below the root before the
+  walk enters it. A skipped file there removes that directory from the walk,
+  because the crate reads all ignore files of a directory that it enters.
+- Each skipped file gets one warning per process.
+
+The builder installs that filter with `filter_entry`, so a caller passes its
+own filter to the builder and does not call `filter_entry` again. Readers that
+build a matcher from named files (`fallow watch`, the gitignored-target check)
+and the input digest of `dead-code --finding-id` call `readable_ignore_file`
+before each read. It uses the same project scope as the walk. A path below a
+file, such as `.git/info/exclude` when `.git` is the file of a linked
+worktree, counts as absent. The first lines of the `.git` and `commondir`
+files are read as `BufRead::lines` reads them: a `\r` is removed only before
+a `\n`.
+
 ### Dynamic import pattern base
 
 `resolve_dynamic_patterns` matches a dynamic import pattern relative to the

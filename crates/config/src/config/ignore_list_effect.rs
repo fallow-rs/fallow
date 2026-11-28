@@ -125,8 +125,7 @@ impl ResolvedConfig {
     }
 
     fn mark_project_files(&self, globs: &[Vec<Option<GlobMatcher>>], hits: &mut [Vec<bool>]) {
-        let mut builder = crate::source_walk_builder(&self.root);
-        builder.filter_entry(|entry| {
+        let builder = crate::source_walk_builder(&self.root, |entry| {
             entry
                 .file_name()
                 .to_str()

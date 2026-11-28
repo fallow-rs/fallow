@@ -40,6 +40,7 @@ mod external_plugin;
 /// Extglob groups, such as `!(*.spec)`, rewritten for `globset`.
 pub mod extglob;
 mod fixability;
+mod ignore_files;
 /// JSONC parsing helpers pinning the dialect fallow accepts.
 pub mod jsonc;
 pub mod levenshtein;
@@ -67,6 +68,9 @@ pub use config_value_writer::*;
 pub use config_writer::*;
 pub use external_plugin::*;
 pub use fixability::*;
+pub use ignore_files::{
+    IgnoreFileSources, checked_global_gitignore, checked_walk_builder, readable_ignore_file,
+};
 pub use package_manager::PackageManager;
 #[doc(hidden)]
 pub use permutation::{PermutationSite, sort_permuted};

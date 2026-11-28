@@ -118,7 +118,7 @@ impl<'a> GitignoredTargets<'a> {
                 continue;
             }
             match self
-                .dir_matcher(dir)
+                .dir_matcher(dir, &repo_root)
                 .matched_path_or_any_parents(target, false)
             {
                 Match::Ignore(_) => return true,
@@ -142,17 +142,22 @@ impl<'a> GitignoredTargets<'a> {
             .clone()
     }
 
-    fn dir_matcher(&mut self, dir: &Path) -> &Gitignore {
+    fn dir_matcher(&mut self, dir: &Path, repo_root: &Path) -> &Gitignore {
         self.dir_matchers
             .entry(dir.to_path_buf())
             .or_insert_with(|| {
-                build_matcher(dir, DIR_IGNORE_FILES.iter().map(|name| dir.join(name)))
+                build_matcher(
+                    dir,
+                    repo_root,
+                    DIR_IGNORE_FILES.iter().map(|name| dir.join(name)),
+                )
             })
     }
 
     fn exclude_matcher(&mut self, repo_root: &Path) -> &Gitignore {
         self.exclude.get_or_insert_with(|| {
             build_matcher(
+                repo_root,
                 repo_root,
                 std::iter::once(repo_root.join(".git").join("info").join("exclude")),
             )
@@ -226,10 +231,41 @@ fn module_file_candidates(target: &Path) -> Vec<Candidate> {
 
 /// Build one matcher rooted at `dir` from the ignore files that exist. A line
 /// that does not parse is skipped, so the other lines of the file still apply.
-fn build_matcher(dir: &Path, files: impl Iterator<Item = PathBuf>) -> Gitignore {
+/// A file that is not a regular file, a link out of `repo_root`, or a file
+/// that is too large is not read.
+fn build_matcher(dir: &Path, repo_root: &Path, files: impl Iterator<Item = PathBuf>) -> Gitignore {
     let mut builder = GitignoreBuilder::new(dir);
-    for file in files.filter(|file| file.is_file()) {
+    for file in files.filter(|file| fallow_config::readable_ignore_file(file, repo_root)) {
         let _partial_error = builder.add(file);
     }
     builder.build().unwrap_or_else(|_| Gitignore::empty())
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rules_of_a_gitignore_that_links_out_of_the_repository_do_not_apply() {
+        let outside = tempfile::tempdir().expect("outside directory");
+        std::fs::write(outside.path().join("rules"), "generated/\n").expect("rules");
+        let directory = tempfile::tempdir().expect("repository");
+        let root = directory.path();
+        std::fs::create_dir_all(root.join(".git")).expect("git directory");
+        std::fs::create_dir_all(root.join("src")).expect("src directory");
+        std::fs::write(root.join("src/index.ts"), "").expect("importer");
+        std::os::unix::fs::symlink(outside.path().join("rules"), root.join("src/.gitignore"))
+            .expect("link out of the repository");
+        let importer = root.join("src/index.ts");
+
+        assert!(
+            !GitignoredTargets::new(root).ignores_missing_target(&importer, "./generated/client")
+        );
+
+        std::fs::remove_file(root.join("src/.gitignore")).expect("remove link");
+        std::fs::write(root.join("src/.gitignore"), "generated/\n").expect("regular rules");
+        assert!(
+            GitignoredTargets::new(root).ignores_missing_target(&importer, "./generated/client")
+        );
+    }
 }

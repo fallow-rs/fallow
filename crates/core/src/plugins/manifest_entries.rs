@@ -719,9 +719,9 @@ fn push_field_value<'a>(
 fn discover_manifest_paths(root: &Path, matcher: &globset::GlobMatcher) -> Vec<PathBuf> {
     let mut out = Vec::new();
     let canonical_root = root.canonicalize().ok();
-    let walker = fallow_config::source_walk_builder(root)
-        .filter_entry(|entry| entry.file_name() != "node_modules")
-        .build();
+    let walker =
+        fallow_config::source_walk_builder(root, |entry| entry.file_name() != "node_modules")
+            .build();
     for entry in walker.flatten() {
         let Some(file_type) = entry.file_type() else {
             continue;

@@ -1178,8 +1178,7 @@ fn collect_markdown_reference_surface_files(
     ignore_set: &globset::GlobSet,
 ) {
     let root = config.root.clone();
-    let mut builder = fallow_config::source_walk_builder(&config.root);
-    builder.filter_entry(move |entry| {
+    let builder = fallow_config::source_walk_builder(&config.root, move |entry| {
         let relative = entry
             .path()
             .strip_prefix(&root)

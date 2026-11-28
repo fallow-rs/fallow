@@ -310,21 +310,19 @@ fn normalized_text(content: &[u8]) -> String {
 /// would prune directories on one machine and not on another. It skips hidden
 /// directories (the fallow cache lives there) and `node_modules`.
 fn fingerprint_walk_builder(root: &Path) -> ignore::WalkBuilder {
-    let mut builder = ignore::WalkBuilder::new(root);
-    builder
-        .hidden(false)
-        .git_ignore(true)
-        .git_global(false)
-        .git_exclude(true)
-        .filter_entry(|entry| {
-            let is_dir = entry.file_type().is_some_and(|kind| kind.is_dir());
-            if !is_dir || entry.depth() == 0 {
-                return true;
-            }
-            let name = entry.file_name().to_string_lossy();
-            !name.starts_with('.') && name != "node_modules"
-        });
-    builder
+    let sources = fallow_config::IgnoreFileSources {
+        git_ignore: true,
+        git_exclude: true,
+        git_global: false,
+    };
+    fallow_config::checked_walk_builder(root, sources, |entry| {
+        let is_dir = entry.file_type().is_some_and(|kind| kind.is_dir());
+        if !is_dir || entry.depth() == 0 {
+            return true;
+        }
+        let name = entry.file_name().to_string_lossy();
+        !name.starts_with('.') && name != "node_modules"
+    })
 }
 
 /// The globs of the non-source files the analysis reads to resolve imports
@@ -369,7 +367,7 @@ fn input_files_digest(config: &ResolvedConfig) -> String {
     let root = config.root.as_path();
     let globs = resolution_file_globs(config);
     let mut files: std::collections::BTreeMap<String, String> = std::collections::BTreeMap::new();
-    if let Ok(content) = std::fs::read(root.join(".git/info/exclude")) {
+    if let Some(content) = read_input_file(root, &root.join(".git/info/exclude"), true) {
         files.insert(".git/info/exclude".to_owned(), normalized_text(&content));
     }
     let mut project_configs: Vec<PathBuf> = Vec::new();
@@ -388,7 +386,7 @@ fn input_files_digest(config: &ResolvedConfig) -> String {
         if config.ignore_patterns.is_match(relative) {
             continue;
         }
-        if let Ok(content) = std::fs::read(entry.path()) {
+        if let Some(content) = read_input_file(root, entry.path(), is_ignore_file) {
             let key = StableFileKey::from_relative(relative).as_str().to_owned();
             files.insert(key, normalized_text(&content));
             if is_project_config_name(&name) {
@@ -404,6 +402,31 @@ fn input_files_digest(config: &ResolvedConfig) -> String {
         .flat_map(|(path, content)| [path.as_str(), content.as_str()])
         .collect();
     fallow_types::identity::fnv1a64_parts(&parts)
+}
+
+/// The content of one fingerprint input file: a regular file inside `root`
+/// with at most [`fallow_types::read_guard::DEFAULT_MAX_READ_BYTES`] bytes.
+///
+/// An ignore file passes the ignore file check of the walk instead, so a FIFO
+/// or a link to a device is never opened, and a link to a file elsewhere in
+/// the repository is read, as the walk reads it.
+fn read_input_file(root: &Path, path: &Path, is_ignore_file: bool) -> Option<Vec<u8>> {
+    if is_ignore_file {
+        if !fallow_config::readable_ignore_file(path, root) {
+            return None;
+        }
+        return fallow_types::read_guard::read_bytes_bounded(
+            path,
+            fallow_types::read_guard::DEFAULT_MAX_READ_BYTES,
+        )
+        .ok();
+    }
+    fallow_types::read_guard::read_bytes_inside(
+        root,
+        path,
+        fallow_types::read_guard::DEFAULT_MAX_READ_BYTES,
+    )
+    .ok()
 }
 
 /// Follow the `extends` chain of one tsconfig or jsconfig file and add each
@@ -424,7 +447,10 @@ fn add_extends_chain(
             let Some(next) = resolve_extends_target(root, &current, &target) else {
                 continue;
             };
-            if let Ok(content) = std::fs::read(&next) {
+            if let Ok(content) = fallow_types::read_guard::read_bytes_bounded(
+                &next,
+                fallow_types::read_guard::DEFAULT_MAX_READ_BYTES,
+            ) {
                 files.insert(extends_key(root, &next), normalized_text(&content));
                 frontier.push((next, depth + 1));
             }
@@ -435,7 +461,11 @@ fn add_extends_chain(
 /// The `extends` targets of a tsconfig or jsconfig file: one string or an
 /// array of strings.
 fn read_extends(path: &Path) -> Option<Vec<String>> {
-    let content = std::fs::read_to_string(path).ok()?;
+    let content = fallow_types::read_guard::read_to_string_bounded(
+        path,
+        fallow_types::read_guard::DEFAULT_MAX_READ_BYTES,
+    )
+    .ok()?;
     let value: serde_json::Value = fallow_config::jsonc::parse_to_value(&content).ok()?;
     match value.get("extends")? {
         serde_json::Value::String(target) => Some(vec![target.clone()]),
