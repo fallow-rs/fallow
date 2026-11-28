@@ -2511,6 +2511,54 @@ fn github_sticky_comment_lookup_keeps_the_bot_rule_when_user_is_forbidden() {
     assert_eq!(requests, 2);
 }
 
+/// A `/user` error other than 401 or 403 stops the lookup. fallow does not
+/// fall back to a new comment and does not update a comment it cannot match.
+#[test]
+fn github_sticky_comment_lookup_stops_when_user_fails() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let body = dir.path().join("comment.md");
+    std::fs::write(&body, "<!-- fallow-id: summary -->\nnew body").expect("write body");
+    let (api_url, server) = serve(vec![
+        MockResponse {
+            method: "GET",
+            path_contains: "/repos/owner/repo/issues/7/comments?per_page=100&page=1",
+            status: 200,
+            body: GITHUB_USER_STICKY_COMMENTS,
+        },
+        MockResponse {
+            method: "GET",
+            path_contains: "/user",
+            status: 500,
+            body: r#"{"message":"Server Error"}"#,
+        },
+    ]);
+    let output = Command::new(fallow_bin())
+        .args(["--format", "json", "--quiet", "ci", "post-pr-comment"])
+        .args(["--provider", "github", "--pr", "7", "--repo", "owner/repo"])
+        .args(["--marker-id", "summary", "--dry-run", "--api-url", &api_url])
+        .arg("--body")
+        .arg(&body)
+        .env("NO_COLOR", "1")
+        .env("RUST_LOG", "")
+        .env("FALLOW_API_RETRIES", "1")
+        .env_remove("FALLOW_BOT_LOGIN")
+        .env("GH_TOKEN", "test-token")
+        .output()
+        .expect("run fallow post-pr-comment");
+    let _ = server.join();
+    let all = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_ne!(output.status.code(), Some(0), "output:\n{all}");
+    assert!(
+        all.contains("FALLOW_CI_DEDUP_LOOKUP_FAILED"),
+        "output:\n{all}"
+    );
+    assert!(!all.contains("\"action\""), "no plan expected:\n{all}");
+}
+
 /// A note of another user with the sticky marker is not updated. The token
 /// user has no bot metadata, so fallow reads it from `/user` to compare.
 #[test]
