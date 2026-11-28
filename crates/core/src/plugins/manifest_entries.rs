@@ -20,6 +20,7 @@ use std::path::{Path, PathBuf};
 use fallow_config::{
     ExternalPluginDef, ManifestCondition, ManifestEntryRule, ManifestFieldPath,
     ManifestFieldSegment, ManifestFormat, ManifestPathPart, ManifestPathTemplate,
+    glob_validation::MAX_GLOB_BYTES,
 };
 use serde_json::Value;
 
@@ -32,6 +33,7 @@ use super::config_parser::normalize_config_path;
 const MAX_MANIFEST_FIELD_VALUES: usize = 1_024;
 
 /// Maximum number of concrete paths one entry template may produce per manifest.
+/// Each concrete path is a glob of at most [`MAX_GLOB_BYTES`] bytes.
 const MAX_MANIFEST_ENTRY_EXPANSIONS: usize = 4_096;
 
 /// A kind of `manifestEntries` diagnostic, kebab-serialized for agents that
@@ -551,6 +553,11 @@ fn referenced_field_paths(rule: &ManifestEntryRule) -> Vec<ManifestFieldPath> {
     paths
 }
 
+/// The byte length of the longest of `paths`.
+fn longest(paths: &[String]) -> usize {
+    paths.iter().map(String::len).max().unwrap_or(0)
+}
+
 /// Expand `${dotted.field}` interpolations in a path against a manifest, fanning
 /// out over string / array field values. Returns an empty vec when any
 /// interpolation resolves to nothing (a missing field seeds nothing).
@@ -558,45 +565,42 @@ fn expand_interpolations(
     path: &ManifestPathTemplate,
     manifest: &Value,
 ) -> Result<Vec<String>, ExpansionError> {
+    let too_large = || ExpansionError::EntryPaths {
+        template: path.as_str().to_string(),
+    };
     let mut expanded = vec![String::new()];
     for part in path.parts() {
-        match part {
-            ManifestPathPart::Literal(literal) => {
-                for value in &mut expanded {
-                    value.push_str(literal);
-                }
-            }
-            ManifestPathPart::Field(field) => {
-                let values = field_segment_values(manifest, field)?;
-                if values.is_empty() {
-                    return Ok(Vec::new());
-                }
-
-                let Some(next_len) = expanded.len().checked_mul(values.len()) else {
-                    return Err(ExpansionError::EntryPaths {
-                        template: path.as_str().to_string(),
-                    });
-                };
-                if next_len > MAX_MANIFEST_ENTRY_EXPANSIONS {
-                    return Err(ExpansionError::EntryPaths {
-                        template: path.as_str().to_string(),
-                    });
-                }
-
-                let mut next = Vec::with_capacity(next_len);
-                for prefix in &expanded {
-                    for value in &values {
-                        let mut concrete = String::with_capacity(prefix.len() + value.len());
-                        concrete.push_str(prefix);
-                        concrete.push_str(value);
-                        next.push(concrete);
-                    }
-                }
-                expanded = next;
-            }
+        let values = match part {
+            ManifestPathPart::Literal(literal) => vec![literal.clone()],
+            ManifestPathPart::Field(field) => field_segment_values(manifest, field)?,
+        };
+        if values.is_empty() {
+            return Ok(Vec::new());
         }
+        expanded = append_each(&expanded, &values).ok_or_else(too_large)?;
     }
     Ok(expanded)
+}
+
+/// Each of `prefixes` followed by each of `values`. Returns `None` when the
+/// result has more than [`MAX_MANIFEST_ENTRY_EXPANSIONS`] paths or a path
+/// longer than [`MAX_GLOB_BYTES`].
+fn append_each(prefixes: &[String], values: &[String]) -> Option<Vec<String>> {
+    let count = prefixes.len().checked_mul(values.len())?;
+    if count > MAX_MANIFEST_ENTRY_EXPANSIONS || longest(prefixes) + longest(values) > MAX_GLOB_BYTES
+    {
+        return None;
+    }
+    let mut next = Vec::with_capacity(count);
+    for prefix in prefixes {
+        for value in values {
+            let mut concrete = String::with_capacity(prefix.len() + value.len());
+            concrete.push_str(prefix);
+            concrete.push_str(value);
+            next.push(concrete);
+        }
+    }
+    Some(next)
 }
 
 /// The path-segment string values a field yields: a string or number yields
@@ -988,6 +992,25 @@ mod tests {
                 template: "${left}/${right}/index.ts".to_string(),
             })
         );
+    }
+
+    #[test]
+    fn a_manifest_value_that_makes_a_path_too_long_is_an_explicit_error() {
+        let numbers: Vec<Value> = (0..64).map(Value::from).collect();
+        let manifest = serde_json::json!({
+            "part": "y".repeat(1_000),
+            "a": numbers,
+            "b": numbers,
+        });
+        let path = format!("${{a}}/${{b}}{}", "${part}".repeat(30));
+
+        let result = expand_interpolations(&template(&path), &manifest);
+
+        let bytes: usize = result
+            .as_ref()
+            .map_or(0, |paths| paths.iter().map(String::len).sum());
+        assert!(bytes < 1 << 20, "{bytes} bytes of entry paths");
+        assert_eq!(result, Err(ExpansionError::EntryPaths { template: path }));
     }
 
     #[test]

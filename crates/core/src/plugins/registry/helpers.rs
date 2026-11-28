@@ -764,7 +764,7 @@ fn collect_path_rule_regex_errors(
     errors: &mut Vec<PluginRegexValidationError>,
 ) {
     for pattern in &rule.exclude_regexes {
-        if let Err(source) = regex::Regex::new(pattern) {
+        if let Err(source) = fallow_config::compile_config_regex(pattern) {
             errors.push(PluginRegexValidationError::new(
                 PluginRegexValidationErrorInput {
                     plugin_name,
@@ -779,7 +779,7 @@ fn collect_path_rule_regex_errors(
         }
     }
     for pattern in &rule.exclude_segment_regexes {
-        if let Err(source) = regex::Regex::new(pattern) {
+        if let Err(source) = fallow_config::compile_config_regex(pattern) {
             errors.push(PluginRegexValidationError::new(
                 PluginRegexValidationErrorInput {
                     plugin_name,

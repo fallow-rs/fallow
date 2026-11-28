@@ -132,3 +132,93 @@ fn validate_sealed_relative_extends(
         ))
     }
 }
+
+/// The most distinct `extends` entries that one config file can list. Real
+/// configs list a few, and each distinct entry is one more full merge.
+pub(super) const MAX_EXTENDS_ENTRIES: usize = 64;
+
+/// `entries` with each repeated key at its last position only, in order.
+///
+/// The load merges the entries in order and a later entry overrides an
+/// earlier one. A repeated entry merges its full value again, so only its
+/// last position changes the result, and the earlier merges are wasted work.
+pub(super) fn keep_last_entries<T, K: Eq + std::hash::Hash>(
+    entries: Vec<T>,
+    key: impl Fn(&T) -> K,
+) -> Vec<T> {
+    let mut seen = rustc_hash::FxHashSet::default();
+    let mut kept: Vec<T> = entries
+        .into_iter()
+        .rev()
+        .filter(|entry| seen.insert(key(entry)))
+        .collect();
+    kept.reverse();
+    kept
+}
+
+/// Refuse a config that lists more than [`MAX_EXTENDS_ENTRIES`] distinct
+/// `extends` entries.
+pub(super) fn check_extends_count(count: usize, source: &str) -> Result<(), miette::Report> {
+    if count > MAX_EXTENDS_ENTRIES {
+        return Err(miette::miette!(
+            "{source} lists {count} distinct extends entries; the limit is {MAX_EXTENDS_ENTRIES}"
+        ));
+    }
+    Ok(())
+}
+
+/// The key that identifies the source of an `extends` target: the URL
+/// without the parts that do not change the fetched file, or the real path
+/// of a local file.
+pub(super) fn extends_target_key(target: &ExtendsTarget<'_>) -> super::ConfigResourceId {
+    match target {
+        ExtendsTarget::Remote(url) => {
+            super::ConfigResourceId::Remote(super::normalize_url_for_dedup(url))
+        }
+        ExtendsTarget::Local(path) => super::ConfigResourceId::Local(
+            dunce::canonicalize(path).unwrap_or_else(|_| path.clone()),
+        ),
+    }
+}
+
+/// Extract the `extends` array from a parsed JSON config value.
+///
+/// Fails loud on malformed values: the key is removed before
+/// deserialization, so `FallowConfig`'s `deny_unknown_fields` never sees a
+/// bad `extends` and the base config would otherwise go unmerged silently.
+pub(super) fn extract_extends(
+    value: &mut serde_json::Value,
+    source: &str,
+) -> Result<Vec<String>, miette::Report> {
+    let Some(extends) = value.as_object_mut().and_then(|obj| obj.remove("extends")) else {
+        return Ok(Vec::new());
+    };
+    match extends {
+        serde_json::Value::String(s) => Ok(vec![s]),
+        serde_json::Value::Array(arr) => arr
+            .into_iter()
+            .map(|entry| match entry {
+                serde_json::Value::String(s) => Ok(s),
+                other => Err(miette::miette!(
+                    "extends entries must be strings, got {} (in {source})",
+                    json_type_name(&other)
+                )),
+            })
+            .collect(),
+        other => Err(miette::miette!(
+            "extends must be a string or an array of strings, got {} (in {source})",
+            json_type_name(&other)
+        )),
+    }
+}
+
+fn json_type_name(value: &serde_json::Value) -> &'static str {
+    match value {
+        serde_json::Value::Null => "null",
+        serde_json::Value::Bool(_) => "a boolean",
+        serde_json::Value::Number(_) => "a number",
+        serde_json::Value::String(_) => "a string",
+        serde_json::Value::Array(_) => "an array",
+        serde_json::Value::Object(_) => "an object",
+    }
+}

@@ -993,7 +993,7 @@ pub fn discover_external_plugins(
     config_plugin_paths: &[String],
 ) -> Vec<ExternalPluginDef> {
     let mut plugins = Vec::new();
-    let mut seen_names = rustc_hash::FxHashSet::default();
+    let mut seen_names = PluginSeen::default();
 
     let canonical_root = dunce::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
 
@@ -1015,7 +1015,7 @@ fn load_configured_plugin_paths(
     config_plugin_paths: &[String],
     canonical_root: &Path,
     plugins: &mut Vec<ExternalPluginDef>,
-    seen_names: &mut rustc_hash::FxHashSet<String>,
+    seen_names: &mut PluginSeen,
 ) {
     for path_str in config_plugin_paths {
         let path = root.join(path_str);
@@ -1039,7 +1039,7 @@ fn load_default_plugins_dir(
     root: &Path,
     canonical_root: &Path,
     plugins: &mut Vec<ExternalPluginDef>,
-    seen_names: &mut rustc_hash::FxHashSet<String>,
+    seen_names: &mut PluginSeen,
 ) {
     let plugins_dir = root.join(".fallow").join(DEFAULT_PLUGINS_DIR_NAME);
     if plugins_dir.is_dir() && is_within_root(&plugins_dir, canonical_root) {
@@ -1051,7 +1051,7 @@ fn load_root_plugin_files(
     root: &Path,
     canonical_root: &Path,
     plugins: &mut Vec<ExternalPluginDef>,
-    seen_names: &mut rustc_hash::FxHashSet<String>,
+    seen_names: &mut PluginSeen,
 ) {
     for path in root_plugin_files(root) {
         load_plugin_file(&path, canonical_root, plugins, seen_names);
@@ -1181,18 +1181,80 @@ fn load_plugins_from_dir(
     dir: &Path,
     canonical_root: &Path,
     plugins: &mut Vec<ExternalPluginDef>,
-    seen: &mut rustc_hash::FxHashSet<String>,
+    seen: &mut PluginSeen,
 ) {
+    let Ok(real_dir) = dunce::canonicalize(dir) else {
+        return;
+    };
+    if !seen.dirs.insert(real_dir) {
+        return;
+    }
     for path in plugin_files_in_dir(dir) {
         load_plugin_file(&path, canonical_root, plugins, seen);
     }
+}
+
+/// The most distinct plugin files that one discovery reads. Real projects
+/// have a few.
+const MAX_EXTERNAL_PLUGIN_FILES: usize = 256;
+
+/// The plugin names, plugin files and plugin folders that one discovery
+/// has seen.
+#[derive(Default)]
+struct PluginSeen {
+    names: rustc_hash::FxHashSet<String>,
+    /// The real paths of the plugin files that the discovery read.
+    files: rustc_hash::FxHashSet<PathBuf>,
+    /// The real paths of the plugin folders that the discovery listed.
+    dirs: rustc_hash::FxHashSet<PathBuf>,
+    warned_file_limit: bool,
+}
+
+impl PluginSeen {
+    /// Whether the discovery reads `path`: a file that a config entry, a
+    /// folder or a link already named is read once, and the discovery reads
+    /// at most [`MAX_EXTERNAL_PLUGIN_FILES`] files.
+    fn claim_file(&mut self, path: &Path) -> bool {
+        let Ok(real) = dunce::canonicalize(path) else {
+            tracing::warn!("cannot resolve plugin file {}, skipping", path.display());
+            return false;
+        };
+        if self.files.contains(&real) {
+            return false;
+        }
+        if self.files.len() >= MAX_EXTERNAL_PLUGIN_FILES {
+            if !self.warned_file_limit {
+                warn_plugin_file_limit(path);
+                self.warned_file_limit = true;
+            }
+            return false;
+        }
+        self.files.insert(real)
+    }
+}
+
+/// Warn once per process for each first skipped plugin file. Bare `fallow`,
+/// watch and the LSP discover the plugins more than once.
+fn warn_plugin_file_limit(first_skipped: &Path) {
+    static WARNED: OnceLock<Mutex<FxHashSet<PathBuf>>> = OnceLock::new();
+    let warned = WARNED.get_or_init(|| Mutex::new(FxHashSet::default()));
+    if let Ok(mut set) = warned.lock()
+        && !set.insert(first_skipped.to_path_buf())
+    {
+        return;
+    }
+    tracing::warn!(
+        "more than {MAX_EXTERNAL_PLUGIN_FILES} external plugin files: skipped {} and the plugin \
+         files after it",
+        first_skipped.display()
+    );
 }
 
 fn load_plugin_file(
     path: &Path,
     canonical_root: &Path,
     plugins: &mut Vec<ExternalPluginDef>,
-    seen: &mut rustc_hash::FxHashSet<String>,
+    seen: &mut PluginSeen,
 ) {
     if !is_within_root(path, canonical_root) {
         tracing::warn!(
@@ -1210,12 +1272,16 @@ fn load_plugin_file(
         return;
     };
 
+    if !seen.claim_file(path) {
+        return;
+    }
+
     let Some(content) = read_plugin_file(path, canonical_root) else {
         return;
     };
 
     if let Some(plugin) = parse_plugin(&content, &format, path) {
-        push_plugin_if_unique(plugin, path, plugins, seen);
+        push_plugin_if_unique(plugin, path, plugins, &mut seen.names);
     }
 }
 
@@ -1260,3 +1326,6 @@ fn push_plugin_if_unique(
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod budget_tests;

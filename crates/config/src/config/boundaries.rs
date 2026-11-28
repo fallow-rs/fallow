@@ -907,10 +907,15 @@ impl BoundaryConfig {
                 &mut expanded_zones,
             );
             if !expansion.expanded_names.is_empty() {
-                group_expansions
+                // A zone declared more than once adds its children again.
+                let names = group_expansions
                     .entry(expansion.group_name.clone())
-                    .or_default()
-                    .extend(expansion.expanded_names);
+                    .or_default();
+                for name in expansion.expanded_names {
+                    if !names.contains(&name) {
+                        names.push(name);
+                    }
+                }
             }
             merge_logical_group_draft(&mut group_drafts, expansion.draft);
         }
@@ -1209,7 +1214,9 @@ fn expand_rules_for_groups(
 ) -> Vec<BoundaryRule> {
     let mut generated_rules = Vec::new();
     let mut explicit_rules = Vec::new();
-    for rule in original_rules {
+    for mut rule in original_rules {
+        rule.allow = dedupe_preserving_order(rule.allow);
+        rule.allow_type_only = dedupe_preserving_order(rule.allow_type_only);
         let allow = expand_rule_allow(&rule.allow, group_expansions);
         let allow_type_only = expand_rule_allow(&rule.allow_type_only, group_expansions);
 
@@ -1538,12 +1545,15 @@ fn normalize_auto_discover_dir(raw: &str) -> Option<String> {
     let with_slashes = raw.replace('\\', "/");
     let trimmed = with_slashes.trim_start_matches("./").trim_end_matches('/');
     if trimmed.starts_with('/') || trimmed.split('/').any(|part| part == "..") {
-        None
-    } else if trimmed == "." {
-        Some(String::new())
-    } else {
-        Some(trimmed.to_owned())
+        return None;
     }
+    // `src/./d` and `src//d` name the folder of `src/d`, so they give the
+    // same child patterns.
+    let segments: Vec<&str> = trimmed
+        .split('/')
+        .filter(|part| !part.is_empty() && *part != ".")
+        .collect();
+    Some(segments.join("/"))
 }
 
 fn join_relative_path(prefix: &str, suffix: &str) -> String {
@@ -1593,6 +1603,8 @@ const fn merge_status(existing: LogicalGroupStatus, new: LogicalGroupStatus) -> 
 #[derive(Default)]
 struct ChildZoneAccumulator {
     zones_by_name: rustc_hash::FxHashMap<String, BoundaryZone>,
+    /// The normalized autoDiscover folders that the zone read already.
+    read_dirs: rustc_hash::FxHashSet<String>,
     first_source_index: rustc_hash::FxHashMap<String, usize>,
 }
 
@@ -1655,6 +1667,9 @@ fn discover_child_zones_in_dir(
         );
         return false;
     };
+    if !accumulator.read_dirs.insert(discover_dir.clone()) {
+        return true;
+    }
 
     let fs_relative = join_relative_path(normalized_root, &discover_dir);
     let absolute_dir = if fs_relative.is_empty() {
@@ -1919,3 +1934,7 @@ mod read_tests;
 #[cfg(test)]
 #[path = "boundaries_preset_tests.rs"]
 mod preset_tests;
+
+#[cfg(test)]
+#[path = "boundaries_budget_tests.rs"]
+mod budget_tests;

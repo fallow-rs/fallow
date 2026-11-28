@@ -307,7 +307,7 @@ impl PluginRegexValidationError {
             field: input.field,
             rule_pattern: input.rule_pattern.to_owned(),
             regex_pattern: input.regex_pattern.to_owned(),
-            source: input.source.to_string(),
+            source: fallow_config::config_regex_error_reason(input.source),
         }
     }
 }
@@ -332,7 +332,7 @@ impl fmt::Display for PluginRegexValidationError {
             .unwrap_or_default();
         write!(
             f,
-            "plugin '{}'{}: invalid regex '{}' in {}.{} for path rule '{}': {}",
+            "plugin '{}'{}: regex '{}' in {}.{} for path rule '{}' {}",
             self.plugin_name,
             location,
             self.regex_pattern,

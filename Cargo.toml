@@ -392,6 +392,7 @@ allow = [
     { path = "crates/cli/src/coverage/upload_inventory/mod.rs", max = 1 },
     { path = "crates/cli/src/coverage/upload_source_maps.rs", max = 2 },
     { path = "crates/config/src/config/dependency_ignore.rs", max = 1 },
+    { path = "crates/config/src/config/disk_glob_walk.rs", max = 2 },
     { path = "crates/config/src/config/glob_validation.rs", max = 1 },
     { path = "crates/config/src/config/legacy_glob.rs", max = 1 },
     { path = "crates/config/src/config/resolution.rs", max = 1 },
