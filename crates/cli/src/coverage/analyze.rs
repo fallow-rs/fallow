@@ -421,7 +421,7 @@ pub(super) fn emit_cloud_error(err: &CloudError, output: OutputFormat) -> ExitCo
         CloudError::Auth(_) | CloudError::TierRequired(_) => {
             crate::telemetry::note_failure_reason(crate::telemetry::FailureReason::Auth);
         }
-        CloudError::Network(_) | CloudError::Server(_) => {
+        CloudError::Network(_) | CloudError::Server(_) | CloudError::TooManyValues(_) => {
             crate::telemetry::note_failure_reason(crate::telemetry::FailureReason::Network);
         }
         CloudError::Validation(_) => {

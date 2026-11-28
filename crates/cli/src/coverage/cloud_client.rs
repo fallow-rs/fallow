@@ -53,6 +53,8 @@ pub enum CloudError {
     NotFound(String),
     Network(String),
     Server(String),
+    /// The answer has more JSON values than one read may hold.
+    TooManyValues(String),
 }
 
 impl CloudError {
@@ -60,7 +62,7 @@ impl CloudError {
         match self {
             Self::Validation(_) => INVALID_INPUT,
             Self::Auth(_) | Self::TierRequired(_) | Self::NotFound(_) => RESOURCE_UNAVAILABLE,
-            Self::Network(_) | Self::Server(_) => NETWORK_FAILURE,
+            Self::Network(_) | Self::Server(_) | Self::TooManyValues(_) => NETWORK_FAILURE,
         }
     }
 
@@ -71,7 +73,8 @@ impl CloudError {
             | Self::TierRequired(message)
             | Self::NotFound(message)
             | Self::Network(message)
-            | Self::Server(message) => message,
+            | Self::Server(message)
+            | Self::TooManyValues(message) => message,
         }
     }
 }
@@ -353,24 +356,78 @@ pub fn fetch_runtime_context(request: &CloudRequest) -> Result<CloudRuntimeConte
         api_key: request.api_key.clone(),
         agent_source: request.agent_source.clone(),
     };
-    match cloud_transport::send(&auth, &url, &CloudBody::None, RUNTIME_CONTEXT_OPERATION)? {
+    let mut context = match read_runtime_context(&auth, &url, &request.repo) {
+        Err(CloudError::TooManyValues(_)) => {
+            read_runtime_context_pages(&auth, &url, &request.repo)?
+        }
+        result => result?,
+    };
+    super::partial_capture::apply_capture_policy(&mut context);
+    Ok(context)
+}
+
+/// Rows per page when one runtime-context answer has too many JSON values.
+/// The cloud accepts at most 1,000.
+const RUNTIME_CONTEXT_PAGE_ROWS: u32 = 1000;
+
+/// The most pages of one paged runtime-context read, so a cloud that never
+/// ends the page list cannot keep the read open.
+const MAX_RUNTIME_CONTEXT_PAGES: usize = 1000;
+
+fn read_runtime_context(
+    auth: &CloudAuth,
+    url: &str,
+    repo: &str,
+) -> Result<CloudRuntimeContext, CloudError> {
+    match cloud_transport::send(auth, url, &CloudBody::None, RUNTIME_CONTEXT_OPERATION)? {
         CloudOutcome::Success(response) => {
             serde_json::from_str::<CloudRuntimeContextResponse>(&response.body)
-                .map(|response| {
-                    let mut context = response.into_context();
-                    super::partial_capture::apply_capture_policy(&mut context);
-                    context
-                })
+                .map(CloudRuntimeContextResponse::into_context)
                 .map_err(|err| {
                     CloudError::Server(format!("malformed runtime-context response: {err}"))
                 })
         }
-        CloudOutcome::Http(failure) => Err(map_http_failure(
-            &failure,
-            RUNTIME_CONTEXT_OPERATION,
-            &request.repo,
-        )),
+        CloudOutcome::Http(failure) => {
+            Err(map_http_failure(&failure, RUNTIME_CONTEXT_OPERATION, repo))
+        }
     }
+}
+
+/// Read the runtime context of a large repository in pages and join them.
+/// Each page has the same repository fields, and the function, blast-radius
+/// and importance rows of its functions. The value limit of the transport
+/// applies to each page. The cloud leaves the `never_called` rows out of the
+/// pages of a context that is not actionable.
+fn read_runtime_context_pages(
+    auth: &CloudAuth,
+    url: &str,
+    repo: &str,
+) -> Result<CloudRuntimeContext, CloudError> {
+    let first_url = format!("{url}&limit={RUNTIME_CONTEXT_PAGE_ROWS}");
+    let mut context = read_runtime_context(auth, &first_url, repo)?;
+    let mut cursor = take_next_cursor(&mut context);
+    let mut pages = 1;
+    while let Some(next) = cursor {
+        if pages == MAX_RUNTIME_CONTEXT_PAGES {
+            return Err(CloudError::Server(format!(
+                "runtime-context response did not end after {MAX_RUNTIME_CONTEXT_PAGES} pages"
+            )));
+        }
+        let page_url = format!("{first_url}&cursor={}", url_encode_query_value(&next));
+        let mut page = read_runtime_context(auth, &page_url, repo)?;
+        cursor = take_next_cursor(&mut page);
+        context.functions.append(&mut page.functions);
+        context.blast_radius.append(&mut page.blast_radius);
+        context.importance.append(&mut page.importance);
+        pages += 1;
+    }
+    Ok(context)
+}
+
+/// Remove the `page` field of a paged answer and return its next cursor.
+fn take_next_cursor(context: &mut CloudRuntimeContext) -> Option<String> {
+    let page = context.extra.remove("page")?;
+    page.get("next_cursor")?.as_str().map(str::to_owned)
 }
 
 /// Map a non-2xx cloud answer to a [`CloudError`]. The 5xx statuses never
@@ -736,5 +793,91 @@ mod tests {
         assert_eq!(function.extra["covered_by_test"], Value::Null);
         assert!(!function.extra.contains_key("hit_count"));
         assert!(context.blast_radius[0].extra["production_callers"].is_null());
+    }
+
+    /// One page of a runtime-context answer with `rows` function rows. Each
+    /// row carries `pad` extra values, so three pages hold more JSON values
+    /// than one answer may hold.
+    fn runtime_context_page(page: usize, rows: usize, pad: usize, next: Option<&str>) -> String {
+        let pad = vec!["0"; pad].join(",");
+        let functions = (0..rows)
+            .map(|row| {
+                format!(
+                    r#"{{"file_path":"src/p{page}.ts","function_name":"f{row}","tracking_state":"called","pad":[{pad}]}}"#
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(",");
+        let next = next.map_or_else(|| "null".to_owned(), |cursor| format!("\"{cursor}\""));
+        format!(
+            r#"{{"data":{{"repo":"acme/web","summary":{{"functions_tracked":{rows}}},"functions":[{functions}],"blast_radius":[{{"id":"b{page}","file":"src/p{page}.ts","function":"f0","line":1,"risk_band":"low"}}],"page":{{"next_cursor":{next},"total":{total}}},"warnings":[]}}}}"#,
+            total = rows * 3,
+        )
+    }
+
+    /// Serve the runtime-context answers of a large repository: one answer
+    /// with every row has more JSON values than the transport accepts, so the
+    /// read must ask for pages. Returns the endpoint and the request lines.
+    fn serve_large_runtime_context() -> (String, std::sync::mpsc::Receiver<String>) {
+        use std::io::{BufRead, BufReader, Write};
+
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind local server");
+        let port = listener.local_addr().expect("local address").port();
+        let (sender, receiver) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(stream) = stream else { return };
+                let mut reader = BufReader::new(stream.try_clone().expect("clone stream"));
+                let mut request_line = String::new();
+                reader.read_line(&mut request_line).expect("read request");
+                let mut line = String::new();
+                while reader.read_line(&mut line).is_ok_and(|read| read > 2) {
+                    line.clear();
+                }
+                let body = if !request_line.contains("limit=") {
+                    format!(
+                        r#"{{"data":{{"pad":[{}]}}}}"#,
+                        vec!["0"; 2_000_001].join(",")
+                    )
+                } else if request_line.contains("cursor=c3") {
+                    runtime_context_page(3, 1000, 700, None)
+                } else if request_line.contains("cursor=c2") {
+                    runtime_context_page(2, 1000, 700, Some("c3"))
+                } else {
+                    runtime_context_page(1, 1000, 700, Some("c2"))
+                };
+                let _ = sender.send(request_line);
+                let mut stream = stream;
+                let _ = write!(
+                    stream,
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+            }
+        });
+        (format!("http://127.0.0.1:{port}"), receiver)
+    }
+
+    #[test]
+    fn runtime_context_over_the_value_limit_is_read_in_pages() {
+        let (endpoint, requests) = serve_large_runtime_context();
+        let mut request = request("acme/web");
+        request.api_endpoint = Some(endpoint);
+        let context = fetch_runtime_context(&request).expect("the paged read succeeds");
+
+        assert_eq!(context.functions.len(), 3000);
+        assert_eq!(context.functions[0].file_path, "src/p1.ts");
+        assert_eq!(context.functions[2999].file_path, "src/p3.ts");
+        assert_eq!(context.blast_radius.len(), 3);
+        assert!(
+            !context.extra.contains_key("page"),
+            "the merged read has no page"
+        );
+        let requests: Vec<String> = requests.try_iter().collect();
+        assert_eq!(requests.len(), 4, "{requests:?}");
+        assert!(!requests[0].contains("limit="));
+        assert!(requests[1].contains("limit=1000") && !requests[1].contains("cursor="));
+        assert!(requests[2].contains("cursor=c2"));
+        assert!(requests[3].contains("cursor=c3"));
     }
 }
