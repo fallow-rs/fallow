@@ -9,7 +9,6 @@ use fallow_output::MutationCacheOutput;
 use crate::mutation::dry_run_cache::DryRunCache;
 use crate::mutation::protocol::InitRequest;
 use crate::mutation::result_cache::{KeyFiles, NOT_KEYED, ResultCache};
-use crate::mutation::run_dir::RunFile;
 use crate::mutation::scheduler::{ScheduleIssue, ScheduleOutcome};
 
 /// The result cache of a run. `None` with `--no-cache`.
@@ -48,8 +47,8 @@ pub(super) fn key_files(
 /// `cache-write-failed` issue and keeps the run result. Gives `None` with no
 /// cache (`--no-cache`) and when no companion started.
 pub(super) fn store_results(
-    cache: Option<&ResultCache>,
-    dry_cache: Option<&DryRunCache>,
+    (cache, dry_cache): (Option<&ResultCache>, Option<&DryRunCache>),
+    options: &crate::mutation::MutationRunOptions,
     outcome: &mut ScheduleOutcome,
 ) -> Option<MutationCacheOutput> {
     let cache = cache.filter(|_| outcome.ready.is_some())?;
@@ -60,6 +59,11 @@ pub(super) fn store_results(
             "the mutation result cache was not saved: {message}"
         ));
     }
+    let reach = super::mutation_reach::ReachRequest::new(
+        options.reach_selection,
+        !options.kill_matrix_targets.is_empty(),
+    );
+    let reach_selection = super::mutation_reach::finish(reach, dry_cache, outcome);
     let dry_run_stored = dry_cache.map_or(0, |dry_cache| {
         let stored = dry_cache.record(&outcome.dry_run_entries);
         if let Err(message) = dry_cache.save() {
@@ -84,23 +88,27 @@ pub(super) fn store_results(
         dry_run_misses: outcome.dry_run_missed,
         dry_run_stored,
         not_keyed: NOT_KEYED.iter().map(|&item| item.to_owned()).collect(),
+        reach_selection,
     })
 }
 
-/// The dry-run cache of a run that has the result cache `keys`. It keys on
-/// the result cache key of each test file.
+/// The dry-run cache of a run of `plan` at `root` that has the result cache
+/// `keys`. It keys on the result cache key of each test file. A plan with
+/// probes gives it the reach facts of the run.
 pub(super) fn dry_run_cache(
     keys: &Arc<ResultCache>,
     mutation_cache: &Path,
-    instrumented: &[RunFile<'_>],
+    (plan, root): (&MutationPlan, &Path),
     operators: Option<&[String]>,
     init: &InitRequest,
 ) -> Arc<DryRunCache> {
-    Arc::new(DryRunCache::open(
+    let instrumented = super::mutation_reach::run_files(plan);
+    let cache = DryRunCache::open(
         mutation_cache,
         Arc::clone(keys),
-        instrumented,
+        &instrumented,
         operators,
         init,
-    ))
+    );
+    Arc::new(super::mutation_reach::with_facts(cache, root, plan))
 }

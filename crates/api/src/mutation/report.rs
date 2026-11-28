@@ -614,6 +614,8 @@ mod tests {
             support_files: Vec::new(),
             no_test_files: false,
             framework_config_checked: false,
+            probes: None,
+            config_support_files: Vec::new(),
             skipped_files: Vec::new(),
             unmatched_paths: Vec::new(),
             skipped_tests: Vec::new(),
@@ -627,6 +629,7 @@ mod tests {
             dry_run_reused: 0,
             dry_run_missed: 0,
             dry_run_entries: Vec::new(),
+            reach: None,
             ready: None,
             results: results
                 .iter()

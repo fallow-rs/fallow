@@ -33,6 +33,8 @@ mod dry_facts;
 mod dry_phase;
 mod dry_store;
 mod issues;
+mod reach_select;
+pub use reach_select::{ReachConfig, ReachLookup, ReachOutcome, ReachSelection, ShareProbes};
 pub mod modes;
 mod retry_set;
 mod split;
@@ -140,6 +142,8 @@ pub struct ScheduleConfig {
     pub cache: Option<Arc<dyn ResultLookup>>,
     /// The stored dry-run facts of each test file. `None` dry-runs each file.
     pub dry_runs: Option<Arc<dyn DryRunLookup>>,
+    /// The reach selection of the dry-run files, when the run selects by reach.
+    pub reach: Option<ReachConfig>,
     /// The outcome journal. It receives each final result when it is final,
     /// and gives the results of an interrupted earlier run on `--resume`.
     pub journal: Option<Arc<dyn OutcomeJournal>>,
@@ -257,6 +261,8 @@ pub struct ScheduleOutcome {
     pub dry_run_missed: usize,
     /// The new dry-run facts of each test file, for the store.
     pub dry_run_entries: Vec<DryRunEntry>,
+    /// The reach selection and the probe ids of the dry run.
+    pub reach: Option<ReachOutcome>,
 }
 
 impl ScheduleOutcome {
@@ -281,6 +287,7 @@ impl ScheduleOutcome {
             dry_run_reused: 0,
             dry_run_missed: 0,
             dry_run_entries: Vec::new(),
+            reach: None,
         }
     }
 }
@@ -1869,6 +1876,7 @@ pub fn run_schedule_with_progress(
         dry_files,
         undiscovered,
     } = start_primary(spawner, plan, config)?;
+    let dry_files = reach_select::narrow(config.reach.as_ref(), &ready, dry_files, &mut outcome);
     outcome.issues.extend(undiscovered_issue(&undiscovered));
     outcome.undiscovered_test_files = undiscovered;
     let memo = ControlMemo::default();

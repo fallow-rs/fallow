@@ -16,11 +16,11 @@ use fallow_output::{
     MutationCacheOutput, MutationCompletionStatus, MutationInspectOutput, MutationInspectStatus,
     MutationKillMatrix, MutationKillMatrixStatus, MutationKillMatrixTargetMode,
     MutationKillMatrixTargetStatus, MutationPlanDisposition, MutationPlanOutput,
-    MutationReplayCall, MutationReplayOutcome, MutationReplayOutput, MutationReplaySide,
-    MutationReplayVerdict, MutationReport, MutationResumeOutput, MutationScopeKind,
-    MutationScopeOutput, MutationSkippedFile, MutationStaleReason, MutationTargetOnlyKill,
-    MutationTestKillRow, MutationTypecheckOutput, MutationUnmatchedPath, SKIPPED_TESTS_CODE,
-    TestReachClass,
+    MutationReachSelectionMode, MutationReachSelectionOutput, MutationReplayCall,
+    MutationReplayOutcome, MutationReplayOutput, MutationReplaySide, MutationReplayVerdict,
+    MutationReport, MutationResumeOutput, MutationScopeKind, MutationScopeOutput,
+    MutationSkippedFile, MutationStaleReason, MutationTargetOnlyKill, MutationTestKillRow,
+    MutationTypecheckOutput, MutationUnmatchedPath, SKIPPED_TESTS_CODE, TestReachClass,
 };
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -728,6 +728,9 @@ fn render_status_lines(out: &mut String, report: &MutationReport, min_score: Opt
     }
     if let Some(cache) = report.cache.as_ref() {
         let _ = cache_line(out, cache);
+        if let Some(reach) = &cache.reach_selection {
+            let _ = writeln!(out, "{}", reach_line(reach));
+        }
     }
     if let Some(resume) = &report.resume {
         let _ = writeln!(out, "{}", resume_line(resume));
@@ -761,6 +764,41 @@ fn cache_line(out: &mut String, cache: &MutationCacheOutput) -> std::fmt::Result
         "Cache: {} came from an earlier run. {opt_out}",
         parts.join(" and ")
     )
+}
+
+/// The line of a run with `--reach-selection`.
+fn reach_line(reach: &MutationReachSelectionOutput) -> String {
+    if let Some(reason) = &reach.disabled {
+        let why = match reason.as_str() {
+            "kill-matrix-targets" => "a kill matrix target needs the dry run of its file",
+            "runner-shares-modules" => {
+                "the test workers keep the modules of one test file for the next one"
+            }
+            other => other,
+        };
+        return format!("Reach selection: off for this run, because {why}.");
+    }
+    let total = reach.dropped + reach.kept.values().sum::<usize>();
+    let files = plural(total, "test file", "test files");
+    match reach.mode {
+        MutationReachSelectionMode::On => format!(
+            "Reach selection: left out the dry run of {} of {total} {files}. Pass --reach-selection off to dry-run each test file.",
+            reach.dropped
+        ),
+        MutationReachSelectionMode::Check => match reach.violations.first() {
+            None => format!(
+                "Reach selection check: no dropped test file covers a mutant ({} of {total} {files} dropped).",
+                reach.dropped
+            ),
+            Some(first) => format!(
+                "Reach selection check: {} {}, for example {} covers mutant {}.",
+                reach.violations.len(),
+                plural(reach.violations.len(), "wrong drop", "wrong drops"),
+                first.test_file,
+                first.mutant_id
+            ),
+        },
+    }
 }
 
 /// The line of a `--resume` run.

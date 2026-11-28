@@ -433,6 +433,12 @@ pub(super) fn plan_with_wraps(
         mutant_ids: (!options.mutant_ids.is_empty())
             .then(|| options.mutant_ids.iter().cloned().collect()),
         record_exports,
+        probes: !record_exports
+            && super::mutation_reach::enabled(
+                options.reach_selection,
+                options.analysis.no_cache,
+                !options.kill_matrix_targets.is_empty(),
+            ),
     };
     // The runner decision reads the test files of the first plan. A second
     // plan without the component files keeps that decision.
@@ -893,13 +899,7 @@ fn recording_and_witnesses(
 
 /// The instrumented files of `plan` as the run directory takes them.
 pub(super) fn run_files(plan: &MutationPlan) -> Vec<RunFile<'_>> {
-    plan.files
-        .iter()
-        .map(|file| RunFile {
-            path: &file.path,
-            code: &file.instrumented_code,
-        })
-        .collect()
+    super::mutation_reach::run_files(plan)
 }
 
 /// The journal path as the report shows it: relative to the root, with `/`
@@ -1251,7 +1251,7 @@ fn execute(
     let init = init_request(planned, &root, &run_dir);
     let dry_cache = result_cache.as_ref().map(|keys| {
         let operators = planned.operators.as_deref();
-        dry_run_cache(keys, &mutation_cache, &run_files(plan), operators, &init)
+        dry_run_cache(keys, &mutation_cache, (plan, &root), operators, &init)
     });
     let config = ScheduleConfig {
         init,
@@ -1270,6 +1270,7 @@ fn execute(
             .clone()
             .map(|cache| cache as Arc<dyn DryRunLookup>),
         journal: Some(Arc::clone(&run_journal.journal) as Arc<dyn OutcomeJournal>),
+        reach: super::mutation_reach::schedule_config(options, plan, dry_cache.as_ref()),
     };
     let spawner = ProcessSpawner {
         runtime: runtime.path.clone(),
@@ -1282,7 +1283,8 @@ fn execute(
     let mut outcome = run_schedule_with_progress(&spawner, &schedule, &config, progress)
         .map_err(|error| schedule_error(&error, &config.runner, config.runner_timeout))?;
     let runner = runner_output(&outcome, name, manifest, &runtime);
-    let cache = store_results(result_cache.as_deref(), dry_cache.as_deref(), &mut outcome);
+    let caches = (result_cache.as_deref(), dry_cache.as_deref());
+    let cache = store_results(caches, options, &mut outcome);
     let journal_run_id = Some(run_journal.journal.run_id().to_owned());
     let resume = settle_journal(options, run_journal, &mut outcome);
     let (record, witness) = record_and_search(options, &outcome, spawner, &config, &mutation_cache);
@@ -1728,6 +1730,8 @@ mod tests {
             counts: fallow_engine::mutation::MutationPlanCounts::default(),
             no_test_files: false,
             framework_config_checked: false,
+            probes: None,
+            config_support_files: Vec::new(),
             skipped_files: Vec::new(),
             unmatched_paths: Vec::new(),
             skipped_tests: Vec::new(),
@@ -1765,6 +1769,8 @@ mod tests {
             counts: fallow_engine::mutation::MutationPlanCounts::default(),
             no_test_files: false,
             framework_config_checked: false,
+            probes: None,
+            config_support_files: Vec::new(),
             skipped_files: Vec::new(),
             unmatched_paths: Vec::new(),
             skipped_tests: Vec::new(),

@@ -6,7 +6,7 @@ use std::process::Command;
 use fallow_output::{MutantStatus, MutationCompletionStatus, MutationReport};
 
 use super::template::{self, Runner};
-use crate::mutation::{MutationRunOptions, MutationRunScope, Operator};
+use crate::mutation::{MutationRunOptions, MutationRunScope, Operator, ReachSelectionMode};
 use crate::{AnalysisOptions, run_mutation};
 
 /// With this variable set to `1`, a missing runner fails the test instead
@@ -87,12 +87,16 @@ pub struct Run {
     pub stored: usize,
     /// The test files whose dry-run facts came from the cache.
     pub dry_run_hits: usize,
+    /// The test files that the reach record left out of the dry run.
+    pub reach_dropped: usize,
 }
 
 /// A template project in a temporary directory.
 pub struct Project {
     _dir: tempfile::TempDir,
     pub root: PathBuf,
+    /// The reach selection of a cached run. A cache-free run has none.
+    reach: ReachSelectionMode,
 }
 
 impl Project {
@@ -100,7 +104,16 @@ impl Project {
         let dir = tempfile::tempdir().expect("dir");
         let root = dunce::canonicalize(dir.path()).expect("root");
         template::write(&root, runner, vitest);
-        Self { _dir: dir, root }
+        Self {
+            _dir: dir,
+            root,
+            reach: ReachSelectionMode::Off,
+        }
+    }
+
+    /// The project with `reach` for each cached run.
+    pub fn with_reach(self, reach: ReachSelectionMode) -> Self {
+        Self { reach, ..self }
     }
 
     /// One mutation run of the arithmetic operator on [`SOURCE`], with the
@@ -116,6 +129,11 @@ impl Project {
             operators: Some(vec![Operator::ArithmeticOperator]),
             allow_dirty: true,
             concurrency: Some(1),
+            reach_selection: if cached {
+                self.reach
+            } else {
+                ReachSelectionMode::Off
+            },
             ..MutationRunOptions::default()
         };
         let report = run_mutation(&options).expect("the mutation run completes");
@@ -123,6 +141,12 @@ impl Project {
         let (hits, stored, dry_run_hits) = report.cache.as_ref().map_or((0, 0, 0), |cache| {
             (cache.hits, cache.stored, cache.dry_run_hits)
         });
+        let reach_dropped = report
+            .cache
+            .as_ref()
+            .and_then(|cache| cache.reach_selection.as_ref())
+            .filter(|reach| matches!(reach.mode, fallow_output::MutationReachSelectionMode::On))
+            .map_or(0, |reach| reach.dropped);
         let mut observation: Observation = report
             .mutants
             .into_iter()
@@ -144,6 +168,7 @@ impl Project {
             hits,
             stored,
             dry_run_hits,
+            reach_dropped,
         }
     }
 }

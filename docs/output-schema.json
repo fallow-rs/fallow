@@ -35463,7 +35463,7 @@
       "properties": {
         "code": {
           "type": "string",
-          "description": "A stable kebab-case code: `cache-write-failed`,\n`duplicate-test-ids`, `journal-write-failed`, `runtime-error`,\n`skipped-tests`, `static-map-miss`, `test-files-not-discovered`,\n`typecheck-failed`, `worktree-changed` or `worktree-check-failed`."
+          "description": "A stable kebab-case code: `cache-write-failed`,\n`duplicate-test-ids`, `journal-write-failed`,\n`reach-selection-violation`, `runtime-error`, `skipped-tests`,\n`static-map-miss`, `test-files-not-discovered`, `typecheck-failed`,\n`worktree-changed` or `worktree-check-failed`."
         },
         "message": {
           "type": "string",
@@ -35958,6 +35958,17 @@
             "type": "string"
           },
           "description": "The test inputs that the cache key does not cover: modules that a\ntest loads through a dynamic import that the module graph does not\nresolve (`dynamic-imports`), and files that a test reads\n(`file-reads`). A change to them does not invalidate a cached result."
+        },
+        "reach_selection": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/MutationReachSelectionOutput"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The selection of the dry-run test files by recorded function reach.\nAbsent when the run does not select by reach."
         }
       },
       "required": [
@@ -41055,6 +41066,93 @@
         "duration_ms"
       ],
       "description": "The mutant runs of one worker mode."
+    },
+    "MutationReachSelectionOutput": {
+      "type": "object",
+      "properties": {
+        "mode": {
+          "description": "The mode of the run. In a `check` run, the dry run ran each test\nfile, and `violations` compares the covering tests with the dropped\nfiles.",
+          "$ref": "#/definitions/MutationReachSelectionMode"
+        },
+        "disabled": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Why the run did not select by reach, when it did not:\n`kill-matrix-targets` (a target needs the dry run of its file) or\n`runner-shares-modules` (the workers of the runner keep the modules\nof one test file for the next one, for example Vitest with\n`isolate: false`, so no record is complete)."
+        },
+        "dropped": {
+          "type": "integer",
+          "description": "The test files that the reach record left out of the dry run. In a\ncheck run, the files that it would leave out."
+        },
+        "dropped_files": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The paths of the dropped test files, relative to the project root,\nsorted."
+        },
+        "kept": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "description": "The count of test files that stayed in the dry run, for each reason:\n`no-record`, `environment`, `runner-config-changed`, `new-reach-file`,\n`unknown-loaded-file`,\n`changed-file-without-probes`, `changed-skeleton`,\n`changed-entered-function`, `changed-binding`, `mutant-in-loaded-code`,\n`loads-mutated-declarator`,\n`mutant-in-entered-function` and `mutant-in-file-without-probes`."
+        },
+        "recorded": {
+          "type": "integer",
+          "description": "The test files whose reach record this run wrote."
+        },
+        "violations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/MutationReachViolation"
+          },
+          "description": "In a check run, each mutant that a dropped test file covers. A\nnon-empty list is a defect of the selection."
+        }
+      },
+      "required": [
+        "mode",
+        "dropped",
+        "dropped_files",
+        "kept",
+        "recorded",
+        "violations"
+      ],
+      "description": "The selection of the dry-run test files by recorded function reach."
+    },
+    "MutationReachSelectionMode": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "on",
+          "description": "Leave out the dropped test files."
+        },
+        {
+          "type": "string",
+          "const": "check",
+          "description": "Dry-run each test file and compare."
+        }
+      ],
+      "description": "The mode of the reach selection."
+    },
+    "MutationReachViolation": {
+      "type": "object",
+      "properties": {
+        "test_file": {
+          "type": "string",
+          "description": "The dropped test file, relative to the project root."
+        },
+        "mutant_id": {
+          "type": "string",
+          "description": "The mutant that a test of the file covers."
+        }
+      },
+      "required": [
+        "test_file",
+        "mutant_id"
+      ],
+      "description": "A mutant that a test file covers although the reach record drops the file."
     }
   }
 }

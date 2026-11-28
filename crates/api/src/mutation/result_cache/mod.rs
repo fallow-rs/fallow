@@ -297,6 +297,10 @@ pub struct ResultCache {
     file: PathBuf,
     /// The key parts that each mutant of the run shares.
     shared: String,
+    /// The part of `shared` without the content of the support files. The
+    /// reach record checks the support files that a test worker loads one by
+    /// one.
+    env_shared: String,
     files: KeyFiles,
     /// The content hash of each file that a key read.
     hashes: Mutex<FxHashMap<String, String>>,
@@ -350,6 +354,16 @@ impl ResultCache {
         feed(&mut hasher, runner);
         feed(&mut hasher, &lockfile_digest(root));
         feed(&mut hasher, &runner_config_digest(root));
+        let env_shared = {
+            let mut env = hasher.clone();
+            if !files.runner_projects.is_empty() {
+                env.update((files.runner_projects.len() as u64).to_le_bytes());
+                for project in &files.runner_projects {
+                    feed(&mut env, project);
+                }
+            }
+            hex(&env.finalize())
+        };
         hasher.update((files.support_files.len() as u64).to_le_bytes());
         for support in &files.support_files {
             feed(&mut hasher, support);
@@ -366,6 +380,7 @@ impl ResultCache {
             root: root.to_path_buf(),
             file,
             shared: hex(&hasher.finalize()),
+            env_shared,
             files,
             hashes: Mutex::new(FxHashMap::default()),
             test_digests: Mutex::new(FxHashMap::default()),
@@ -415,6 +430,35 @@ impl ResultCache {
         let mut hasher = Sha256::new();
         feed(&mut hasher, &self.shared);
         feed(&mut hasher, &self.test_digest(test_file));
+        hex(&hasher.finalize())
+    }
+
+    /// The key part of `test_file` without the content of the files that it
+    /// or the support files reach: the shared part of the key without the
+    /// support files, the path and content of the test file, and the Bun
+    /// configs of its folders. The reach record of a test
+    /// file (see `dry_run_cache`) checks the reached files one by one.
+    pub fn test_env_part(&self, test_file: &str) -> String {
+        let mut hasher = Sha256::new();
+        feed(&mut hasher, &self.env_shared);
+        feed(&mut hasher, test_file);
+        feed(&mut hasher, &self.hash_of(test_file));
+        for dir in package_folders(test_file) {
+            let bunfig = format!("{dir}/{BUNFIG}");
+            feed(&mut hasher, &bunfig);
+            feed(&mut hasher, &self.hash_of(&bunfig));
+        }
+        hex(&hasher.finalize())
+    }
+
+    /// The digest of the path and the content of each of `files`.
+    pub fn files_digest(&self, files: &[String]) -> String {
+        let mut hasher = Sha256::new();
+        hasher.update((files.len() as u64).to_le_bytes());
+        for path in files {
+            feed(&mut hasher, path);
+            feed(&mut hasher, &self.hash_of(path));
+        }
         hex(&hasher.finalize())
     }
 

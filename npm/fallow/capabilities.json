@@ -1391,6 +1391,17 @@
           ]
         },
         {
+          "name": "--reach-selection",
+          "type": "string",
+          "required": false,
+          "description": "Select the dry-run test files by recorded function reach (off by default). `on` records in the cache which functions each test file enters, and leaves a test file out of a later dry run when its record proves that it cannot run a mutant. `check` records, dry-runs each file, and reports each dropped file that covers a mutant. Needs the cache. Overrides `mutation.reachSelection`",
+          "possible_values": [
+            "off",
+            "on",
+            "check"
+          ]
+        },
+        {
           "name": "--min-score",
           "type": "string",
           "required": false,

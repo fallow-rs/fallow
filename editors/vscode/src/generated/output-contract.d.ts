@@ -2072,6 +2072,10 @@ export type MutationKillMatrixTargetMode = ("target-first" | "full")
  */
 export type MutationScopeKind = ("changed" | "all" | "paths")
 /**
+ * The mode of the reach selection.
+ */
+export type MutationReachSelectionMode = ("on" | "check")
+/**
  * The result of one mutant.
  */
 export type MutantStatus = ("killed" | "timeout" | "survived" | "no_coverage" | "runtime_error" | "flaky" | "pruned" | "pending" | "equivalent" | "compile_error" | "not_killed_by_target")
@@ -22691,6 +22695,69 @@ dry_run_stored: number
  * (`file-reads`). A change to them does not invalidate a cached result.
  */
 not_keyed: string[]
+/**
+ * The selection of the dry-run test files by recorded function reach.
+ * Absent when the run does not select by reach.
+ */
+reach_selection?: (MutationReachSelectionOutput | null)
+}
+/**
+ * The selection of the dry-run test files by recorded function reach.
+ */
+export interface MutationReachSelectionOutput {
+mode: MutationReachSelectionMode
+/**
+ * Why the run did not select by reach, when it did not:
+ * `kill-matrix-targets` (a target needs the dry run of its file) or
+ * `runner-shares-modules` (the workers of the runner keep the modules
+ * of one test file for the next one, for example Vitest with
+ * `isolate: false`, so no record is complete).
+ */
+disabled?: (string | null)
+/**
+ * The test files that the reach record left out of the dry run. In a
+ * check run, the files that it would leave out.
+ */
+dropped: number
+/**
+ * The paths of the dropped test files, relative to the project root,
+ * sorted.
+ */
+dropped_files: string[]
+/**
+ * The count of test files that stayed in the dry run, for each reason:
+ * `no-record`, `environment`, `runner-config-changed`, `new-reach-file`,
+ * `unknown-loaded-file`,
+ * `changed-file-without-probes`, `changed-skeleton`,
+ * `changed-entered-function`, `changed-binding`, `mutant-in-loaded-code`,
+ * `loads-mutated-declarator`,
+ * `mutant-in-entered-function` and `mutant-in-file-without-probes`.
+ */
+kept: {
+[k: string]: number
+}
+/**
+ * The test files whose reach record this run wrote.
+ */
+recorded: number
+/**
+ * In a check run, each mutant that a dropped test file covers. A
+ * non-empty list is a defect of the selection.
+ */
+violations: MutationReachViolation[]
+}
+/**
+ * A mutant that a test file covers although the reach record drops the file.
+ */
+export interface MutationReachViolation {
+/**
+ * The dropped test file, relative to the project root.
+ */
+test_file: string
+/**
+ * The mutant that a test of the file covers.
+ */
+mutant_id: string
 }
 /**
  * The resume facts of a `--resume` run.
@@ -23137,9 +23204,10 @@ changed_paths: string[]
 export interface MutationRunIssue {
 /**
  * A stable kebab-case code: `cache-write-failed`,
- * `duplicate-test-ids`, `journal-write-failed`, `runtime-error`,
- * `skipped-tests`, `static-map-miss`, `test-files-not-discovered`,
- * `typecheck-failed`, `worktree-changed` or `worktree-check-failed`.
+ * `duplicate-test-ids`, `journal-write-failed`,
+ * `reach-selection-violation`, `runtime-error`, `skipped-tests`,
+ * `static-map-miss`, `test-files-not-discovered`, `typecheck-failed`,
+ * `worktree-changed` or `worktree-check-failed`.
  */
 code: string
 /**

@@ -1,6 +1,21 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Deserializer, Serialize};
 
+/// The selection of the dry-run test files by recorded function reach.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+pub enum MutationReachSelection {
+    /// No reach record and no selection.
+    #[default]
+    Off,
+    /// Record the functions that each test file enters, and leave a test file
+    /// out of the dry run when its record proves that it cannot run a mutant.
+    On,
+    /// Record as `on`, dry-run each test file, and report each dropped test
+    /// file that covers a mutant.
+    Check,
+}
+
 /// The test runner of `fallow mutation`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
@@ -234,6 +249,16 @@ pub struct MutationConfig {
     /// runner reads it. Unset uses each project. `--runner-project` wins.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub runner_projects: Option<Vec<String>>,
+
+    /// Select the dry-run test files by recorded function reach: `off`, `on`
+    /// or `check`. A run with `on` or `check` records in the cache which
+    /// functions each test file enters. A later run with `on` leaves a test
+    /// file out of the dry run when its record proves that the file cannot
+    /// run a mutant of that run. `check` dry-runs each file and reports each
+    /// dropped file that covers a mutant. The selection needs the cache.
+    /// Unset is `off`. `--reach-selection` wins.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reach_selection: Option<MutationReachSelection>,
 }
 
 impl MutationConfig {
@@ -257,7 +282,8 @@ mod tests {
         let config = parse(
             r#"{"runner":"vitest","operators":["arithmetic-operator","removed-call"],
                 "minScore":80,"concurrency":4,"mutantsPerLine":2,"functionScope":true,"typecheck":true,
-                "runnerConfig":"vitest.integration.config.mjs","runnerProjects":["unit"]}"#,
+                "runnerConfig":"vitest.integration.config.mjs","runnerProjects":["unit"],
+                "reachSelection":"check"}"#,
         )
         .expect("valid config");
         assert_eq!(config.runner, MutationRunner::Vitest);
@@ -273,6 +299,7 @@ mod tests {
         assert_eq!(config.mutants_per_line, Some(2));
         assert_eq!(config.function_scope, Some(true));
         assert_eq!(config.typecheck, Some(true));
+        assert_eq!(config.reach_selection, Some(MutationReachSelection::Check));
         assert_eq!(
             config.runner_config.as_deref(),
             Some("vitest.integration.config.mjs")

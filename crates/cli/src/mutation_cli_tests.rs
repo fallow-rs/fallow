@@ -1334,6 +1334,7 @@ fn cached_results_get_one_line_with_the_opt_out() {
         dry_run_misses: 0,
         dry_run_stored: 1,
         not_keyed: vec!["dynamic-imports".to_owned(), "file-reads".to_owned()],
+        reach_selection: None,
     });
     let text = run_text(&cached, &OPTIONS);
     assert!(!text.contains("Cache:"), "no line without a hit: {text}");
@@ -1344,6 +1345,7 @@ fn cached_results_get_one_line_with_the_opt_out() {
         dry_run_misses: 0,
         dry_run_stored: 0,
         not_keyed: vec!["dynamic-imports".to_owned(), "file-reads".to_owned()],
+        reach_selection: None,
     });
     let text = run_text(&cached, &OPTIONS);
     assert!(
@@ -1359,6 +1361,7 @@ fn cached_results_get_one_line_with_the_opt_out() {
         dry_run_misses: 7,
         dry_run_stored: 0,
         not_keyed: vec!["dynamic-imports".to_owned(), "file-reads".to_owned()],
+        reach_selection: None,
     });
     let text = run_text(&cached, &OPTIONS);
     assert!(
@@ -1374,6 +1377,7 @@ fn cached_results_get_one_line_with_the_opt_out() {
         dry_run_misses: 0,
         dry_run_stored: 0,
         not_keyed: vec!["dynamic-imports".to_owned(), "file-reads".to_owned()],
+        reach_selection: None,
     });
     let text = run_text(&cached, &OPTIONS);
     assert!(
