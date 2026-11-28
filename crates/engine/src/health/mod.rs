@@ -1,6 +1,7 @@
 //! Command-neutral health execution options and runners.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use fallow_config::{EmailMode, WorkspaceInfo};
 use fallow_output::{
@@ -119,7 +120,7 @@ pub(crate) fn build_styling_analysis_artifacts(
 pub fn shared_parse_data_from_artifacts(
     results: &AnalysisResults,
     graph: Option<RetainedModuleGraph>,
-    modules: Option<Vec<crate::source::ModuleInfo>>,
+    modules: Option<Arc<[crate::source::ModuleInfo]>>,
     files: Option<Vec<crate::discover::DiscoveredFile>>,
     workspaces: Vec<WorkspaceInfo>,
     script_used_packages: impl IntoIterator<Item = String>,
@@ -764,8 +765,8 @@ pub struct RuntimeCoverageOptions {
 pub struct HealthSharedParseData {
     /// Discovered files reused from the upstream analysis.
     pub files: Vec<fallow_types::discover::DiscoveredFile>,
-    /// Parsed modules reused from the upstream analysis.
-    pub modules: Vec<fallow_types::extract::ModuleInfo>,
+    /// Parsed modules reused from the upstream analysis, shared with it.
+    pub modules: Arc<[fallow_types::extract::ModuleInfo]>,
     /// Dead-code results reused by advisory health surfaces that do not need the graph.
     pub dead_code_results: Option<AnalysisResults>,
     /// Workspace metadata discovered during config resolution.

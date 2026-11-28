@@ -8,6 +8,8 @@ use fallow_config::{ResolvedConfig, RulesConfig, Severity};
 use fallow_types::discover::StableFileKey;
 use fallow_types::results::SecurityFinding;
 
+#[doc(hidden)]
+pub use crate::results::SharedDeadCodeAnalysisArtifacts;
 pub use crate::results::{
     AnalysisResults, DeadCodeAnalysis, DeadCodeAnalysisArtifacts, DeadCodeAnalysisOutput,
     DeadCodeAnalysisWithHashes, derive_security_severity, enable_security_rules,

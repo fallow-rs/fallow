@@ -1,4 +1,5 @@
 use std::process::ExitCode;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use fallow_config::{OutputFormat, ResolvedConfig, RulesConfig, Severity, WorkspaceInfo};
@@ -483,7 +484,7 @@ struct CheckAnalysisData {
     results: AnalysisResults,
     trace_graph: Option<fallow_engine::module_graph::RetainedModuleGraph>,
     trace_timings: Option<fallow_types::trace::PipelineTimings>,
-    retained_modules: Option<Vec<ModuleInfo>>,
+    retained_modules: Option<Arc<[ModuleInfo]>>,
     retained_files: Option<Vec<DiscoveredFile>>,
     workspaces: Vec<WorkspaceInfo>,
     workspace_diagnostics: Vec<fallow_config::WorkspaceDiagnostic>,
@@ -494,6 +495,35 @@ struct CheckAnalysisData {
 
 fn check_data_from_artifacts(
     output: fallow_engine::dead_code::DeadCodeAnalysisArtifacts,
+    session: &fallow_engine::session::AnalysisSession,
+) -> CheckAnalysisData {
+    let fallow_engine::dead_code::DeadCodeAnalysisArtifacts {
+        results,
+        timings,
+        graph,
+        modules,
+        files,
+        script_used_packages,
+        trace_provenance,
+        file_hashes,
+    } = output;
+    check_data_from_shared_artifacts(
+        fallow_engine::dead_code::SharedDeadCodeAnalysisArtifacts {
+            results,
+            timings,
+            graph,
+            modules: modules.map(Arc::from),
+            files,
+            script_used_packages,
+            trace_provenance,
+            file_hashes,
+        },
+        session,
+    )
+}
+
+fn check_data_from_shared_artifacts(
+    output: fallow_engine::dead_code::SharedDeadCodeAnalysisArtifacts,
     session: &fallow_engine::session::AnalysisSession,
 ) -> CheckAnalysisData {
     crate::requests::measure_changed_since_scope(session.files());
@@ -557,9 +587,12 @@ fn run_check_analysis(
     .map_err(|err| emit_input_error(&format!("Workspace baseline error: {err}"), opts.output))?;
 
     let result = if opts.retain_modules_for_health {
+        // Health reads the modules only, so it shares the parsed modules of
+        // the session. An owned copy holds every module twice until the
+        // session drops.
         session
-            .analyze_dead_code_with_artifacts(true, true)
-            .map(|output| check_data_from_artifacts(output, &session))
+            .analyze_dead_code_with_shared_artifacts(true, true)
+            .map(|output| check_data_from_shared_artifacts(output, &session))
             .map_err(|e| emit_input_error(&format!("Analysis error: {e}"), opts.output))
     } else if opts.include_dupes {
         session
@@ -746,7 +779,7 @@ fn regression_config_path(opts: &CheckOptions<'_>) -> std::path::PathBuf {
 fn build_shared_parse_data(
     results: &AnalysisResults,
     trace_graph: Option<fallow_engine::module_graph::RetainedModuleGraph>,
-    retained_modules: Option<Vec<ModuleInfo>>,
+    retained_modules: Option<Arc<[ModuleInfo]>>,
     retained_files: Option<Vec<DiscoveredFile>>,
     workspaces: Vec<WorkspaceInfo>,
     script_used_packages: &rustc_hash::FxHashSet<String>,
