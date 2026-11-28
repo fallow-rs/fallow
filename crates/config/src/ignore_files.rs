@@ -408,25 +408,33 @@ pub mod test_bases {
         reason = "a test that skips its private base case names the reason"
     )]
     pub fn private_base_directory() -> Option<tempfile::TempDir> {
-        let home = std::env::var_os("HOME")?;
+        let found = private_base();
+        if let Err(reason) = &found {
+            eprintln!("skipped the private base case: {reason}");
+        }
+        found.ok()
+    }
+
+    fn private_base() -> Result<tempfile::TempDir, String> {
+        let home = std::env::var_os("HOME").ok_or("HOME is not set")?;
         let directory = tempfile::Builder::new()
             .prefix("fallow-walk-test-")
             .tempdir_in(home)
-            .ok()?;
-        let base = dunce::canonicalize(directory.path()).ok()?;
+            .map_err(|error| format!("no temp dir in the home directory: {error}"))?;
+        let base = dunce::canonicalize(directory.path())
+            .map_err(|error| format!("the temp dir does not resolve: {error}"))?;
         let private = base.ancestors().all(|dir| {
             fallow_types::read_scope::only_owner_writes(dir)
                 && std::fs::symlink_metadata(dir.join(".ignore")).is_err()
         });
         if !private {
-            eprintln!(
-                "skipped the private base case: a directory above {} can get a file \
-                 from another user, or holds a .ignore file",
+            return Err(format!(
+                "a directory above {} can get a file from another user, or holds a \
+                 .ignore file",
                 base.display()
-            );
-            return None;
+            ));
         }
-        Some(directory)
+        Ok(directory)
     }
 
     /// A base directory that all users can write.
@@ -464,14 +472,19 @@ mod tests {
                 git_global: true,
             },
         };
-        let Some(directory) = test_bases::private_base_directory() else {
-            return;
+        let repository_in = |base: &Path| {
+            let top = base.join("repo");
+            std::fs::create_dir_all(top.join(".git")).expect("git directory");
+            top
         };
-        let base = dunce::canonicalize(directory.path()).expect("canonical base");
-        let top = base.join("repo");
-        std::fs::create_dir_all(top.join(".git")).expect("git directory");
-        assert!(crate_may_read_parents(&top, reads));
+        if let Some(directory) = test_bases::private_base_directory() {
+            let base = dunce::canonicalize(directory.path()).expect("canonical base");
+            assert!(crate_may_read_parents(&repository_in(&base), reads));
+        }
 
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let base = dunce::canonicalize(directory.path()).expect("canonical base");
+        let top = repository_in(&base);
         std::fs::write(base.join(".ignore"), "x\n").expect("ignore file");
         assert!(!crate_may_read_parents(&top, reads));
         std::fs::remove_file(base.join(".ignore")).expect("remove ignore file");
