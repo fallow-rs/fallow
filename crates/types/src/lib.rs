@@ -72,6 +72,7 @@ pub mod inline_threshold;
 pub mod issue_meta;
 /// Levenshtein distance and closest-match policy for typo suggestions.
 pub mod levenshtein;
+mod link_walk;
 /// Machine-readable manifest of the fallow MCP server's tools, shared by
 /// `fallow schema` and the telemetry tool-name allowlist; kept in sync with
 /// the live tool router by a drift test in `crates/mcp`.

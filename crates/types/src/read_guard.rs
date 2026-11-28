@@ -13,6 +13,8 @@ use std::fmt;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
+use crate::link_walk::{Stop, resolve_below};
+
 /// The default size limit for a project file that fallow reads in full.
 ///
 /// Config files, `tsconfig.json` files, rule packs and `CODEOWNERS` files of
@@ -114,6 +116,10 @@ impl std::error::Error for ReadRefusal {
 /// True when `path`, after symlinks are resolved, is `root` or a path below
 /// the resolved `root`. A relative `path` is taken relative to `root`.
 ///
+/// Each component and each symlink target resolves in turn, and a step that
+/// leaves the root gives `false`, also when a later `..` would come back. So
+/// the answer depends only on entries inside the root.
+///
 /// Returns `false` when `root` or `path` does not resolve, for example a
 /// missing file, a dangling link or a path that is too long.
 #[must_use]
@@ -121,7 +127,7 @@ pub fn is_inside_root(root: &Path, path: &Path) -> bool {
     let Ok(canonical_root) = canonicalize(root) else {
         return false;
     };
-    canonicalize(&root.join(path)).is_ok_and(|resolved| resolved.starts_with(&canonical_root))
+    resolve_below(root, &canonical_root, path).is_ok()
 }
 
 /// Read `path` in full when it resolves inside `root`, is a regular file and
@@ -210,7 +216,7 @@ impl ReadRoot {
         {
             return false;
         }
-        canonicalize(&joined).is_ok_and(|resolved| resolved.starts_with(canonical_root))
+        resolve_below(&self.root, canonical_root, path).is_ok()
     }
 }
 
@@ -236,23 +242,23 @@ fn read_bytes_in(
     if let Some(source) = missing_inside(root, canonical_root, &joined, resolve_dir) {
         return Err(io(source));
     }
-    let resolved = match canonicalize(&joined) {
+    let resolved = match resolve_below(root, canonical_root, path) {
         Ok(resolved) => resolved,
-        Err(_) if unresolved_is_outside(canonical_root, &joined) => return Err(outside()),
-        Err(source) => return Err(io(source)),
+        Err(Stop::Outside | Stop::Missing { in_link: true }) => return Err(outside()),
+        Err(Stop::Missing { in_link: false }) => {
+            return Err(io(std::io::ErrorKind::NotFound.into()));
+        }
+        Err(Stop::Unreadable(source)) => return Err(io(source)),
     };
-    if !resolved.starts_with(canonical_root) {
-        return Err(outside());
-    }
     read_resolved(path, &resolved, max_bytes)
 }
 
 /// The `NotFound` error of `joined` when no entry, not even a link, has that
 /// name and the nearest existing directory above it resolves inside
-/// `canonical_root`. No link exists below a missing entry, so the full check
-/// of [`unresolved_is_outside`] cannot find a link out of the root. The walk
-/// up costs one `lstat` call for each missing directory. `None` sends the
-/// path to the full check: an entry that exists, a dangling link, a `..`
+/// `canonical_root`. No link exists below a missing entry, so the full walk
+/// of [`resolve_below`] cannot find a link out of the root. The walk up
+/// costs one `lstat` call for each missing directory. `None` sends the path
+/// to the full walk: an entry that exists, a dangling link, a `..`
 /// component, a directory that does not resolve, or a directory outside the
 /// root.
 fn missing_inside(
@@ -305,49 +311,6 @@ std::thread_local! {
 #[must_use]
 pub fn canonicalize_calls() -> u64 {
     CANONICALIZE_CALLS.with(std::cell::Cell::get)
-}
-
-/// True when `joined`, a path that does not resolve, names a place outside
-/// `canonical_root` or ends in a dangling link. The longest leading part of
-/// `joined` that resolves is resolved, and the rest is taken by text, because
-/// no link exists below a missing entry. A dangling link at the first missing
-/// entry counts as outside, so a caller cannot tell a dangling link from a
-/// link to a file outside the root.
-fn unresolved_is_outside(canonical_root: &Path, joined: &Path) -> bool {
-    use std::path::Component;
-    let components: Vec<Component<'_>> = joined.components().collect();
-    let Some((resolved_len, mut current)) = (0..=components.len()).rev().find_map(|len| {
-        let prefix: PathBuf = components[..len].iter().collect();
-        canonicalize(&prefix).ok().map(|resolved| (len, resolved))
-    }) else {
-        return true;
-    };
-    if !current.starts_with(canonical_root) {
-        return true;
-    }
-    for (index, component) in components[resolved_len..].iter().enumerate() {
-        match component {
-            Component::CurDir => {}
-            Component::ParentDir => {
-                current.pop();
-                if !current.starts_with(canonical_root) {
-                    return true;
-                }
-            }
-            Component::Normal(name) => {
-                current.push(name);
-                let dangling = index == 0
-                    && current
-                        .symlink_metadata()
-                        .is_ok_and(|meta| meta.file_type().is_symlink());
-                if dangling {
-                    return true;
-                }
-            }
-            Component::RootDir | Component::Prefix(_) => return true,
-        }
-    }
-    !current.starts_with(canonical_root)
 }
 
 /// [`read_bytes_inside`] that also requires valid UTF-8.
@@ -550,6 +513,46 @@ mod tests {
         assert!(matches!(err, ReadRefusal::OutsideRoot { .. }));
         assert!(!err.to_string().contains("content-7531"));
         assert!(!is_inside_root(&root, Path::new("../other.txt")));
+    }
+
+    /// A link that leaves the root and comes back through `..` is outside
+    /// the root. The answer does not depend on whether the directory outside
+    /// the root exists.
+    #[cfg(unix)]
+    #[test]
+    #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+    fn refuses_a_link_that_leaves_the_root_and_comes_back() {
+        for middle_exists in [true, false] {
+            let outer = tempfile::tempdir().unwrap();
+            let root = outer.path().join("project");
+            std::fs::create_dir(&root).unwrap();
+            std::fs::write(root.join("real.json"), "{}").unwrap();
+            if middle_exists {
+                std::fs::create_dir(outer.path().join("probe")).unwrap();
+            }
+            std::os::unix::fs::symlink("../probe/../project/real.json", root.join("a.json"))
+                .unwrap();
+            std::os::unix::fs::symlink(
+                outer.path().join("probe/../project/real.json"),
+                root.join("b.json"),
+            )
+            .unwrap();
+            for name in ["a.json", "b.json"] {
+                let path = Path::new(name);
+                assert!(
+                    !is_inside_root(&root, path),
+                    "{name}, middle exists: {middle_exists}"
+                );
+                assert!(!ReadRoot::new(&root).is_inside(path), "{name}");
+                assert!(
+                    matches!(
+                        read_bytes_inside(&root, path, 16),
+                        Err(ReadRefusal::OutsideRoot { .. })
+                    ),
+                    "{name}, middle exists: {middle_exists}"
+                );
+            }
+        }
     }
 
     #[cfg(unix)]
