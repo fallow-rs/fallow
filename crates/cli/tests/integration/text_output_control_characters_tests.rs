@@ -352,3 +352,44 @@ fn a_config_value_with_a_line_break_stays_on_its_warning_line() {
         output.stderr
     );
 }
+
+#[cfg(unix)]
+#[test]
+fn uncolored_health_values_drop_their_terminal_sequence_with_color_on() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    std::fs::create_dir_all(root.join("packages/a/src")).unwrap();
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"root","private":true,"workspaces":["packages/*"]}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("packages/a/package.json"),
+        r#"{"name":"a\u001b[8mhidden","main":"src/index.ts"}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("packages/a/src/index.ts"),
+        "export const f = (a: number) => (a > 1 ? a : 0);\n",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("packages/a/src/br\u{1b}[8mx.ts"),
+        "export const = (\n",
+    )
+    .unwrap();
+
+    for args in [
+        &["health", "--group-by", "package"][..],
+        &["health", "--complexity"][..],
+    ] {
+        let output = run_with_color(root, args, true);
+        assert!(
+            !output.stdout.contains(HIDE_SEQUENCE),
+            "{}: a project value sent a terminal sequence:\n{}",
+            args.join(" "),
+            output.stdout
+        );
+    }
+}
