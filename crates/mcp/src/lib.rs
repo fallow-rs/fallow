@@ -51,6 +51,15 @@ mod test_support {
 /// `#[tokio::main]`) so the synchronous CLI can call this without an ambient
 /// async context.
 pub fn run_stdio_server() -> ExitCode {
+    // The server starts itself again with this flag to run one Code Mode
+    // snippet in a process that it can kill.
+    if std::env::args()
+        .skip(1)
+        .any(|arg| arg == tools::CODE_MODE_WORKER_FLAG)
+    {
+        return tools::run_code_mode_worker();
+    }
+
     // Honor `--version` / `-V` / `-v` before starting the stdio server, so a
     // version probe gets a parseable `<bin> <version>` line instead of the
     // server hanging on an absent MCP handshake. Matches the CLI's clap shape.

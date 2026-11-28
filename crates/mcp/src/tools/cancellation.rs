@@ -13,8 +13,8 @@
 //! without a change to its signature. A call that runs as an MCP task runs in
 //! a spawned future with a scope of its own, whose token `tasks/cancel` sets
 //! (see `crate::tasks`). Code Mode is the exception: it runs its
-//! snippet on a blocking thread outside the scope, so `code_execute` reads the
-//! token first and passes it to the snippet as an argument.
+//! snippet from a blocking thread outside the scope, so `code_execute` reads
+//! the token first and passes it to the snippet run as an argument.
 
 use std::future::Future;
 use std::sync::Arc;

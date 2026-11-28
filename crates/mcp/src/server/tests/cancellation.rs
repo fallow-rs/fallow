@@ -90,6 +90,17 @@ fn fake_cli(dir: &std::path::Path, pid_path: &std::path::Path) -> std::path::Pat
     binary
 }
 
+/// The built `fallow-mcp` binary, which runs each Code Mode snippet in its own
+/// process. `cargo test -p fallow-mcp` builds it for the integration tests.
+fn code_mode_worker() -> crate::tools::CodeModeWorker {
+    let path = super::e2e::cargo_profile_dir().join("fallow-mcp");
+    assert!(
+        path.is_file(),
+        "fallow-mcp binary not found at {path:?}. Build it first: cargo build -p fallow-mcp"
+    );
+    crate::tools::CodeModeWorker::server_binary(path)
+}
+
 /// Start a server on the fake CLI, send `tools/call` request 2 with `name`
 /// and `arguments`, cancel it once the CLI runs, and report whether the CLI
 /// process exited in time.
@@ -104,6 +115,7 @@ async fn cancel_tool_call(name: &str, arguments: serde_json::Value) -> (u32, boo
         tool_router: FallowMcp::tool_router(),
         confirm_timeout: crate::tools::CONFIRM_TIMEOUT,
         tasks: crate::tasks::TaskStore::new(),
+        code_mode_worker: Some(code_mode_worker()),
     };
     let (client, server_io) = tokio::io::duplex(64 * 1024);
     let (server_read, server_write) = tokio::io::split(server_io);
@@ -177,8 +189,9 @@ async fn a_client_cancel_kills_the_subprocess_of_a_direct_tool_call() {
     );
 }
 
-/// Code Mode runs its snippet on a blocking thread, outside the request
-/// scope. The cancel must still reach the subprocess of a host call.
+/// Code Mode waits for its snippet process on a blocking thread, outside the
+/// request scope. The cancel must still reach the subprocess of a host call,
+/// which runs in the server process.
 #[tokio::test]
 async fn a_client_cancel_kills_the_subprocess_of_a_code_mode_host_call() {
     // The test process runs in `crates/mcp`, a Rust root, where Code Mode

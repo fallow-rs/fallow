@@ -74,14 +74,21 @@ fn is_cancelled(request: Option<&CancellationToken>) -> bool {
     request.is_some_and(CancellationToken::is_cancelled)
 }
 
+#[path = "code_mode_envelope.rs"]
+mod code_mode_envelope;
 #[path = "code_mode_rust.rs"]
 mod code_mode_rust;
 #[path = "code_mode_subprocess.rs"]
 mod code_mode_subprocess;
 #[path = "code_mode_tools.rs"]
 mod code_mode_tools;
+#[path = "code_mode_worker.rs"]
+mod code_mode_worker;
 
-use code_mode_rust::{is_rust_root, reject_rust_root, rust_root_envelope};
+#[cfg(test)]
+use code_mode_envelope::code_mode_limits;
+use code_mode_envelope::{SnippetLimits, error_envelope, omitted_field, refuse_before_run};
+use code_mode_rust::reject_rust_root;
 #[cfg(test)]
 use code_mode_subprocess::normalize_output;
 use code_mode_subprocess::run_fallow_sync;
@@ -91,15 +98,12 @@ use code_mode_tools::{
     CODE_MODE_ALIASES, CodeModeBacking, CodeModeTool, build_tool_args, merge_default_root,
     run_api_tool,
 };
+pub use code_mode_worker::{
+    CODE_MODE_WORKER_FLAG, CodeModeWorker, execute_code_mode_isolated, run_code_mode_worker,
+};
 
-/// Run one Code Mode snippet on the current blocking thread.
-///
-/// `request` is the cancellation token of the MCP request. The snippet runs
-/// outside the task-local request scope, so the caller captures the token
-/// before it moves the run to a blocking thread. A cancel stops the snippet
-/// at its next interrupt check, kills the process tree of a running
-/// subprocess host call, and sets the cancellation flag of a running
-/// in-process host call.
+/// [`execute_code_mode_in`] in the folder of the process.
+#[cfg(test)]
 pub fn execute_code_mode(
     binary: String,
     params: CodeExecuteParams,
@@ -108,43 +112,49 @@ pub fn execute_code_mode(
     execute_code_mode_in(binary, params, request, Path::new("."))
 }
 
-/// [`execute_code_mode`] with the server folder as a parameter. A host call
-/// without a root runs in `cwd`, so `cwd` decides the Rust refusal then.
+/// Run one Code Mode snippet and its host calls on the current thread, with
+/// `cwd` as the server folder. A host call without a root runs in `cwd`, so
+/// `cwd` decides the Rust refusal then.
+///
+/// A cancel of `request` stops the snippet at its next interrupt check, kills
+/// the process tree of a running subprocess host call, and sets the
+/// cancellation flag of a running in-process host call. The interrupt check
+/// does not run inside a native builtin of the engine, so this run can pass
+/// its deadline. The server runs each snippet with
+/// [`execute_code_mode_isolated`], which can always stop it.
+#[cfg(test)]
 fn execute_code_mode_in(
     binary: String,
     params: CodeExecuteParams,
     request: Option<CancellationToken>,
     cwd: &Path,
 ) -> Result<String, String> {
-    let timeout_ms = params
-        .timeout_ms
-        .unwrap_or(DEFAULT_TIMEOUT_MS)
-        .min(MAX_TIMEOUT_MS);
-    let max_output_bytes = params
-        .max_output_bytes
-        .unwrap_or(DEFAULT_MAX_OUTPUT_BYTES)
-        .min(MAX_OUTPUT_BYTES);
-    let limits = code_mode_limits(timeout_ms, max_output_bytes);
-    let error_limit = max_output_bytes.max(MAX_ERROR_BYTES);
-    if params.code.len() > MAX_CODE_BYTES {
-        return Err(error_envelope(
-            &format!("code mode snippet exceeded {MAX_CODE_BYTES} bytes"),
-            &[],
-            0,
-            &limits,
-            error_limit,
-        ));
-    }
-    if is_rust_root(params.root.as_deref(), cwd) {
-        return Err(rust_root_envelope(&limits, error_limit));
-    }
+    execute_code_mode_with(HostDispatch::Local { binary }, params, request, cwd)
+}
+
+/// Run one snippet in this process, with `host` as the route of its host
+/// calls.
+fn execute_code_mode_with(
+    host: HostDispatch,
+    params: CodeExecuteParams,
+    request: Option<CancellationToken>,
+    cwd: &Path,
+) -> Result<String, String> {
+    let snippet_limits = SnippetLimits::new(&params);
+    refuse_before_run(&params, &snippet_limits, cwd)?;
+    let SnippetLimits {
+        timeout_ms,
+        max_output_bytes,
+        envelope: limits,
+        error_bytes: error_limit,
+    } = snippet_limits;
     let deadline = Instant::now() + Duration::from_millis(timeout_ms);
 
     let runtime = build_code_mode_runtime(deadline, request.clone())?;
     let context =
         Context::full(&runtime).map_err(|err| format!("failed to create JS context: {err}"))?;
-    let state = Rc::new(RefCell::new(CodeModeState::new(
-        binary,
+    let state = Rc::new(RefCell::new(CodeModeState::with_host(
+        host,
         params.root,
         cwd.to_path_buf(),
         deadline,
@@ -194,51 +204,6 @@ fn execute_code_mode_in(
     }
 }
 
-/// Render the dropped-entry count only when the trace actually overflowed, so
-/// an ordinary response keeps the shape its consumers already parse.
-fn omitted_field(calls_omitted: usize) -> Option<usize> {
-    (calls_omitted > 0).then_some(calls_omitted)
-}
-
-/// Build a failed code-mode response, clamping `error` so a thrown message
-/// cannot push megabytes into the calling agent's context the way an oversized
-/// result would. The `truncated` and `error_bytes` fields appear only when the
-/// clamp actually fired, so an ordinary failure keeps its existing shape.
-fn error_envelope(
-    error: &str,
-    calls: &[CodeModeCall],
-    calls_omitted: usize,
-    limits: &serde_json::Value,
-    max_error_bytes: usize,
-) -> String {
-    let mut envelope = json!({
-        "schema_version": "mcp-code-execute/v1",
-        "ok": false,
-        "error": clamp_utf8(error, max_error_bytes),
-        "calls": calls,
-        "calls_omitted": omitted_field(calls_omitted),
-        "limits": limits
-    });
-    if error.len() > max_error_bytes
-        && let Some(fields) = envelope.as_object_mut()
-    {
-        fields.insert("truncated".to_string(), json!(true));
-        fields.insert("error_bytes".to_string(), json!(error.len()));
-    }
-    envelope.to_string()
-}
-
-/// Build the `limits` JSON block echoed on every code-mode response.
-fn code_mode_limits(timeout_ms: u64, max_output_bytes: usize) -> serde_json::Value {
-    json!({
-        "timeout_ms": timeout_ms,
-        "max_output_bytes": max_output_bytes,
-        "max_host_calls": MAX_HOST_CALLS,
-        "max_rejected_host_calls": MAX_REJECTED_HOST_CALLS,
-        "max_recorded_calls": MAX_RECORDED_CALLS
-    })
-}
-
 /// Longest prefix of `value` that fits in `max` bytes without splitting a
 /// character.
 pub(super) fn clamp_utf8(value: &str, max: usize) -> &str {
@@ -275,7 +240,7 @@ fn build_code_mode_runtime(
     deadline: Instant,
     request: Option<CancellationToken>,
 ) -> Result<Runtime, String> {
-    let runtime = Runtime::new().map_err(|err| format!("failed to create JS runtime: {err}"))?;
+    let runtime = code_mode_worker::new_engine_runtime()?;
     runtime.set_memory_limit(MEMORY_LIMIT_BYTES);
     runtime.set_max_stack_size(MAX_STACK_BYTES);
     runtime.set_interrupt_handler(Some(Box::new(move || {
@@ -539,8 +504,19 @@ fn user_source(code: &str) -> String {
     )
 }
 
+/// The route of the host calls of a snippet.
+enum HostDispatch {
+    /// Run each host call in this process, with `binary` as the fallow CLI
+    /// of the subprocess-backed calls.
+    #[cfg(test)]
+    Local { binary: String },
+    /// Send each host call to the server over the stdio of this snippet
+    /// process.
+    Server(code_mode_worker::ServerLink),
+}
+
 struct CodeModeState {
-    binary: String,
+    host: HostDispatch,
     default_root: Option<String>,
     /// The server folder: the root of a host call without a root.
     cwd: PathBuf,
@@ -576,6 +552,7 @@ struct ResolvedHostCall {
 }
 
 impl CodeModeState {
+    #[cfg(test)]
     fn new(
         binary: String,
         default_root: Option<String>,
@@ -584,8 +561,26 @@ impl CodeModeState {
         request: Option<CancellationToken>,
         max_output_bytes: usize,
     ) -> Self {
+        Self::with_host(
+            HostDispatch::Local { binary },
+            default_root,
+            cwd,
+            deadline,
+            request,
+            max_output_bytes,
+        )
+    }
+
+    fn with_host(
+        host: HostDispatch,
+        default_root: Option<String>,
+        cwd: PathBuf,
+        deadline: Instant,
+        request: Option<CancellationToken>,
+        max_output_bytes: usize,
+    ) -> Self {
         Self {
-            binary,
+            host,
             default_root,
             cwd,
             deadline,
@@ -751,14 +746,18 @@ impl CodeModeState {
         }
 
         self.dispatched += 1;
-        let outcome = dispatch_host_call(
-            &self.binary,
-            resolved.tool,
-            resolved.params,
-            self.deadline,
-            self.request.as_ref(),
-            budget,
-        );
+        let outcome = match &mut self.host {
+            #[cfg(test)]
+            HostDispatch::Local { binary } => dispatch_host_call(
+                binary,
+                resolved.tool,
+                resolved.params,
+                self.deadline,
+                self.request.as_ref(),
+                budget,
+            ),
+            HostDispatch::Server(link) => link.call(resolved.tool, resolved.params, budget),
+        };
         call.duration_ms = started.elapsed().as_millis();
         match outcome {
             Ok(stdout) => {
@@ -889,13 +888,13 @@ impl CodeModeState {
                 .collect();
         }
         self.dispatched += pending.len();
-        run_batch_dispatches(
-            &self.binary,
-            self.deadline,
-            self.request.as_ref(),
-            share,
-            pending,
-        )
+        match &mut self.host {
+            #[cfg(test)]
+            HostDispatch::Local { binary } => {
+                run_batch_dispatches(binary, self.deadline, self.request.as_ref(), share, pending)
+            }
+            HostDispatch::Server(link) => link.batch(share, pending),
+        }
     }
 
     /// Charge, memoize, and record the batch in element order, then render the

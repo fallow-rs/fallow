@@ -666,14 +666,72 @@ a parameter, so a new tool gets the same behavior without a signature change.
   ends, the call counts as abandoned, in the same count that Code Mode reads
   before it starts in-process work. The `audit` base worktree is removed on
   drop, so an early stop does not leave it behind.
-- Code Mode runs its snippet on a blocking thread, outside the task-local
-  scope. `code_execute` therefore reads the request token before
-  `spawn_blocking` and passes it to `execute_code_mode`. A cancel then acts at
-  each place where the deadline acts. The sandbox interrupt handler stops the
-  snippet. A new host call or batch element runs nothing. A subprocess host
-  call kills its process tree in the `run_fallow_sync` poll loop. An in-process
-  host call sets its cancellation flag and counts as abandoned, as on a
-  timeout.
+- Code Mode runs each snippet in a snippet process: the server binary,
+  started again with the internal `--code-mode-worker` flag
+  (`crates/mcp/src/tools/code_mode_worker.rs`). The JS engine calls its
+  interrupt handler between bytecode steps, not inside a native builtin, so
+  one builtin call (for example `reverse` on an array-like object with a
+  `length` of `2 ** 53 - 1`) can run for years. A thread cannot be stopped
+  from outside, but a process can. The server kills the snippet process tree
+  when `timeout_ms` plus a grace time of 2 seconds passes, or on a cancel, and
+  answers with `code mode execution timed out` or the cancel error. A killed
+  snippet has an empty `calls[]`.
+- The first `code_execute` call starts the snippet process, so a server that
+  never runs a snippet holds no extra process. After that, the server keeps
+  one idle snippet process (`code_mode_worker_process.rs`). A snippet takes it
+  and gives it back when it ends normally, also with a thrown error, so a
+  normal snippet pays no process start and no process cleanup. Each snippet
+  gets a new JS runtime, so no global survives into the next snippet. A
+  killed process is replaced on a background thread.
+- The allocator keeps the memory pages of a large snippet. The JS engine of
+  the snippet process therefore uses a counting allocator
+  (`code_mode_heap.rs`) that records the peak engine heap of each snippet.
+  When that peak passes 16 MiB, half of the engine memory limit, the snippet
+  process asks for its own replacement. A snippet that fills the engine memory
+  passes it, whatever its error text (`out of memory` or `null`). The engine
+  refuses an allocation over its limit before it calls the allocator, so a
+  refused allocation counts nothing. The count covers only the engine heap,
+  not the memory of the process: on Linux a new process starts with the peak
+  memory of its parent in `ru_maxrss`, so a process-level peak would replace
+  the process after each snippet.
+- The snippet process first writes a `ready` line with its protocol version
+  and the package version of its build, and each start line carries the same
+  two values. Each side refuses a peer that does not match, with an error that
+  says to restart the MCP server. A spawn that fails, for example because the
+  binary file was removed, gives the same hint, and so does a new process that
+  ends before its `ready` line. On macOS, for example, the kernel kills each
+  new process of a signed binary that was written in place while it ran. The
+  server does not compare the binary file itself: a reinstall of the same
+  version touches or replaces the file, and its snippet process still matches.
+  On Linux the server spawns `/proc/self/exe`, which stays the running binary.
+- On a new snippet process, the server starts its deadline again when the
+  `ready` line arrives, because the snippet process starts its own deadline
+  when it reads the start line. A slow process start then does not take the
+  time of the snippet, and the snippet can report its own timeout with its
+  `calls[]` trace. The shift is at most one grace time of 2 seconds.
+- A watchdog thread ends the snippet process when its parent process changes
+  (Unix), or when one snippet runs 4 seconds past its `timeout_ms`. On Linux
+  the process also sets `PR_SET_PDEATHSIG`. That signal follows the thread
+  that started the process, so the server starts every snippet process on
+  one long-lived thread. On Windows the job object of the process tree ends
+  the process with the server.
+- The server queues each line for a writer thread and does not wait for the
+  write. Only the read of the next message ends at the deadline plus the
+  grace time, or at a cancel. A process that stops reading holds only the
+  writer thread, and the read reports a failed write.
+- The snippet process starts no process and runs no analysis. It sends each
+  host call and each `fallow.all` batch to the server as one line of JSON on
+  its stdout and reads the result on its stdin. The host calls therefore run
+  in the server process, with the warm parse store and the abandoned-call
+  count of the server. The server also keeps its own `max_host_calls` budget
+  and output cap for the snippet process.
+- The server waits for the snippet process on a blocking thread, outside the
+  task-local scope. `code_execute` therefore reads the request token before
+  `spawn_blocking` and passes it to `execute_code_mode_isolated`. A cancel
+  then acts at each place where the deadline acts. The server kills the
+  snippet process. A subprocess host call kills its process tree in the
+  `run_fallow_sync` poll loop. An in-process host call sets its cancellation
+  flag and counts as abandoned, as on a timeout.
 
 A cancelled call gets no response on the wire. rmcp removes the request from
 its pool when `notifications/cancelled` arrives, and drops the response that

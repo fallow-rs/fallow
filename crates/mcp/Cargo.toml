@@ -22,7 +22,7 @@ path = "src/main.rs"
 
 [dependencies]
 rmcp = { version = "3.10", features = ["transport-io", "elicitation"] }
-rquickjs = "0.14"
+rquickjs = { version = "0.14", features = ["allocator"] }
 fallow-api.workspace = true
 fallow-output.workspace = true
 fallow-process = { workspace = true, features = ["tokio"] }
@@ -38,6 +38,9 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 xxhash-rust.workspace = true
 mimalloc = { workspace = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = { workspace = true }
 
 [dev-dependencies]
 fallow-api = { workspace = true, features = ["testing"] }

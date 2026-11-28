@@ -1424,6 +1424,7 @@ dependencies = [
  "fallow-output",
  "fallow-process",
  "fallow-types",
+ "libc",
  "mimalloc",
  "regex",
  "rmcp",

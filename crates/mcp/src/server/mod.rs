@@ -23,14 +23,15 @@ use crate::params::{
     TraceImportPathParams,
 };
 use crate::tools::{
-    analyze_call, architecture_call, dupes_call, execute_code_mode, health_call, inspect_target,
-    mutation_inspect_call, mutation_plan_call, request_cancellation, resolve_cargo_fallow,
-    run_analyze, run_architecture, run_audit, run_check_changed, run_check_runtime_coverage,
-    run_decision_surface, run_explain, run_feature_flags, run_find_dupes, run_find_similar_code,
-    run_fix_apply_confirmed, run_fix_preview, run_get_blast_radius, run_get_cleanup_candidates,
-    run_get_cloud_deployment_changes, run_get_cloud_review_packet, run_get_cloud_runtime_context,
-    run_get_hot_paths, run_get_importance, run_get_token_blast_radius, run_guard, run_health,
-    run_impact, run_impact_all, run_impact_closure, run_inspect_similar_code, run_list_boundaries,
+    analyze_call, architecture_call, dupes_call, execute_code_mode_isolated, health_call,
+    inspect_target, mutation_inspect_call, mutation_plan_call, request_cancellation,
+    resolve_cargo_fallow, run_analyze, run_architecture, run_audit, run_check_changed,
+    run_check_runtime_coverage, run_decision_surface, run_explain, run_feature_flags,
+    run_find_dupes, run_find_similar_code, run_fix_apply_confirmed, run_fix_preview,
+    run_get_blast_radius, run_get_cleanup_candidates, run_get_cloud_deployment_changes,
+    run_get_cloud_review_packet, run_get_cloud_runtime_context, run_get_hot_paths,
+    run_get_importance, run_get_token_blast_radius, run_guard, run_health, run_impact,
+    run_impact_all, run_impact_closure, run_inspect_similar_code, run_list_boundaries,
     run_list_suppressions, run_mutation_inspect, run_mutation_plan, run_mutation_tasks,
     run_project_info, run_recommend, run_rust_call, run_security_candidates, run_submit_feedback,
     run_symbol_impact, run_symbol_trace, run_trace_clone_tool, run_trace_dependency_tool,
@@ -80,6 +81,8 @@ pub struct FallowMcp {
     confirm_timeout: std::time::Duration,
     /// The MCP tasks of this server. All clones share one store.
     tasks: crate::tasks::TaskStore,
+    /// The process that runs each Code Mode snippet: this server binary.
+    code_mode_worker: Option<crate::tools::CodeModeWorker>,
 }
 
 impl FallowMcp {
@@ -91,6 +94,7 @@ impl FallowMcp {
             tool_router: Self::tool_router(),
             confirm_timeout: crate::tools::CONFIRM_TIMEOUT,
             tasks: crate::tasks::TaskStore::new(),
+            code_mode_worker: crate::tools::CodeModeWorker::current(),
         }
     }
 
@@ -168,13 +172,16 @@ impl FallowMcp {
         // The blocking thread is outside the task-local request scope, so the
         // token goes to the snippet as an argument.
         let request = request_cancellation();
-        tokio::task::spawn_blocking(move || execute_code_mode(binary, params, request))
-            .await
-            .map_err(|err| McpError::internal_error(format!("code mode task failed: {err}"), None))
-            .map(|result| match result {
-                Ok(output) => CallToolResult::success(vec![ContentBlock::text(output)]),
-                Err(output) => CallToolResult::error(vec![ContentBlock::text(output)]),
-            })
+        let worker = self.code_mode_worker.clone();
+        tokio::task::spawn_blocking(move || {
+            execute_code_mode_isolated(worker.as_ref(), binary, params, request.as_ref())
+        })
+        .await
+        .map_err(|err| McpError::internal_error(format!("code mode task failed: {err}"), None))
+        .map(|result| match result {
+            Ok(output) => CallToolResult::success(vec![ContentBlock::text(output)]),
+            Err(output) => CallToolResult::error(vec![ContentBlock::text(output)]),
+        })
     }
 
     /// Analyze a TypeScript/JavaScript project for unused code and dependency cycles. On a Rust root, it runs `cargo fallow check` (deps, visibility; no score) and takes only root. Detects unused files, exports, types, dependencies, enum/class members, unresolved imports, unlisted dependencies, duplicate exports, circular dependencies, re-export cycles (barrel files that form a structural loop, silently breaking re-exports), package cycles (workspace packages that import each other in a loop), boundary violations, rule-pack policy violations (banned calls, imports, and catalogue-derived effects declared via the rulePacks config key), stale suppression comments, missing suppression reasons when rules.require-suppression-reason is enabled, unused pnpm catalog entries (entries in pnpm-workspace.yaml `catalog:` / `catalogs:` not referenced by any workspace package), empty pnpm catalog groups, unresolved catalog references (workspace package.json declares `catalog:` but the catalog has no entry), unused dependency overrides (entries in `pnpm-workspace.yaml#overrides`, `package.json#pnpm.overrides`, top-level `package.json#overrides`, or Bun `package.json#resolutions` whose target package no workspace package declares and the active readable lockfile does not resolve), and misconfigured dependency overrides (unparsable key or empty value; the active package manager may reject or ignore the entry). Opt-in issue_types: "private-type-leaks", "deprecated-exports-in-use", "absent-component-props", "constant-parameters", "namespace-escapes", "test-only-exports". Returns structured JSON with all issues found, grouped by issue type. Each finding has a stable `finding_id`; an id absent from a scoped or differently configured run means unknown, not resolved. For code duplication use find_dupes, for complexity hotspots use check_health. Supports baselines, regression detection, performance tuning, boundary_violations, and group_by. Read the `fallow://tools/analyze` resource for the boundary_violations alias, the group_by modes, and how to dispatch the `next_steps[]` follow-up commands.

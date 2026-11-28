@@ -249,6 +249,7 @@ jobs:
               - 'crates/cli/tests/integration/trace_error_tests.rs'
               - 'crates/lsp/**'
               - 'crates/mcp/src/tools/code_mode_subprocess.rs'
+              - 'crates/mcp/src/tools/code_mode_worker.rs'
               - 'crates/mcp/src/tools/mod.rs'
               - 'crates/mcp/src/tools/rust.rs'
               - 'crates/mcp/Cargo.toml'
