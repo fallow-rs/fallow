@@ -25,13 +25,14 @@ fn cache_dir_warning(baseline: &Path, cache_dir: &Path, root: &Path) -> Option<S
     let name = baseline
         .file_name()
         .map_or_else(|| "baseline.json".into(), |name| name.to_string_lossy());
-    let root = crate::write_guard::resolve(root);
+    // The paths are shown as given. A resolved path can name the place that
+    // a linked cache directory leads to, outside the project.
     Some(format!(
         "Warning: the baseline {} is in the fallow cache directory {}. \
          Fallow tells Git to ignore all files in this directory, so you cannot commit the baseline. \
          Save the baseline to a path that you commit, for example {COMMITTED_BASELINE_DIR}/{name}.",
-        display_from(&resolved, &root),
-        display_from(&cache, &root),
+        display_from(&absolute, root),
+        display_from(cache_dir, root),
     ))
 }
 
@@ -51,7 +52,9 @@ pub fn warn_if_in_cache_dir(baseline: &Path, cache_dir: &Path, root: &Path) {
 /// `/` as the separator on every platform. A resolved path on Windows has the
 /// `\\?\` prefix, which the full path does not show.
 fn display_from(path: &Path, root: &Path) -> String {
-    fallow_types::path_util::display_relative(dunce::simplified(root), dunce::simplified(path))
+    let shown =
+        fallow_types::path_util::display_relative(dunce::simplified(root), dunce::simplified(path));
+    fallow_types::display_text::display_text(&shown).into_owned()
 }
 
 #[cfg(test)]
@@ -72,6 +75,27 @@ mod tests {
         assert!(warning.contains("cache directory .fallow."), "{warning}");
         assert!(
             warning.contains("fallow-baselines/dead-code.json"),
+            "{warning}"
+        );
+    }
+
+    /// The warning names the paths as given, not the place that a linked
+    /// cache directory leads to.
+    #[cfg(unix)]
+    #[test]
+    fn the_warning_does_not_print_where_a_linked_cache_dir_leads() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path().join("project");
+        let elsewhere = dir.path().join("target-name-6631");
+        std::fs::create_dir_all(&root).expect("root");
+        std::fs::create_dir_all(&elsewhere).expect("elsewhere");
+        let cache = root.join(".fallow");
+        std::os::unix::fs::symlink(&elsewhere, &cache).expect("link");
+        let warning = cache_dir_warning(&cache.join("dead-code.json"), &cache, &root)
+            .expect("a baseline in the cache directory is flagged");
+        assert!(!warning.contains("target-name-6631"), "{warning}");
+        assert!(
+            warning.contains("the baseline .fallow/dead-code.json is in"),
             "{warning}"
         );
     }
