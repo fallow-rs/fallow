@@ -4,7 +4,7 @@
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 /// The state of a path that a config key names, relative to the project.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -37,25 +37,29 @@ pub enum ProjectEntry {
 /// root.
 #[must_use]
 pub fn project_scope_base(root: &Path) -> PathBuf {
-    let Ok(root) = dunce::canonicalize(root) else {
+    let cache = SCOPE_BASES.get_or_init(Mutex::default);
+    if root.is_absolute()
+        && let Ok(bases) = cache.lock()
+        && let Some(base) = bases.given_bases.get(root)
+    {
+        return base.clone();
+    }
+    let Ok(resolved) = dunce::canonicalize(root) else {
         return root.to_path_buf();
     };
-    let cache = SCOPE_BASES.get_or_init(Mutex::default);
-    let generation = match cache.lock() {
-        Ok(bases) => {
-            if let Some(base) = bases.bases.get(&root) {
-                return base.clone();
-            }
-            bases.generation
-        }
-        Err(_) => return uncached_scope_base(&root),
+    let (generation, known) = match cache.lock() {
+        Ok(bases) => (bases.generation, bases.bases.get(&resolved).cloned()),
+        Err(_) => return uncached_scope_base(&resolved),
     };
-    let base = uncached_scope_base(&root);
+    let base = known.unwrap_or_else(|| uncached_scope_base(&resolved));
     // A clear during the search makes the result stale, so it is not kept.
     if let Ok(mut bases) = cache.lock()
         && bases.generation == generation
     {
-        bases.bases.insert(root, base.clone());
+        if root.is_absolute() {
+            bases.given_bases.insert(root.to_path_buf(), base.clone());
+        }
+        bases.bases.insert(resolved, base.clone());
     }
     base
 }
@@ -65,18 +69,50 @@ pub fn project_scope_base(root: &Path) -> PathBuf {
 #[derive(Default)]
 struct ScopeBases {
     bases: FxHashMap<PathBuf, PathBuf>,
+    /// The scope base of each absolute root, by the root as the caller gave
+    /// it, so a repeated call does not resolve the root again.
+    given_bases: FxHashMap<PathBuf, PathBuf>,
+    /// The probe scope of each absolute root, by the root as the caller
+    /// gave it.
+    probes: FxHashMap<PathBuf, Option<ProbeScope>>,
+    /// Directories that resolved inside a scope base, by base.
+    inside_dirs: FxHashMap<PathBuf, FxHashSet<PathBuf>>,
     generation: u64,
 }
 
+/// The resolved paths that [`may_probe_project_path`] checks a probe
+/// against, for one root.
+#[derive(Clone)]
+struct ProbeScope {
+    canonical_root: PathBuf,
+    canonical_base: PathBuf,
+    base_as_given: PathBuf,
+}
+
 static SCOPE_BASES: OnceLock<Mutex<ScopeBases>> = OnceLock::new();
+
+/// The count of [`clear_project_scope_bases`] calls, for caches outside this
+/// module that must not outlive a clear.
+static SCOPE_GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// The count of [`clear_project_scope_bases`] calls so far. A cache of scope
+/// results is valid only while this value stays the same.
+#[must_use]
+pub fn scope_generation() -> u64 {
+    SCOPE_GENERATION.load(std::sync::atomic::Ordering::Acquire)
+}
 
 /// Forget the scope bases that [`project_scope_base`] found. Workspace
 /// discovery calls it at the start of each analysis, so a long-lived
 /// process (LSP, watch) sees a new `.git` entry or workspace manifest. A
 /// search that runs during the clear does not keep its result.
 pub fn clear_project_scope_bases() {
+    SCOPE_GENERATION.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
     if let Some(Ok(mut bases)) = SCOPE_BASES.get().map(Mutex::lock) {
         bases.bases.clear();
+        bases.given_bases.clear();
+        bases.probes.clear();
+        bases.inside_dirs.clear();
         bases.generation = bases.generation.wrapping_add(1);
     }
 }
@@ -217,12 +253,19 @@ pub fn project_entry_within(
     canonical_root: &Path,
     path: &Path,
 ) -> ProjectEntry {
-    let joined = canonical_root.join(path);
-    let Ok(relative) = joined.strip_prefix(canonical_base) else {
-        return ProjectEntry::Outside;
-    };
-    let mut current = canonical_base.to_path_buf();
-    let mut components = relative.components();
+    // The canonical root holds no link, so a relative path that starts
+    // inside it walks from the root and not from the base.
+    let joined;
+    let (mut current, mut components) =
+        if path.is_relative() && canonical_root.starts_with(canonical_base) {
+            (canonical_root.to_path_buf(), path.components())
+        } else {
+            joined = canonical_root.join(path);
+            let Ok(relative) = joined.strip_prefix(canonical_base) else {
+                return ProjectEntry::Outside;
+            };
+            (canonical_base.to_path_buf(), relative.components())
+        };
     while let Some(component) = components.next() {
         match component {
             Component::CurDir => {}
@@ -299,6 +342,39 @@ pub fn absolute_path_text_inside(path: &Path, canonical_base: &Path, base_as_giv
     normalized.starts_with(canonical_base) || given.is_ok_and(|given| normalized.starts_with(given))
 }
 
+/// Whether the directory `dir` resolves inside the scope base `base`, with
+/// `check` for a directory that this run has not checked yet. A directory
+/// that passes is kept until the next [`clear_project_scope_bases`], so the
+/// probes of many candidate files in one directory check it once.
+pub fn dir_inside_scope_base(base: &Path, dir: &Path, check: impl FnOnce() -> bool) -> bool {
+    let cache = SCOPE_BASES.get_or_init(Mutex::default);
+    let generation = match cache.lock() {
+        Ok(bases) => {
+            if bases
+                .inside_dirs
+                .get(base)
+                .is_some_and(|dirs| dirs.contains(dir))
+            {
+                return true;
+            }
+            bases.generation
+        }
+        Err(_) => return check(),
+    };
+    let inside = check();
+    if inside
+        && let Ok(mut bases) = cache.lock()
+        && bases.generation == generation
+    {
+        bases
+            .inside_dirs
+            .entry(base.to_path_buf())
+            .or_default()
+            .insert(dir.to_path_buf());
+    }
+    inside
+}
+
 /// Whether a probe of `path` stays inside the read scope of the project
 /// root `root` (see [`project_scope_base`]). A relative `path` is taken
 /// relative to the root.
@@ -311,12 +387,54 @@ pub fn absolute_path_text_inside(path: &Path, canonical_base: &Path, base_as_giv
 /// not.
 #[must_use]
 pub fn may_probe_project_path(root: &Path, path: &Path) -> bool {
-    let Ok(canonical_root) = dunce::canonicalize(root) else {
+    let Some(scope) = probe_scope(root) else {
         return false;
     };
+    project_path_entry(
+        &scope.canonical_base,
+        &scope.base_as_given,
+        &scope.canonical_root,
+        path,
+    ) != ProjectEntry::Outside
+}
+
+/// The probe scope of `root`, resolved once per root until the next
+/// [`clear_project_scope_bases`]. Entry discovery checks many probes of one
+/// package root, so each check must not resolve the root and its base
+/// again. `None` when the root does not resolve.
+fn probe_scope(root: &Path) -> Option<ProbeScope> {
+    // A relative root depends on the current directory, so it is not kept.
+    if !root.is_absolute() {
+        return uncached_probe_scope(root);
+    }
+    let cache = SCOPE_BASES.get_or_init(Mutex::default);
+    let generation = match cache.lock() {
+        Ok(bases) => {
+            if let Some(scope) = bases.probes.get(root) {
+                return scope.clone();
+            }
+            bases.generation
+        }
+        Err(_) => return uncached_probe_scope(root),
+    };
+    let scope = uncached_probe_scope(root);
+    if let Ok(mut bases) = cache.lock()
+        && bases.generation == generation
+    {
+        bases.probes.insert(root.to_path_buf(), scope.clone());
+    }
+    scope
+}
+
+fn uncached_probe_scope(root: &Path) -> Option<ProbeScope> {
+    let canonical_root = dunce::canonicalize(root).ok()?;
     let canonical_base = project_scope_base(root);
-    let given = base_as_given(root, &canonical_root, &canonical_base);
-    project_path_entry(&canonical_base, &given, &canonical_root, path) != ProjectEntry::Outside
+    let base_as_given = base_as_given(root, &canonical_root, &canonical_base);
+    Some(ProbeScope {
+        canonical_root,
+        canonical_base,
+        base_as_given,
+    })
 }
 
 /// Whether `path` starts with two separators, or with a Windows prefix
@@ -397,6 +515,29 @@ fn missing_rest(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_directory_inside_the_scope_base_is_checked_once() {
+        let base = Path::new("/scope-cache-test/base");
+        let dir = base.join("packages/a");
+        let checks = std::cell::Cell::new(0);
+        let check = || {
+            checks.set(checks.get() + 1);
+            true
+        };
+        assert!(dir_inside_scope_base(base, &dir, check));
+        assert!(dir_inside_scope_base(base, &dir, check));
+        assert_eq!(checks.get(), 1);
+
+        let outside = base.join("packages/out");
+        let refuse = || {
+            checks.set(checks.get() + 1);
+            false
+        };
+        assert!(!dir_inside_scope_base(base, &outside, refuse));
+        assert!(!dir_inside_scope_base(base, &outside, refuse));
+        assert_eq!(checks.get(), 3, "a refused directory is checked again");
+    }
 
     #[test]
     #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
