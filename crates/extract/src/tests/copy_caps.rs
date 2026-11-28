@@ -130,3 +130,22 @@ fn glimmer_chain_member_accesses_stay_bounded() {
     });
     assert_bytes_below("glimmer chain", work, MIB);
 }
+
+/// A long member chain on an imported design token binding.
+#[test]
+fn css_in_js_token_chain_stays_bounded() {
+    let source = format!(
+        "import {{ vars }} from './tokens';\nexport const x = vars{};\n",
+        ".aaaa".repeat(1_000)
+    );
+    let work = work_on_large_stack(move || {
+        let leaf_paths: rustc_hash::FxHashSet<String> =
+            std::iter::once("color.primary".to_string()).collect();
+        let queries = [crate::css_in_js::ConsumerQuery::MemberBinding {
+            alias: "vars",
+            leaf_paths: &leaf_paths,
+        }];
+        crate::css_in_js::css_in_js_consumer_scan(&source, Path::new("a.ts"), &queries)
+    });
+    assert_bytes_below("css-in-js token chain", work, 12 * MIB);
+}
