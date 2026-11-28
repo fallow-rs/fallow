@@ -1496,9 +1496,11 @@ Shared invariants (`crates/cli/src/base_worktree.rs`):
   repository top level, which the `.git` stub of the snapshot marks. The
   walk sets `parents(false)` without a check of the files above the top
   level, so a file that appears there during the run cannot apply. For a
-  root below the top level, the crate applies only the `.ignore` files of
-  the walk, and `crates/config/src/ignore_parent_rules.rs` applies the
-  other kinds with the precedence of the crate.
+  root below the top level, `crates/config/src/ignore_parent_rules.rs`
+  applies the files between the root and the top level with the
+  precedence of the crate. The crate keeps the rules of the walk unless a
+  parent `.ignore` file re-includes (`!`). It reads the ignore files of a
+  walked directory from its listing, so a name must match exactly.
 
 - Both prune modes and the per-audit sweep share one decision code path
   (`sweep_reusable_caches_with_report`), so prune can never drift from what

@@ -323,21 +323,22 @@ where
     // write the temp dir. The choice does not read those files, so a file
     // that appears there during the run cannot change it. The crate gets
     // `parents(false)`. A root below the top level also needs the rules
-    // between the root and the top level: the crate applies only the
-    // `.ignore` files of the walk, and opens no parent file. `ParentRules`
-    // applies the other kinds with the precedence of the crate.
+    // between the root and the top level: `ParentRules` applies them with
+    // the precedence of the crate, and decides which rules the crate keeps.
     let in_repository = has_git_entry(&scope);
     let emulated = in_repository && scope != canonical_root;
-    let parent_rules =
-        emulated.then(|| parent_rules::ParentRules::load(root, &canonical_root, &scope, reads));
+    let parent_rules = emulated
+        .then(|| parent_rules::ParentRules::load(root, &canonical_root, &scope, reads))
+        .flatten();
+    let crate_reads_walk = parent_rules.as_ref().is_none_or(|rules| !rules.full());
     let mut builder = WalkBuilder::new(root);
     builder
         .hidden(false)
         .parents(!in_repository)
-        .ignore(reads.dot_ignore)
-        .git_ignore(reads.sources.git_ignore && !emulated)
-        .git_global(reads.sources.git_global && !emulated)
-        .git_exclude(reads.sources.git_exclude && !emulated)
+        .ignore(reads.dot_ignore && crate_reads_walk)
+        .git_ignore(reads.sources.git_ignore && crate_reads_walk)
+        .git_global(reads.sources.git_global && parent_rules.is_none())
+        .git_exclude(reads.sources.git_exclude && crate_reads_walk)
         .filter_entry(move |entry| {
             let is_dir = entry.file_type().is_some_and(|kind| kind.is_dir());
             if entry.depth() > 0
