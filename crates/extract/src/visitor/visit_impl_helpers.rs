@@ -1482,6 +1482,21 @@ pub(super) fn playwright_extend_chain<'b, 'a>(
     Some((calls, receiver))
 }
 
+/// The most fixture bindings that one fixture type collects. Types that each
+/// name the previous type twice double the bindings at each declaration.
+const MAX_FIXTURE_TYPE_BINDINGS: usize = 512;
+/// The longest fixture path, in bytes, that a fixture binding records.
+const MAX_FIXTURE_PATH_BYTES: usize = 128;
+
+/// The `<prefix>.<name>` fixture path, or `None` past [`MAX_FIXTURE_PATH_BYTES`].
+fn fixture_path(prefix: &str, name: &str) -> Option<String> {
+    let path = match prefix {
+        "" => name.to_string(),
+        _ => format!("{prefix}.{name}"),
+    };
+    (path.len() <= MAX_FIXTURE_PATH_BYTES).then_some(path)
+}
+
 pub(super) fn collect_fixture_type_bindings_from_type(
     ty: &TSType<'_>,
     path_prefix: &str,
@@ -1502,13 +1517,11 @@ pub(super) fn collect_fixture_type_bindings_from_type(
                 return;
             };
             if let Some(alias_bindings) = aliases.get(alias_name.as_str()) {
-                for (suffix, type_name) in alias_bindings {
-                    let combined = if path_prefix.is_empty() {
-                        suffix.clone()
-                    } else {
-                        format!("{path_prefix}.{suffix}")
-                    };
-                    bindings.push((combined, type_name.clone()));
+                let room = MAX_FIXTURE_TYPE_BINDINGS.saturating_sub(bindings.len());
+                for (suffix, type_name) in alias_bindings.iter().take(room) {
+                    if let Some(combined) = fixture_path(path_prefix, suffix) {
+                        bindings.push((combined, type_name.clone()));
+                    }
                 }
             }
         }
@@ -1539,6 +1552,9 @@ pub(super) fn collect_fixture_type_bindings_from_members(
     bindings: &mut Vec<(String, String)>,
 ) {
     for member in members {
+        if bindings.len() >= MAX_FIXTURE_TYPE_BINDINGS {
+            return;
+        }
         collect_fixture_type_binding_from_member(member, path_prefix, aliases, bindings);
     }
 }
@@ -1560,10 +1576,8 @@ fn collect_fixture_type_binding_from_member(
     let Some(type_annotation) = prop.type_annotation.as_deref() else {
         return;
     };
-    let next_path = if path_prefix.is_empty() {
-        fixture_name.text().into_owned()
-    } else {
-        format!("{path_prefix}.{}", fixture_name.text())
+    let Some(next_path) = fixture_path(path_prefix, &fixture_name.text()) else {
+        return;
     };
     if let Some((alias_name, _)) = fixture_type_reference_name(&type_annotation.type_annotation)
         && aliases.contains_key(alias_name.as_str())

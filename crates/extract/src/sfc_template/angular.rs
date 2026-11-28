@@ -20,11 +20,14 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use fallow_types::extract::SinkSite;
 
 use crate::MemberAccess;
-use crate::template_usage::{TemplateSnippetKind, collect_unresolved_refs_and_accesses};
+use crate::template_usage::{
+    TemplateSnippetKind, collect_unresolved_refs_and_accesses, named_locals,
+};
 
 use super::angular_text::{icu_message_head, mask_string_contents};
 use super::recovery::RecoveryScanner;
 use super::scanners::scan_curly_section;
+use super::scope_stack::ScopeStack;
 
 /// Result of scanning an Angular template for member references.
 #[derive(Debug, Default)]
@@ -197,7 +200,7 @@ struct AngularTemplateScanner<'a> {
     source: &'a str,
     recovery: RecoveryScanner<'a>,
     refs: AngularTemplateRefs,
-    scopes: Vec<Vec<String>>,
+    scopes: ScopeStack<()>,
     /// Component field name -> array element class, so a `@for` / `*ngFor` over a
     /// bare-identifier component field types the loop variable to the element
     /// class (issue #1712).
@@ -232,7 +235,7 @@ impl<'a> AngularTemplateScanner<'a> {
             source,
             recovery: RecoveryScanner::new(source),
             refs: AngularTemplateRefs::default(),
-            scopes: vec![Vec::new()],
+            scopes: ScopeStack::new(()),
             component_field_array_types,
             iteration_element_types: FxHashMap::default(),
             iteration_iterable_sources: FxHashMap::default(),
@@ -282,7 +285,7 @@ impl<'a> AngularTemplateScanner<'a> {
             self.interpolation_unterminated = true;
             return index + 2;
         };
-        collect_expression_refs(expr.trim(), &current_locals(&self.scopes), &mut self.refs);
+        collect_expression_refs(expr.trim(), self.scopes.locals(), &mut self.refs);
         next_index
     }
 
@@ -304,7 +307,7 @@ impl<'a> AngularTemplateScanner<'a> {
     }
 
     fn at_icu_case_level(&self) -> bool {
-        self.icu_message_depths.last() == Some(&self.scopes.len())
+        self.icu_message_depths.last() == Some(&self.scopes.depth())
     }
 
     /// A bare `{` in Angular text opens an ICU message or an ICU case
@@ -318,12 +321,12 @@ impl<'a> AngularTemplateScanner<'a> {
             icu_message_head(self.source, index)
         };
         let Some((head, next_index)) = icu_head else {
-            self.scopes.push(Vec::new());
+            self.scopes.push((), Vec::new());
             return index + 1;
         };
-        collect_expression_refs(head.trim(), &current_locals(&self.scopes), &mut self.refs);
-        self.scopes.push(Vec::new());
-        self.icu_message_depths.push(self.scopes.len());
+        collect_expression_refs(head.trim(), self.scopes.locals(), &mut self.refs);
+        self.scopes.push((), Vec::new());
+        self.icu_message_depths.push(self.scopes.depth());
         next_index
     }
 
@@ -333,13 +336,11 @@ impl<'a> AngularTemplateScanner<'a> {
         while self
             .icu_message_depths
             .last()
-            .is_some_and(|&depth| depth >= self.scopes.len())
+            .is_some_and(|&depth| depth >= self.scopes.depth())
         {
             self.icu_message_depths.pop();
         }
-        if self.scopes.len() > 1 {
-            self.scopes.pop();
-        }
+        self.scopes.pop();
         index + 1
     }
 
@@ -474,7 +475,7 @@ fn strip_html_comments_preserve_offsets(source: &str) -> String {
 fn handle_control_flow(
     source: &str,
     start: usize,
-    scopes: &mut Vec<Vec<String>>,
+    scopes: &mut ScopeStack<()>,
     refs: &mut AngularTemplateRefs,
     iter_ctx: &mut IterationTypingCtx<'_>,
 ) -> Option<usize> {
@@ -503,16 +504,15 @@ fn handle_parenthesized_block_control_flow(
     source: &str,
     start: usize,
     keyword_end: usize,
-    scopes: &mut Vec<Vec<String>>,
+    scopes: &mut ScopeStack<()>,
     refs: &mut AngularTemplateRefs,
 ) -> Option<usize> {
     let after_keyword = &source[start + 1 + keyword_end..];
     let paren_start = after_keyword.find('(')?;
     let paren_content_start = start + 1 + keyword_end + paren_start;
     let (expr, after_paren) = scan_parenthesized(source, paren_content_start)?;
-    let locals = current_locals(scopes);
-    collect_expression_refs(expr.trim(), &locals, refs);
-    scopes.push(Vec::new());
+    collect_expression_refs(expr.trim(), scopes.locals(), refs);
+    scopes.push((), Vec::new());
     let brace_pos = source[after_paren..].find('{')?;
     Some(after_paren + brace_pos + 1)
 }
@@ -521,7 +521,7 @@ fn handle_defer_control_flow(
     source: &str,
     start: usize,
     keyword_end: usize,
-    scopes: &mut Vec<Vec<String>>,
+    scopes: &mut ScopeStack<()>,
     refs: &mut AngularTemplateRefs,
 ) -> Option<usize> {
     let after_keyword = &source[start + 1 + keyword_end..];
@@ -534,9 +534,8 @@ fn handle_defer_control_flow(
     }
 
     let (paren_content, after_paren) = scan_parenthesized(source, abs_after_keyword)?;
-    let locals = current_locals(scopes);
-    collect_defer_when_refs(paren_content, &locals, refs);
-    scopes.push(Vec::new());
+    collect_defer_when_refs(paren_content, scopes.locals(), refs);
+    scopes.push((), Vec::new());
     let brace_pos = source[after_paren..].find('{')?;
     Some(after_paren + brace_pos + 1)
 }
@@ -557,7 +556,7 @@ fn handle_let_control_flow(
     source: &str,
     start: usize,
     keyword_end: usize,
-    scopes: &mut [Vec<String>],
+    scopes: &mut ScopeStack<()>,
     refs: &mut AngularTemplateRefs,
 ) -> Option<usize> {
     let after_keyword = &source[start + 1 + keyword_end..];
@@ -575,12 +574,8 @@ fn handle_let_control_flow(
     let semi_pos = expr_rest.find(';')?;
     let expr = expr_rest[..semi_pos].trim();
 
-    let locals = current_locals(scopes);
-    collect_expression_refs(expr, &locals, refs);
-
-    if let Some(scope) = scopes.last_mut() {
-        scope.push(var_name.to_string());
-    }
+    collect_expression_refs(expr, scopes.locals(), refs);
+    scopes.extend_innermost([var_name.to_string()]);
 
     let abs_semi = start + 1 + keyword_end + offset + name_end + expr_start + semi_pos + 1;
     Some(abs_semi)
@@ -590,7 +585,7 @@ fn handle_else_control_flow(
     source: &str,
     start: usize,
     keyword_end: usize,
-    scopes: &mut Vec<Vec<String>>,
+    scopes: &mut ScopeStack<()>,
     refs: &mut AngularTemplateRefs,
 ) -> Option<usize> {
     let rest_from = start + 1 + keyword_end;
@@ -602,7 +597,7 @@ fn handle_else_control_flow(
         return handle_else_if_control_flow(source, if_keyword_end, scopes, refs);
     }
 
-    scopes.push(Vec::new());
+    scopes.push((), Vec::new());
     let brace_pos = source[rest_from..].find('{')?;
     Some(rest_from + brace_pos + 1)
 }
@@ -618,7 +613,7 @@ fn is_else_if(after_else: &str) -> bool {
 fn handle_else_if_control_flow(
     source: &str,
     if_keyword_end: usize,
-    scopes: &mut Vec<Vec<String>>,
+    scopes: &mut ScopeStack<()>,
     refs: &mut AngularTemplateRefs,
 ) -> Option<usize> {
     let after_if = &source[if_keyword_end..];
@@ -632,18 +627,13 @@ fn handle_else_if_control_flow(
 fn enter_if_block(
     source: &str,
     paren_content_start: usize,
-    scopes: &mut Vec<Vec<String>>,
+    scopes: &mut ScopeStack<()>,
     refs: &mut AngularTemplateRefs,
 ) -> Option<usize> {
     let (paren_content, after_paren) = scan_parenthesized(source, paren_content_start)?;
     let (cond_expr, alias_name) = parse_if_condition_and_alias(paren_content);
-    let locals = current_locals(scopes);
-    collect_expression_refs(cond_expr.trim(), &locals, refs);
-    let mut scope_locals = Vec::new();
-    if let Some(alias) = alias_name {
-        scope_locals.push(alias.to_string());
-    }
-    scopes.push(scope_locals);
+    collect_expression_refs(cond_expr.trim(), scopes.locals(), refs);
+    scopes.push((), alias_name.map(str::to_string));
     let brace_pos = source[after_paren..].find('{')?;
     Some(after_paren + brace_pos + 1)
 }
@@ -652,9 +642,9 @@ fn push_empty_control_flow_scope(
     source: &str,
     start: usize,
     keyword_end: usize,
-    scopes: &mut Vec<Vec<String>>,
+    scopes: &mut ScopeStack<()>,
 ) -> Option<usize> {
-    scopes.push(Vec::new());
+    scopes.push((), Vec::new());
     let rest_from = start + 1 + keyword_end;
     let brace_pos = source[rest_from..].find('{')?;
     Some(rest_from + brace_pos + 1)
@@ -664,7 +654,7 @@ fn handle_if_control_flow(
     source: &str,
     start: usize,
     keyword_end: usize,
-    scopes: &mut Vec<Vec<String>>,
+    scopes: &mut ScopeStack<()>,
     refs: &mut AngularTemplateRefs,
 ) -> Option<usize> {
     let after_keyword = &source[start + 1 + keyword_end..];
@@ -676,7 +666,7 @@ fn handle_for_control_flow(
     source: &str,
     start: usize,
     keyword_end: usize,
-    scopes: &mut Vec<Vec<String>>,
+    scopes: &mut ScopeStack<()>,
     refs: &mut AngularTemplateRefs,
     iter_ctx: &mut IterationTypingCtx<'_>,
 ) -> Option<usize> {
@@ -709,20 +699,17 @@ fn handle_for_control_flow(
         for implicit in &["$index", "$first", "$last", "$even", "$odd", "$count"] {
             locals_for_scope.push((*implicit).to_string());
         }
-        let current = current_locals(scopes);
-        collect_expression_refs(iterable, &current, refs);
+        collect_expression_refs(iterable, scopes.locals(), refs);
     }
 
+    // The `track` expression sees the loop locals.
+    scopes.push((), locals_for_scope);
     for part in parts.iter().skip(1) {
         let part = part.trim();
         if let Some(track_expr) = part.strip_prefix("track") {
-            let mut all_locals = current_locals(scopes);
-            all_locals.extend(locals_for_scope.clone());
-            collect_expression_refs(track_expr.trim(), &all_locals, refs);
+            collect_expression_refs(track_expr.trim(), scopes.locals(), refs);
         }
     }
-
-    scopes.push(locals_for_scope);
     let brace_pos = source[after_paren..].find('{')?;
     Some(after_paren + brace_pos + 1)
 }
@@ -817,21 +804,23 @@ fn scan_parenthesized(source: &str, start: usize) -> Option<(&str, usize)> {
 }
 
 /// Process an HTML tag, extracting Angular binding attributes.
-/// `*ngFor` bindings are added to the current scope so subsequent expressions see them.
+/// `*ngFor` bindings are added to the current scope so subsequent expressions
+/// see them. They are added after the tag, so each attribute of the tag reads
+/// the locals from before it.
 fn process_tag(
     tag: &str,
     tag_start: usize,
-    scopes: &mut [Vec<String>],
+    scopes: &mut ScopeStack<()>,
     refs: &mut AngularTemplateRefs,
     iter_ctx: &mut IterationTypingCtx<'_>,
 ) {
-    let locals = current_locals(scopes);
-
+    let mut ng_for_scope_locals = Vec::new();
     for caps in ATTR_RE.captures_iter(tag) {
         if let Some(attr) = parse_template_attr(&caps, tag_start) {
-            process_tag_attr(&attr, &locals, scopes, refs, iter_ctx);
+            process_tag_attr(&attr, scopes, &mut ng_for_scope_locals, refs, iter_ctx);
         }
     }
+    scopes.extend_innermost(ng_for_scope_locals);
 }
 
 struct AngularTemplateAttr<'a> {
@@ -862,12 +851,19 @@ fn parse_template_attr<'a>(
 
 fn process_tag_attr(
     attr: &AngularTemplateAttr<'_>,
-    locals: &[String],
-    scopes: &mut [Vec<String>],
+    scopes: &mut ScopeStack<()>,
+    ng_for_scope_locals: &mut Vec<String>,
     refs: &mut AngularTemplateRefs,
     iter_ctx: &mut IterationTypingCtx<'_>,
 ) {
     collect_inner_html_sink(attr, refs);
+
+    if attr.name == "*ngFor" {
+        handle_ng_for(attr.value, scopes, ng_for_scope_locals, refs, iter_ctx);
+        return;
+    }
+
+    let locals = scopes.locals();
 
     if attr.name.starts_with('[') && !attr.name.starts_with("[(") {
         collect_expression_refs(attr.value, locals, refs);
@@ -888,11 +884,6 @@ fn process_tag_attr(
         // `*ngIf="cond; else elseTpl"`: the `then` and `else` clauses can name
         // a component member that holds a `TemplateRef`.
         collect_microsyntax_refs(attr.value, locals, refs);
-        return;
-    }
-
-    if attr.name == "*ngFor" {
-        handle_ng_for(attr.value, locals, scopes, refs, iter_ctx);
         return;
     }
 
@@ -999,19 +990,20 @@ fn collect_inner_html_sink(attr: &AngularTemplateAttr<'_>, refs: &mut AngularTem
     }
 }
 
-/// Handle `*ngFor` microsyntax. Pushes bindings into the scope so subsequent
-/// expressions within the element see them as locals.
+/// Handle `*ngFor` microsyntax. Adds the bindings to `new_scope_locals`, which
+/// the caller adds to the scope so subsequent expressions within the element
+/// see them as locals.
 fn handle_ng_for(
     value: &str,
-    locals: &[String],
-    scopes: &mut [Vec<String>],
+    scopes: &mut ScopeStack<()>,
+    new_scope_locals: &mut Vec<String>,
     refs: &mut AngularTemplateRefs,
     iter_ctx: &mut IterationTypingCtx<'_>,
 ) {
     let clauses: Vec<&str> = value.split(';').collect();
 
-    let mut ng_for_locals = locals.to_vec();
-    let mut new_scope_locals = Vec::new();
+    // The locals that the clauses declare, read after the locals in scope.
+    let mut ng_for_locals: Vec<String> = Vec::new();
 
     for clause in &clauses {
         let clause = clause.trim();
@@ -1034,7 +1026,9 @@ fn handle_ng_for(
             } else {
                 new_scope_locals.push(loop_item_local(binding));
             }
-            collect_expression_refs(iterable, &ng_for_locals, refs);
+            scopes.read_with(ng_for_locals.iter().cloned(), |locals| {
+                collect_expression_refs(iterable, locals, refs);
+            });
             continue;
         }
 
@@ -1048,12 +1042,10 @@ fn handle_ng_for(
         }
 
         if let Some(rest) = clause.strip_prefix("trackBy:") {
-            collect_expression_refs(rest.trim(), &ng_for_locals, refs);
+            scopes.read_with(ng_for_locals.iter().cloned(), |locals| {
+                collect_expression_refs(rest.trim(), locals, refs);
+            });
         }
-    }
-
-    if let Some(scope) = scopes.last_mut() {
-        scope.extend(new_scope_locals);
     }
 }
 
@@ -1097,21 +1089,19 @@ fn collect_snippet_refs(
     if snippet.is_empty() {
         return;
     }
-    let mut parser_locals = Vec::with_capacity(locals.len());
-    let mut loop_items: Vec<&str> = Vec::new();
-    for local in locals {
-        match local.strip_prefix(LOOP_ITEM_MARKER) {
-            Some(item) => loop_items.push(item),
-            None => parser_locals.push(local.clone()),
-        }
-    }
+    let parser_locals: Vec<&str> = named_locals(snippet, locals)
+        .into_iter()
+        .filter(|local| !local.starts_with(LOOP_ITEM_MARKER))
+        .collect();
     let (unresolved, member_accesses) =
         collect_unresolved_refs_and_accesses(snippet, kind, &parser_locals);
-    refs.identifiers.extend(
-        unresolved
-            .into_iter()
-            .filter(|name| !loop_items.contains(&name.as_str())),
-    );
+    let is_loop_item = |name: &str| {
+        locals
+            .iter()
+            .any(|local| local.strip_prefix(LOOP_ITEM_MARKER) == Some(name))
+    };
+    refs.identifiers
+        .extend(unresolved.into_iter().filter(|name| !is_loop_item(name)));
     for access in member_accesses {
         refs.add_member_access(access);
     }
@@ -1241,10 +1231,6 @@ fn split_pipe_segments(expr: &str) -> (&str, Vec<&str>) {
     }
 
     (main_expr, segments)
-}
-
-fn current_locals(scopes: &[Vec<String>]) -> Vec<String> {
-    scopes.iter().flat_map(|s| s.iter().cloned()).collect()
 }
 
 #[cfg(test)]

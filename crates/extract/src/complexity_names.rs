@@ -19,6 +19,14 @@ use crate::js_text::JsText;
 /// [`CUT_LITERAL_SUFFIX`].
 const MAX_CONTEXT_LITERAL_CHARS: usize = 40;
 
+/// Maximum number of bytes of the callee in a context name.
+///
+/// Real callees are short (`router.get`, `test.describe.only`). Each function
+/// argument of the call holds a copy of the name, so a long callee times many
+/// arguments costs their product. A longer dotted callee falls back to its
+/// last property, and a callee that is still too long gives no name.
+const MAX_CALLEE_LABEL_BYTES: usize = 128;
+
 /// Suffix of a string literal that a context name cut.
 const CUT_LITERAL_SUFFIX: &str = "...";
 
@@ -135,8 +143,10 @@ fn argument_literal(argument: &Argument<'_>) -> Option<String> {
             .map(JsText::text)?,
         _ => return None,
     };
+    // `cut_literal` keeps the first characters only, so a longer copy is waste.
     Some(
         raw.chars()
+            .take(MAX_CONTEXT_LITERAL_CHARS + 1)
             .map(|c| if breaks_one_line_name(c) { ' ' } else { c })
             .collect(),
     )
@@ -158,27 +168,50 @@ fn cut_literal(literal: &str) -> String {
 
 /// Readable callee: a dotted path when every segment is an identifier
 /// (`Command.make`), else the last property (`handle` in `a.b().handle`).
+/// A label longer than [`MAX_CALLEE_LABEL_BYTES`] is not used.
 fn callee_label(callee: &Expression<'_>) -> Option<String> {
     match callee.without_parentheses() {
-        Expression::Identifier(ident) => Some(ident.name.to_string()),
+        Expression::Identifier(ident) => fits_callee_label(ident.name.as_str()),
         Expression::StaticMemberExpression(member) => {
-            Some(dotted_path(&member.object).map_or_else(
-                || member.property.name.to_string(),
-                |object| format!("{object}.{}", member.property.name),
-            ))
+            let property = member.property.name.as_str();
+            match dotted_path(&member.object, property.len() + 1) {
+                Some(object) => Some(format!("{object}.{property}")),
+                None => fits_callee_label(property),
+            }
         }
         _ => None,
     }
 }
 
-fn dotted_path(expr: &Expression<'_>) -> Option<String> {
-    match expr.without_parentheses() {
-        Expression::Identifier(ident) => Some(ident.name.to_string()),
-        Expression::StaticMemberExpression(member) => {
-            dotted_path(&member.object).map(|object| format!("{object}.{}", member.property.name))
+fn fits_callee_label(name: &str) -> Option<String> {
+    (name.len() <= MAX_CALLEE_LABEL_BYTES).then(|| name.to_string())
+}
+
+/// The dotted path of `expr` when every segment is an identifier and the path
+/// plus `reserved` bytes fits in [`MAX_CALLEE_LABEL_BYTES`].
+fn dotted_path(mut expr: &Expression<'_>, reserved: usize) -> Option<String> {
+    let mut names = Vec::new();
+    let mut bytes = reserved;
+    loop {
+        let (name, next) = match expr.without_parentheses() {
+            Expression::Identifier(ident) => (ident.name.as_str(), None),
+            Expression::StaticMemberExpression(member) => {
+                (member.property.name.as_str(), Some(&member.object))
+            }
+            _ => return None,
+        };
+        bytes += name.len() + usize::from(next.is_some());
+        if bytes > MAX_CALLEE_LABEL_BYTES {
+            return None;
         }
-        _ => None,
+        names.push(name);
+        match next {
+            Some(object) => expr = object,
+            None => break,
+        }
     }
+    names.reverse();
+    Some(names.join("."))
 }
 
 #[cfg(all(test, not(miri)))]
@@ -250,6 +283,17 @@ mod tests {
             call_name("it(\"works\", () => 1)", string_keyed_call_name),
             Some("it(\"works\")".to_owned())
         );
+    }
+
+    #[test]
+    fn string_keyed_call_name_cuts_a_long_callee_to_its_last_property() {
+        let long_callee = format!("a{}.handle(\"x\", () => 1)", ".segment".repeat(40));
+        assert_eq!(
+            call_name(&long_callee, string_keyed_call_name),
+            Some("handle(\"x\")".to_owned())
+        );
+        let long_name = format!("{}(\"x\", () => 1)", "f".repeat(MAX_CALLEE_LABEL_BYTES + 1));
+        assert_eq!(call_name(&long_name, string_keyed_call_name), None);
     }
 
     #[test]

@@ -67,6 +67,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::object::{Lib, module_library};
 use crate::js_text::JsText;
+use crate::visitor::MAX_RECORDED_CHAIN_LINKS;
 
 const PANDA_CONFIG_BINDING: &str = "pandaConfig";
 
@@ -1021,35 +1022,32 @@ fn access_object_chain<'a>(expr: &Expression<'a>) -> Option<(&'a str, Vec<String
     }
 }
 
-fn binding_access_object_chain<'a>(expr: &Expression<'a>) -> Option<(&'a str, Span, Vec<String>)> {
-    match expr {
-        Expression::Identifier(id) => Some((id.name.as_str(), id.span, Vec::new())),
-        Expression::StaticMemberExpression(inner) => {
-            let (base, span, mut segments) = binding_access_object_chain(&inner.object)?;
-            segments.push(inner.property.name.to_string());
-            Some((base, span, segments))
+/// The root binding, its span, and the member names of a static chain such as
+/// `vars.color.primary`. Past `MAX_RECORDED_CHAIN_LINKS` links it gives `None`,
+/// as the JS visitor does, so the read at each link of a chain stays bounded.
+fn binding_access_object_chain<'a>(
+    mut expr: &Expression<'a>,
+) -> Option<(&'a str, Span, Vec<String>)> {
+    let mut segments = Vec::new();
+    loop {
+        let (segment, object) = match unwrap_transparent_expression(expr) {
+            Expression::Identifier(id) => {
+                segments.reverse();
+                return Some((id.name.as_str(), id.span, segments));
+            }
+            Expression::StaticMemberExpression(inner) => {
+                (Some(inner.property.name.to_string()), &inner.object)
+            }
+            Expression::ComputedMemberExpression(inner) => {
+                (static_computed_key(&inner.expression), &inner.object)
+            }
+            _ => return None,
+        };
+        if segments.len() == MAX_RECORDED_CHAIN_LINKS {
+            return None;
         }
-        Expression::ComputedMemberExpression(inner) => {
-            let (base, span, mut segments) = binding_access_object_chain(&inner.object)?;
-            segments.push(static_computed_key(&inner.expression)?);
-            Some((base, span, segments))
-        }
-        Expression::ParenthesizedExpression(expression) => {
-            binding_access_object_chain(&expression.expression)
-        }
-        Expression::TSAsExpression(expression) => {
-            binding_access_object_chain(&expression.expression)
-        }
-        Expression::TSSatisfiesExpression(expression) => {
-            binding_access_object_chain(&expression.expression)
-        }
-        Expression::TSNonNullExpression(expression) => {
-            binding_access_object_chain(&expression.expression)
-        }
-        Expression::TSTypeAssertion(expression) => {
-            binding_access_object_chain(&expression.expression)
-        }
-        _ => None,
+        segments.push(segment?);
+        expr = object;
     }
 }
 

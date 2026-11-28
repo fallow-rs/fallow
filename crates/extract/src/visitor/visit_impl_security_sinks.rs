@@ -18,6 +18,7 @@ use super::{
     static_string_literal_value, unwrap_parens, unwrap_static_expr,
 };
 use crate::js_text::JsText;
+use crate::template_usage::StaticSinkValue;
 use canonical_call::{CallArgKind, CallForm, CanonicalCall, ReceiverPath};
 
 #[path = "canonical_call.rs"]
@@ -885,10 +886,14 @@ impl ModuleInfoExtractor {
             url_arg_literal,
             span,
         } = input;
-        let arg_literal = self.static_sink_literal_value(arg_expr);
+        let arg_value = self.static_sink_value(arg_expr);
+        // A static string too long to keep has no literal text, but it is
+        // not a dynamic argument.
+        let arg_is_static = arg_value.is_some();
+        let arg_literal = arg_value.and_then(StaticSinkValue::known);
         // A path built only from trusted module-relative bases and literal
         // segments is treated like a literal (issue #3711).
-        let arg_is_non_literal = arg_literal.is_none()
+        let arg_is_non_literal = !arg_is_static
             && is_non_literal_arg(arg_expr)
             && !self.is_trusted_static_path_expr(arg_expr);
         if arg_is_non_literal
@@ -1219,8 +1224,9 @@ impl ModuleInfoExtractor {
         let Some(callee_path) = callee_path else {
             return;
         };
-        let arg_literal = self.static_sink_literal_value(&expr.right);
-        let arg_is_non_literal = arg_literal.is_none() && is_non_literal_arg(&expr.right);
+        let arg_value = self.static_sink_value(&expr.right);
+        let arg_is_non_literal = arg_value.is_none() && is_non_literal_arg(&expr.right);
+        let arg_literal = arg_value.and_then(StaticSinkValue::known);
         if !should_capture_member_assign_sink(
             &callee_path,
             arg_literal.as_ref(),

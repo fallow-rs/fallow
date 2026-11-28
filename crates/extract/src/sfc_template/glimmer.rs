@@ -38,6 +38,7 @@ use rustc_hash::FxHashSet;
 
 use crate::MemberAccess;
 use crate::template_usage::TemplateUsage;
+use crate::visitor::MAX_RECORDED_CHAIN_LINKS;
 
 /// Handlebars / Glimmer keywords that must never be resolved as imports,
 /// scoped to **strict mode** (`.gts` / `.gjs`) semantics.
@@ -440,15 +441,18 @@ fn credit_binding(
 /// dotted-path object name (`this`, `this.foo`, `utils`, `utils.formatters`,
 /// ...) with the next single-segment member, matching the JS visitor's
 /// per-hop `visit_static_member_expression` emission. Stops at the first
-/// segment that is not a plain identifier (e.g. would-be `this.foo()`).
+/// segment that is not a plain identifier (e.g. would-be `this.foo()`), and
+/// after an object of `MAX_RECORDED_CHAIN_LINKS` links, as the JS visitor
+/// does. Each access copies its object path, so a chain without the cap
+/// costs the square of its length.
 fn emit_chain_member_accesses(token: &str, usage: &mut TemplateUsage) {
     let mut segments = token.split('.');
     let Some(first) = segments.next() else {
         return;
     };
     let mut object_end = first.len();
-    for member in segments {
-        if !is_plain_identifier(member) {
+    for (object_links, member) in segments.enumerate() {
+        if object_links > MAX_RECORDED_CHAIN_LINKS || !is_plain_identifier(member) {
             return;
         }
         push_member_access(usage, &token[..object_end], member);

@@ -6,6 +6,15 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::{LocalClassExportInfo, ModuleInfoExtractor};
 
+/// The most exports of one local class that get a copy of its members and
+/// heritage.
+///
+/// Real code exports a class under one or two names. Each export of the class
+/// gets its own copy of the member list, so many export names of a class with
+/// many members cost their product. Exports past the cap keep no members and
+/// no heritage.
+const MAX_ENRICHED_EXPORTS_PER_CLASS: usize = 32;
+
 impl ModuleInfoExtractor {
     /// Complete the class data of the file after the walk: the heritage of
     /// exported classes, and the base class reads of unexported classes.
@@ -20,13 +29,26 @@ impl ModuleInfoExtractor {
             return;
         }
 
+        let mut heritage_names: FxHashSet<String> = self
+            .class_heritage
+            .iter()
+            .map(|heritage| heritage.export_name.clone())
+            .collect();
+        let mut enriched_exports: FxHashMap<&str, usize> = FxHashMap::default();
         for export in &mut self.exports {
             let Some(local_name) = export.local_name.as_deref() else {
                 continue;
             };
-            let Some(local_class) = self.local_class_exports.get(local_name) else {
+            let Some((class_name, local_class)) =
+                self.local_class_exports.get_key_value(local_name)
+            else {
                 continue;
             };
+            let enriched = enriched_exports.entry(class_name.as_str()).or_insert(0);
+            if *enriched == MAX_ENRICHED_EXPORTS_PER_CLASS {
+                continue;
+            }
+            *enriched += 1;
 
             if export.members.is_empty() {
                 export.members = local_class.members.clone();
@@ -36,15 +58,12 @@ impl ModuleInfoExtractor {
             }
 
             let export_name = export.name.to_string();
-            let already_has_heritage = self
-                .class_heritage
-                .iter()
-                .any(|heritage| heritage.export_name == export_name);
-            if !already_has_heritage
+            if !heritage_names.contains(&export_name)
                 && (local_class.super_class.is_some()
                     || !local_class.implemented_interfaces.is_empty()
                     || !local_class.instance_bindings.is_empty())
             {
+                heritage_names.insert(export_name.clone());
                 self.class_heritage.push(ClassHeritageInfo {
                     export_name,
                     super_class: local_class.super_class.clone(),

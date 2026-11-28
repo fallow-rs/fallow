@@ -5,11 +5,11 @@ use oxc_ast::ast::*;
 
 use std::sync::Arc;
 
-use fallow_types::extract::{DispatchedEvent, SinkLiteralValue};
+use fallow_types::extract::DispatchedEvent;
 
 use super::{ModuleInfoExtractor, ROUTE_LOADER_DATA_OBJECT};
 use crate::js_text::JsText;
-use crate::template_usage::ScriptBindingContext;
+use crate::template_usage::{ScriptBindingContext, StaticSinkValue};
 
 /// The markup state of a snippet extractor. A script extractor has no
 /// `script` context, because the `defineEmits` harvest marks the emits of a
@@ -62,7 +62,7 @@ impl MarkupContext {
         &self,
         key: &str,
         root: &str,
-    ) -> Option<&SinkLiteralValue> {
+    ) -> Option<&StaticSinkValue> {
         self.script_for(root)?.static_sink_literals.get(key)
     }
 }

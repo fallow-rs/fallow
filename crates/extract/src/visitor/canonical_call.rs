@@ -22,6 +22,14 @@ use super::{sink_literal_value, unwrap_static_expr};
 /// chain length.
 const MAX_CALL_RESULTS: usize = 8;
 
+/// The longest callee path, in bytes, that a canonical call holds.
+///
+/// Real callee paths are short (`this.server.router.get`). The sink capture
+/// copies the path into one record for each argument, so a long path times
+/// many arguments costs their product. A call past the cap has no canonical
+/// view, and the caller records it as a callee that it cannot read.
+const MAX_CALLEE_PATH_BYTES: usize = 1024;
+
 /// The root segment that stands for the earlier part of a chain past
 /// [`MAX_CALL_RESULTS`]. It is not an identifier, so no exact catalogue
 /// pattern names it, and a `*.` pattern still matches the tail of the chain.
@@ -150,8 +158,9 @@ impl<'c, 'a> CanonicalCall<'c, 'a> {
 impl ModuleInfoExtractor {
     /// The canonical view of a call. Returns `None` when the callee is not a
     /// receiver chain (a computed key that does not fold to a constant, a
-    /// private field, a call of a call result such as `f()(x)`), so the caller
-    /// can record a blind spot.
+    /// private field, a call of a call result such as `f()(x)`) or when its
+    /// path is longer than [`MAX_CALLEE_PATH_BYTES`], so the caller can record
+    /// a blind spot.
     pub(in crate::visitor) fn canonical_call<'c, 'a>(
         &self,
         callee: &Expression<'a>,
@@ -163,11 +172,17 @@ impl ModuleInfoExtractor {
             return None;
         }
         let receiver = self.receiver_path(callee)?;
+        if receiver.path.len() > MAX_CALLEE_PATH_BYTES {
+            return None;
+        }
         let path = if receiver.is_static() {
             self.resolve_static_callee_path(receiver.path.clone())
         } else {
             receiver.path.clone()
         };
+        if path.len() > MAX_CALLEE_PATH_BYTES {
+            return None;
+        }
         Some(CanonicalCall {
             form,
             path,
